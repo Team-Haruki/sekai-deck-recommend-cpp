@@ -2,6 +2,9 @@
 #define CARD_EVENT_CALCULATOR_H
 
 #include "data-provider/data-provider.h"
+#include <optional>
+#include <unordered_map>
+#include <vector>
 
 struct CardEventBonusInfo {
     double maxBonus = 0;
@@ -32,7 +35,13 @@ public:
      * @param userCard 用户卡牌
      * @param eventId 活动ID
      */
-    CardEventBonusInfo getCardEventBonus(const UserCard& userCard, int eventId);
+    CardEventBonusInfo getCardEventBonus(
+        const UserCard& userCard,
+        int eventId,
+        const std::optional<std::vector<int>>& customBonusCharacterIds = std::nullopt,
+        const std::optional<int>& customBonusAttr = std::nullopt,
+        const std::optional<std::unordered_map<int, int>>& customBonusSupportUnits = std::nullopt
+    );
 
 };
 

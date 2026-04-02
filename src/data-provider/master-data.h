@@ -49,6 +49,7 @@ public:
 
     std::vector<WorldBloomSupportDeckBonus> worldBloomSupportDeckBonusesWL1;
     std::vector<WorldBloomSupportDeckBonus> worldBloomSupportDeckBonusesWL2;
+    std::vector<WorldBloomSupportDeckBonus> worldBloomSupportDeckBonusesWL3;
 
     void loadFromJsons(std::map<std::string, json>& jsons);
 
@@ -61,6 +62,8 @@ public:
     int getUnitAttrFakeEventId(int eventType, int unit, int attr) const;
 
     int getWorldBloomFakeEventId(int worldBloomTurn, int unit) const;
+
+    int getWorldBloom3PartByCharacterId(int characterId) const;
 
     int getWorldBloomEventTurn(int eventId) const;
 

@@ -152,7 +152,7 @@ class DeckRecommendOptions:
         event_attr (str): Attribute of unit-attr-specificed recommendation, only available when event_id is None. In ["mysterious", "cute", "cool", "pure", "happy"]
         event_unit (str): Unit of unit-attr-specificed recommendation, only available when event_id is None. In ["light_sound", "idol", "street", "theme_park", "school_refusal", "piapro"]
         event_type (str): Event type of unit-attr-specificed/no-event recommendation, only available when event_id is None. In ["marathon", "cheerful_carnival"]
-        world_bloom_event_turn (int): World bloom event turn, only available when event_id is None, In [1, 2]
+        world_bloom_event_turn (int): World bloom event turn, only available when event_id is None, In [1, 3]
         world_bloom_character_id (int): World bloom character ID, only required when event is world bloom
         challenge_live_character_id (int): Challenge live character ID, only required when live is challenge live
         limit (int): Limit of returned decks, default is 10. No guarantee to return this number of decks if not enough cards
@@ -168,6 +168,11 @@ class DeckRecommendOptions:
         fixed_cards (List[int]): List of card IDs that always included in the deck, default is None
         fixed_characters (List[int]): List of character IDs that always included in the deck (first is always leader), cannot used in challenge live, cannot used with fixed_cards together, default is None
         target_bonus_list (List[int]): List of target event bonus, required when target is "bonus"
+        custom_bonus_character_ids (List[int]): Optional custom mixed bonus character IDs.
+        custom_bonus_attr (str): Optional custom mixed bonus attr in ["mysterious", "cute", "cool", "pure", "happy"].
+        custom_bonus_character_support_units (Dict[int, str]): Optional support unit constraint for virtual singer IDs in custom mixed bonus simulation.
+            Keys are character IDs, values are one of ["light_sound", "idol", "street", "theme_park", "school_refusal"].
+            When set, only cards with matching supportUnit or supportUnit == "none" gain character bonus.
         skill_reference_choose_strategy (str): Strategy for bfes skill reference choose in ["average", "max", "min"], default is "average"
         keep_after_training_state (bool): Whether to keep after-training state of bfes cards, default is False
         multi_live_teammate_score_up (int): Score up of single multi-live teammate, default is None (None means copying self score up)
@@ -208,6 +213,9 @@ class DeckRecommendOptions:
     fixed_cards: Optional[List[int]]
     fixed_characters: Optional[List[int]]
     target_bonus_list: Optional[List[int]]
+    custom_bonus_character_ids: Optional[List[int]]
+    custom_bonus_attr: Optional[str]
+    custom_bonus_character_support_units: Optional[Dict[int, str]]
     skill_reference_choose_strategy: Optional[str]
     keep_after_training_state: Optional[bool]
     multi_live_teammate_score_up: Optional[int]

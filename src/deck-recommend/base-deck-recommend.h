@@ -43,6 +43,12 @@ struct DeckRecommendConfig {
 
     // 指定加成列表（目标为Bonus时）
     std::vector<int> bonusList = {};
+    // 自定义混活加成角色（可选）
+    std::optional<std::vector<int>> customBonusCharacterIds = std::nullopt;
+    // 自定义混活加成属性（可选）
+    std::optional<int> customBonusAttr = std::nullopt;
+    // 自定义混活VS附属组合限制（可选）
+    std::optional<std::unordered_map<int, int>> customBonusSupportUnits = std::nullopt;
 
     // 指定一定要包含的卡牌
     std::vector<int> fixedCards = {}; 

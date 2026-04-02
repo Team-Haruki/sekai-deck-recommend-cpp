@@ -87,7 +87,10 @@ public:
         const std::optional<EventConfig>& eventConfig = std::nullopt,
         bool hasCanvasBonus = false,
         const std::vector<MysekaiGateBonus>& userGateBonuses = std::vector<MysekaiGateBonus>(),
-        std::optional<double> scoreUpLimit = std::nullopt
+        std::optional<double> scoreUpLimit = std::nullopt,
+        const std::optional<std::vector<int>>& customBonusCharacterIds = std::nullopt,
+        const std::optional<int>& customBonusAttr = std::nullopt,
+        const std::optional<std::unordered_map<int, int>>& customBonusSupportUnits = std::nullopt
     );
 
     /**
@@ -104,7 +107,10 @@ public:
         const std::unordered_map<int, CardConfig>& singleCardConfig,
         const std::optional<EventConfig>& eventConfig = std::nullopt,
         const std::vector<AreaItemLevel>& areaItemLevels = std::vector<AreaItemLevel>(),
-        std::optional<double> scoreUpLimit = std::nullopt
+        std::optional<double> scoreUpLimit = std::nullopt,
+        const std::optional<std::vector<int>>& customBonusCharacterIds = std::nullopt,
+        const std::optional<int>& customBonusAttr = std::nullopt,
+        const std::optional<std::unordered_map<int, int>>& customBonusSupportUnits = std::nullopt
     );
 
     /**

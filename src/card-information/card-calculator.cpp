@@ -9,7 +9,10 @@ std::optional<CardDetail> CardCalculator::getCardDetail(
     const std::optional<EventConfig>& eventConfig,
     bool hasCanvasBonus,
     const std::vector<MysekaiGateBonus>& userGateBonuses,
-    std::optional<double> scoreUpLimit
+    std::optional<double> scoreUpLimit,
+    const std::optional<std::vector<int>>& customBonusCharacterIds,
+    const std::optional<int>& customBonusAttr,
+    const std::optional<std::unordered_map<int, int>>& customBonusSupportUnits
 )
 {
     auto& cards = this->dataProvider.masterData->cards;
@@ -50,8 +53,14 @@ std::optional<CardDetail> CardCalculator::getCardDetail(
     );
 
     CardEventBonusInfo eventBonus{};
-    if (eventConfig && eventConfig->eventId != 0) {
-        eventBonus = this->eventCalculator.getCardEventBonus(userCard0, eventConfig->eventId);
+    if ((eventConfig && eventConfig->eventId != 0) || customBonusCharacterIds.has_value() || customBonusAttr.has_value()) {
+        eventBonus = this->eventCalculator.getCardEventBonus(
+            userCard0,
+            eventConfig.has_value() ? eventConfig->eventId : 0,
+            customBonusCharacterIds,
+            customBonusAttr,
+            customBonusSupportUnits
+        );
     }
 
     // 支援加成延后到组卡前计算
@@ -96,7 +105,10 @@ std::vector<CardDetail> CardCalculator::batchGetCardDetail(
     const std::unordered_map<int, CardConfig>& singleCardConfig,
     const std::optional<EventConfig>& eventConfig,
     const std::vector<AreaItemLevel>& areaItemLevels,
-    std::optional<double> scoreUpLimit
+    std::optional<double> scoreUpLimit,
+    const std::optional<std::vector<int>>& customBonusCharacterIds,
+    const std::optional<int>& customBonusAttr,
+    const std::optional<std::unordered_map<int, int>>& customBonusSupportUnits
 )
 {
     std::vector<CardDetail> ret{};
@@ -109,7 +121,7 @@ std::vector<CardDetail> CardCalculator::batchGetCardDetail(
         auto cardDetail = this->getCardDetail(
             userCard, areaItemLevels0, config, singleCardConfig, eventConfig, 
             userCanvasBonusCards.find(userCard.cardId) != userCanvasBonusCards.end(),
-            userGateBonuses, scoreUpLimit
+            userGateBonuses, scoreUpLimit, customBonusCharacterIds, customBonusAttr, customBonusSupportUnits
         );
         if (cardDetail.has_value()) {
             ret.push_back(cardDetail.value());

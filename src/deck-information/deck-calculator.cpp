@@ -172,6 +172,11 @@ std::vector<DeckDetail> DeckCalculator::getDeckDetailByCards(
         power.total += p.total;
     }
     power.total += honorBonus;
+    if (eventType == Enums::EventType::world_bloom
+     && eventId.has_value()
+     && this->dataProvider.masterData->getWorldBloomEventTurn(eventId.value()) == 3) {
+        power.total = std::min(power.total, 336000);
+    }
 
     // 计算当前卡组每个卡牌的花前/花后固定技能效果（进Live之前）
     std::array<std::array<DeckCardSkillDetail, 2>, 5> prepareSkills{};
@@ -353,6 +358,6 @@ std::vector<DeckDetail> DeckCalculator::getDeckDetailByCards(
 int DeckCalculator::getWorldBloomSupportDeckCount(int eventId) const
 {
     int turn = this->dataProvider.masterData->getWorldBloomEventTurn(eventId);
-    // wl1 12 wl2 20
-    return turn == 1 ? 12 : 20;
+    // wl1 12, wl2 20, wl3 25
+    return turn == 1 ? 12 : (turn == 2 ? 20 : 25);
 }

@@ -1,4 +1,4 @@
-#include "deck-recommend/event-deck-recommend.h"
+﻿#include "deck-recommend/event-deck-recommend.h"
 #include "deck-recommend/challenge-live-deck-recommend.h"
 #include "deck-recommend/mysekai-deck-recommend.h"
 #include "data-provider/static-data.h"
@@ -294,6 +294,9 @@ struct PyDeckRecommendOptions {
     std::optional<std::vector<int>> fixed_cards;
     std::optional<std::vector<int>> fixed_characters;
     std::optional<std::vector<int>> target_bonus_list;
+    std::optional<std::vector<int>> custom_bonus_character_ids;
+    std::optional<std::string> custom_bonus_attr;
+    std::optional<std::unordered_map<int, std::string>> custom_bonus_character_support_units;
     std::optional<std::string> skill_reference_choose_strategy;
     std::optional<bool> keep_after_training_state;
     std::optional<int> multi_live_teammate_score_up;
@@ -354,6 +357,12 @@ struct PyDeckRecommendOptions {
             result["fixed_characters"] = fixed_characters.value();
         if (target_bonus_list.has_value())
             result["target_bonus_list"] = target_bonus_list.value();
+        if (custom_bonus_character_ids.has_value())
+            result["custom_bonus_character_ids"] = custom_bonus_character_ids.value();
+        if (custom_bonus_attr.has_value())
+            result["custom_bonus_attr"] = custom_bonus_attr.value();
+        if (custom_bonus_character_support_units.has_value())
+            result["custom_bonus_character_support_units"] = custom_bonus_character_support_units.value();
         if (skill_reference_choose_strategy.has_value())
             result["skill_reference_choose_strategy"] = skill_reference_choose_strategy.value();
         if (keep_after_training_state.has_value())
@@ -427,6 +436,12 @@ struct PyDeckRecommendOptions {
             options.fixed_characters = dict["fixed_characters"].cast<std::vector<int>>();
         if (dict.contains("target_bonus_list"))
             options.target_bonus_list = dict["target_bonus_list"].cast<std::vector<int>>();
+        if (dict.contains("custom_bonus_character_ids"))
+            options.custom_bonus_character_ids = dict["custom_bonus_character_ids"].cast<std::vector<int>>();
+        if (dict.contains("custom_bonus_attr"))
+            options.custom_bonus_attr = dict["custom_bonus_attr"].cast<std::string>();
+        if (dict.contains("custom_bonus_character_support_units"))
+            options.custom_bonus_character_support_units = dict["custom_bonus_character_support_units"].cast<std::unordered_map<int, std::string>>();
         if (dict.contains("skill_reference_choose_strategy"))
             options.skill_reference_choose_strategy = dict["skill_reference_choose_strategy"].cast<std::string>();
         if (dict.contains("keep_after_training_state"))
@@ -682,15 +697,22 @@ class SekaiDeckRecommend {
                 
                 if (pyoptions.world_bloom_event_turn.has_value()) {
                     // liveType非挑战，没有传入eventId时，首先尝试模拟WL组卡
-                    if (!pyoptions.event_unit.has_value())
-                        throw std::invalid_argument("event_unit is required for world bloom fake event.");
-                    if (!VALID_UNIT_TYPES.count(pyoptions.event_unit.value()))
-                        throw std::invalid_argument("Invalid event unit: " + pyoptions.event_unit.value());
                     int turn = pyoptions.world_bloom_event_turn.value();
-                    if (turn < 1 || turn > 2)
+                    if (turn < 1 || turn > 3)
                         throw std::invalid_argument("Invalid world bloom event turn: " + std::to_string(turn));
-                    auto unit = mapEnum(EnumMap::unit, pyoptions.event_unit.value());
-                    options.eventId = options.dataProvider.masterData->getWorldBloomFakeEventId(turn, unit);
+                    if (turn == 3) {
+                        if (!pyoptions.world_bloom_character_id.has_value())
+                            throw std::invalid_argument("world_bloom_character_id is required for world bloom 3 fake event.");
+                        int part = options.dataProvider.masterData->getWorldBloom3PartByCharacterId(pyoptions.world_bloom_character_id.value());
+                        options.eventId = options.dataProvider.masterData->getWorldBloomFakeEventId(turn, part);
+                    } else {
+                        if (!pyoptions.event_unit.has_value())
+                            throw std::invalid_argument("event_unit is required for world bloom fake event.");
+                        if (!VALID_UNIT_TYPES.count(pyoptions.event_unit.value()))
+                            throw std::invalid_argument("Invalid event unit: " + pyoptions.event_unit.value());
+                        auto unit = mapEnum(EnumMap::unit, pyoptions.event_unit.value());
+                        options.eventId = options.dataProvider.masterData->getWorldBloomFakeEventId(turn, unit);
+                    }
 
                 } else if (pyoptions.event_attr.has_value() || pyoptions.event_unit.has_value()) {
                     // 然后尝试指定团+颜色组卡
@@ -765,6 +787,52 @@ class SekaiDeckRecommend {
                 if (config.target == RecommendTarget::Bonus)
                     throw std::invalid_argument("target_bonus_list is required for bonus target.");
                 config.bonusList = {};
+            }
+            
+            // 自定义混活组卡
+            if (pyoptions.custom_bonus_attr.has_value()) {
+                const auto& customBonusAttr = pyoptions.custom_bonus_attr.value();
+                if (!VALID_EVENT_ATTRS.count(customBonusAttr)) {
+                    throw std::invalid_argument("Invalid custom bonus attr: " + customBonusAttr);
+                }
+                config.customBonusAttr = mapEnum(EnumMap::attr, customBonusAttr);
+            }
+
+            if (pyoptions.custom_bonus_character_ids.has_value()) {
+                std::set<int> uniqueCids{};
+                std::vector<int> cids{};
+                for (int cid : pyoptions.custom_bonus_character_ids.value()) {
+                    if (cid < 1 || cid > 26) {
+                        throw std::invalid_argument("Invalid custom bonus character ID: " + std::to_string(cid));
+                    }
+                    if (uniqueCids.count(cid)) {
+                        throw std::invalid_argument("Duplicate custom bonus character ID: " + std::to_string(cid));
+                    }
+                    uniqueCids.insert(cid);
+                    cids.push_back(cid);
+                }
+                config.customBonusCharacterIds = cids;
+            }
+
+            if (pyoptions.custom_bonus_character_support_units.has_value()) {
+                std::unordered_map<int, int> supportUnits{};
+                for (const auto& [cid, unitName] : pyoptions.custom_bonus_character_support_units.value()) {
+                    if (cid < 1 || cid > 26) {
+                        throw std::invalid_argument("Invalid custom bonus support unit character ID: " + std::to_string(cid));
+                    }
+                    if (cid < 21 || cid > 26) {
+                        throw std::invalid_argument("custom bonus support unit is only valid for virtual singer characters.");
+                    }
+                    if (!VALID_UNIT_TYPES.count(unitName) || unitName == "piapro") {
+                        throw std::invalid_argument("Invalid custom bonus support unit: " + unitName);
+                    }
+                    if (!config.customBonusCharacterIds.has_value() ||
+                        std::find(config.customBonusCharacterIds.value().begin(), config.customBonusCharacterIds.value().end(), cid) == config.customBonusCharacterIds.value().end()) {
+                        throw std::invalid_argument("custom bonus support unit character ID must be included in custom_bonus_character_ids: " + std::to_string(cid));
+                    }
+                    supportUnits[cid] = mapEnum(EnumMap::unit, unitName);
+                }
+                config.customBonusSupportUnits = supportUnits;
             }
 
             // algorithm
@@ -1290,6 +1358,9 @@ PYBIND11_MODULE(sekai_deck_recommend, m) {
         .def_readwrite("fixed_cards", &PyDeckRecommendOptions::fixed_cards)
         .def_readwrite("fixed_characters", &PyDeckRecommendOptions::fixed_characters)
         .def_readwrite("target_bonus_list", &PyDeckRecommendOptions::target_bonus_list)
+        .def_readwrite("custom_bonus_character_ids", &PyDeckRecommendOptions::custom_bonus_character_ids)
+        .def_readwrite("custom_bonus_attr", &PyDeckRecommendOptions::custom_bonus_attr)
+        .def_readwrite("custom_bonus_character_support_units", &PyDeckRecommendOptions::custom_bonus_character_support_units)
         .def_readwrite("skill_reference_choose_strategy", &PyDeckRecommendOptions::skill_reference_choose_strategy)
         .def_readwrite("keep_after_training_state", &PyDeckRecommendOptions::keep_after_training_state)
         .def_readwrite("multi_live_teammate_score_up", &PyDeckRecommendOptions::multi_live_teammate_score_up)

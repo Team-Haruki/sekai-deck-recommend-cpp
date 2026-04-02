@@ -94,7 +94,8 @@ std::vector<RecommendDeck> BaseDeckRecommend::recommendHighScoreDeck(
 
     auto cards = cardCalculator.batchGetCardDetail(
         userCards, config.cardConfig, config.singleCardConfig, 
-        eventConfig, areaItemLevels, scoreUpLimit
+        eventConfig, areaItemLevels, scoreUpLimit,
+        config.customBonusCharacterIds, config.customBonusAttr, config.customBonusSupportUnits
     );
 
     // 归类支援卡组
@@ -163,7 +164,8 @@ std::vector<RecommendDeck> BaseDeckRecommend::recommendHighScoreDeck(
                 }
             auto card = cardCalculator.batchGetCardDetail(
                 {uc}, config.cardConfig, config.singleCardConfig, 
-                eventConfig, areaItemLevels, scoreUpLimit
+                eventConfig, areaItemLevels, scoreUpLimit,
+                config.customBonusCharacterIds, config.customBonusAttr, config.customBonusSupportUnits
             );
             if (card.size() > 0) {
                 fixedCards.push_back(card[0]);
