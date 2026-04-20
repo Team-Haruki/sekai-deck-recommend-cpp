@@ -138,14 +138,17 @@ bool CardCalculator::isCertainlyLessThan(
     bool checkEventBonus
 )
 {
-    bool ret = false;
+    bool ret = true;
     if (checkPower)
         ret = (ret && cardDetail0.power.isCertainlyLessThan(cardDetail1.power));
     if (checkSkill)
         ret = (ret && cardDetail0.skill.isCertainlyLessThan(cardDetail1.skill));
     if (checkEventBonus)
-        ret = (ret && (cardDetail0.maxEventBonus == std::nullopt || cardDetail1.minEventBonus == std::nullopt ||
-            cardDetail0.maxEventBonus.value() < cardDetail1.minEventBonus.value()));
+        ret = (ret && (
+            cardDetail0.maxEventBonus == std::nullopt
+            || cardDetail1.minEventBonus == std::nullopt
+            || cardDetail0.maxEventBonus.value() < cardDetail1.minEventBonus.value()
+        ));
     return ret;
 }
 

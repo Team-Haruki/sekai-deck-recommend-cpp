@@ -10,6 +10,193 @@ bool containsAny(const std::vector<T>& collection, const std::vector<T>& contain
     return false;
 }
 
+static double calcSkillUpperBound(
+    const std::vector<const CardDetail*>& deckCards,
+    const std::bitset<32>& deckCharacters,
+    const std::vector<CardDetail>& cardDetails,
+    int member,
+    bool isChallengeLive,
+    double scoreTieBreakUpperBound
+) {
+    std::array<double, 5> skills{};
+    int skillCount = 0;
+    for (const auto* deckCard : deckCards) {
+        skills[skillCount++] = deckCard->skill.max;
+    }
+
+    for (const auto& card : cardDetails) {
+        if (skillCount >= member) {
+            break;
+        }
+
+        bool duplicated = false;
+        for (const auto* deckCard : deckCards) {
+            if (deckCard->cardId == card.cardId) {
+                duplicated = true;
+                break;
+            }
+        }
+        if (duplicated) {
+            continue;
+        }
+        if (!isChallengeLive && deckCharacters.test(card.characterId)) {
+            continue;
+        }
+
+        skills[skillCount++] = card.skill.max;
+    }
+
+    if (skillCount < member) {
+        return std::numeric_limits<double>::infinity();
+    }
+
+    std::sort(skills.begin(), skills.begin() + member, std::greater<>());
+    double upperBound = skills[0];
+    for (int i = 1; i < member; ++i) {
+        upperBound += skills[i] / 5.0;
+    }
+    return upperBound + scoreTieBreakUpperBound;
+}
+
+static int calcPowerUpperBound(
+    const std::vector<const CardDetail*>& deckCards,
+    const std::bitset<32>& deckCharacters,
+    const std::vector<CardDetail>& cardDetails,
+    int member,
+    bool isChallengeLive,
+    int honorBonus
+) {
+    std::array<int, 5> powers{};
+    int powerCount = 0;
+    for (const auto* deckCard : deckCards) {
+        powers[powerCount++] = deckCard->power.max;
+    }
+
+    for (const auto& card : cardDetails) {
+        if (powerCount >= member) {
+            break;
+        }
+
+        bool duplicated = false;
+        for (const auto* deckCard : deckCards) {
+            if (deckCard->cardId == card.cardId) {
+                duplicated = true;
+                break;
+            }
+        }
+        if (duplicated) {
+            continue;
+        }
+        if (!isChallengeLive && deckCharacters.test(card.characterId)) {
+            continue;
+        }
+
+        powers[powerCount++] = card.power.max;
+    }
+
+    if (powerCount < member) {
+        return std::numeric_limits<int>::max();
+    }
+
+    int powerUpperBound = honorBonus;
+    for (int i = 0; i < member; ++i) {
+        powerUpperBound += powers[i];
+    }
+    return powerUpperBound;
+}
+
+static double calcScoreUpperBound(
+    LiveCalculator& liveCalculator,
+    const DfsScoreUpperBoundContext& scoreUpperBoundContext,
+    int liveType,
+    const DeckRecommendConfig& cfg,
+    const std::vector<const CardDetail*>& deckCards,
+    const std::bitset<32>& deckCharacters,
+    const std::vector<CardDetail>& cardDetails,
+    int member,
+    bool isChallengeLive,
+    int honorBonus
+) {
+    auto powerUpperBound = calcPowerUpperBound(
+        deckCards,
+        deckCharacters,
+        cardDetails,
+        member,
+        isChallengeLive,
+        honorBonus
+    );
+    if (powerUpperBound == std::numeric_limits<int>::max()) {
+        return std::numeric_limits<double>::infinity();
+    }
+
+    std::array<double, 5> skills{};
+    int skillCount = 0;
+    for (const auto* deckCard : deckCards) {
+        skills[skillCount++] = deckCard->skill.max;
+    }
+
+    for (const auto& card : cardDetails) {
+        if (skillCount >= member) {
+            break;
+        }
+
+        bool duplicated = false;
+        for (const auto* deckCard : deckCards) {
+            if (deckCard->cardId == card.cardId) {
+                duplicated = true;
+                break;
+            }
+        }
+        if (duplicated) {
+            continue;
+        }
+        if (!isChallengeLive && deckCharacters.test(card.characterId)) {
+            continue;
+        }
+
+        skills[skillCount++] = card.skill.max;
+    }
+
+    if (skillCount < member) {
+        return std::numeric_limits<double>::infinity();
+    }
+
+    std::sort(skills.begin(), skills.begin() + member, std::greater<>());
+
+    DeckDetail optimisticDeck{};
+    optimisticDeck.power.total = powerUpperBound;
+    optimisticDeck.cards.reserve(member);
+    for (int i = 0; i < member; ++i) {
+        optimisticDeck.cards.push_back(DeckCardDetail{
+            .cardId = 0,
+            .level = 0,
+            .skillLevel = 0,
+            .masterRank = 0,
+            .power = {},
+            .eventBonus = std::nullopt,
+            .skill = DeckCardSkillDetail{
+                .scoreUp = skills[i],
+            },
+            .episode1Read = false,
+            .episode2Read = false,
+            .afterTraining = false,
+            .defaultImage = 0,
+            .hasCanvasBonus = false,
+        });
+    }
+
+    auto optimisticScore = liveCalculator.getLiveScoreByDeck(
+        optimisticDeck,
+        scoreUpperBoundContext.musicMeta,
+        liveType,
+        cfg.liveSkillOrder,
+        cfg.specificSkillOrder,
+        cfg.multiTeammateScoreUp,
+        cfg.multiTeammatePower
+    );
+    return optimisticScore + double(optimisticScore) / SCORE_MAX;
+}
+
 
 void BaseDeckRecommend::findBestCardsDFS(
     int liveType,
@@ -24,7 +211,8 @@ void BaseDeckRecommend::findBestCardsDFS(
     int honorBonus, 
     std::optional<int> eventType,
     std::optional<int> eventId,
-    const std::vector<CardDetail>& fixedCards
+    const std::vector<CardDetail>& fixedCards,
+    const DfsScoreUpperBoundContext* scoreUpperBoundContext
 )
 {
     // 超时
@@ -34,6 +222,7 @@ void BaseDeckRecommend::findBestCardsDFS(
 
     auto& deckCards = dfsInfo.deckCards;
     auto& deckCharacters = dfsInfo.deckCharacters;
+    auto scoreTieBreakUpperBound = isChallengeLive ? 0.5 : 0.01;
 
     // 防止挑战Live卡的数量小于允许上场的数量导致无法组队
     if (isChallengeLive) {
@@ -130,10 +319,51 @@ void BaseDeckRecommend::findBestCardsDFS(
         deckCards.push_back(&card);
         deckCharacters.flip(card.characterId);
 
-        findBestCardsDFS(
-            liveType, cfg, cardDetails, supportCards, scoreFunc, dfsInfo,
-            limit, isChallengeLive, member, honorBonus, eventType, eventId, fixedCards
-        );
+        bool prunedByBound = false;
+        if (cfg.target == RecommendTarget::Skill
+            && cfg.fixedCharacters.empty()
+            && dfsInfo.deckQueue.size() >= std::size_t(limit)) {
+            auto optimistic = calcSkillUpperBound(
+                deckCards,
+                deckCharacters,
+                cardDetails,
+                member,
+                isChallengeLive,
+                scoreTieBreakUpperBound
+            );
+            if (optimistic <= dfsInfo.deckQueue.top().targetValue) {
+                prunedByBound = true;
+            }
+        }
+
+        if (!prunedByBound) {
+            if (cfg.target == RecommendTarget::Score
+                && scoreUpperBoundContext
+                && dfsInfo.deckQueue.size() >= std::size_t(limit)) {
+                auto optimistic = calcScoreUpperBound(
+                    this->liveCalculator,
+                    *scoreUpperBoundContext,
+                    liveType,
+                    cfg,
+                    deckCards,
+                    deckCharacters,
+                    cardDetails,
+                    member,
+                    isChallengeLive,
+                    honorBonus
+                );
+                if (optimistic <= dfsInfo.deckQueue.top().targetValue) {
+                    prunedByBound = true;
+                }
+            }
+        }
+
+        if (!prunedByBound) {
+            findBestCardsDFS(
+                liveType, cfg, cardDetails, supportCards, scoreFunc, dfsInfo,
+                limit, isChallengeLive, member, honorBonus, eventType, eventId, fixedCards, scoreUpperBoundContext
+            );
+        }
 
         deckCards.pop_back();
         deckCharacters.flip(card.characterId);

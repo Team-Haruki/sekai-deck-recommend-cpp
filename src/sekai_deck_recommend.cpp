@@ -36,9 +36,10 @@ static const std::set<std::string> VALID_TARGETS = {
 
 static const std::string DEFAULT_ALGORITHM = "ga";
 static const std::set<std::string> VALID_ALGORITHMS = {
-    "sa",
     "dfs",
     "ga",
+    "dfs_ga",
+    "rl",
 };
 
 static const std::set<std::string> VALID_MUSIC_DIFFS = {
@@ -181,43 +182,6 @@ struct PySingleCardConfig {
     }
 };
 
-// python传入的模拟退火参数
-struct PySaOptions {
-    std::optional<int> run_num;
-    std::optional<int> seed;
-    std::optional<int> max_iter;
-    std::optional<int> max_no_improve_iter;
-    std::optional<int> time_limit_ms;
-    std::optional<double> start_temprature;
-    std::optional<double> cooling_rate;
-    std::optional<bool> debug;
-
-    py::dict to_dict() const {
-        py::dict result;
-        if (run_num.has_value())                result["run_num"] = run_num.value();
-        if (seed.has_value())                   result["seed"] = seed.value();
-        if (max_iter.has_value())               result["max_iter"] = max_iter.value();
-        if (max_no_improve_iter.has_value())    result["max_no_improve_iter"] = max_no_improve_iter.value();
-        if (time_limit_ms.has_value())          result["time_limit_ms"] = time_limit_ms.value();
-        if (start_temprature.has_value())       result["start_temprature"] = start_temprature.value();
-        if (cooling_rate.has_value())           result["cooling_rate"] = cooling_rate.value();
-        if (debug.has_value())                  result["debug"] = debug.value();
-        return result;
-    }
-    static PySaOptions from_dict(const py::dict& dict) {
-        PySaOptions options;
-        if (dict.contains("run_num"))                options.run_num = dict["run_num"].cast<int>();
-        if (dict.contains("seed"))                   options.seed = dict["seed"].cast<int>();
-        if (dict.contains("max_iter"))               options.max_iter = dict["max_iter"].cast<int>();
-        if (dict.contains("max_no_improve_iter"))    options.max_no_improve_iter = dict["max_no_improve_iter"].cast<int>();
-        if (dict.contains("time_limit_ms"))          options.time_limit_ms = dict["time_limit_ms"].cast<int>();
-        if (dict.contains("start_temprature"))       options.start_temprature = dict["start_temprature"].cast<double>();
-        if (dict.contains("cooling_rate"))           options.cooling_rate = dict["cooling_rate"].cast<double>();
-        if (dict.contains("debug"))                  options.debug = dict["debug"].cast<bool>();
-        return options;
-    }
-};
-
 // python传入的遗传算法参数
 struct PyGaOptions {
     std::optional<int> seed;
@@ -305,7 +269,6 @@ struct PyDeckRecommendOptions {
     std::optional<double> multi_live_score_up_lower_bound;
     std::optional<std::string> skill_order_choose_strategy;
     std::optional<std::vector<int>> specific_skill_order;
-    std::optional<PySaOptions> sa_options;
     std::optional<PyGaOptions> ga_options;
 
     py::dict to_dict() const {
@@ -379,9 +342,6 @@ struct PyDeckRecommendOptions {
             result["skill_order_choose_strategy"] = skill_order_choose_strategy.value();
         if (specific_skill_order.has_value())
             result["specific_skill_order"] = specific_skill_order.value();
-        
-        if (sa_options.has_value())
-            result["sa_options"] = sa_options->to_dict();
         if (ga_options.has_value())
             result["ga_options"] = ga_options->to_dict();
         return result;
@@ -458,9 +418,6 @@ struct PyDeckRecommendOptions {
             options.skill_order_choose_strategy = dict["skill_order_choose_strategy"].cast<std::string>();
         if (dict.contains("specific_skill_order"))
             options.specific_skill_order = dict["specific_skill_order"].cast<std::vector<int>>();
-
-        if (dict.contains("sa_options"))
-            options.sa_options = PySaOptions::from_dict(dict["sa_options"].cast<py::dict>());
         if (dict.contains("ga_options"))
             options.ga_options = PyGaOptions::from_dict(dict["ga_options"].cast<py::dict>());
         return options;
@@ -839,12 +796,14 @@ class SekaiDeckRecommend {
             std::string algorithm = pyoptions.algorithm.value_or(DEFAULT_ALGORITHM);
             if (!VALID_ALGORITHMS.count(algorithm))
                 throw std::invalid_argument("Invalid algorithm: " + algorithm);
-            if (algorithm == "sa")
-                config.algorithm = RecommendAlgorithm::SA;
-            else if (algorithm == "dfs")
+            if (algorithm == "dfs")
                 config.algorithm = RecommendAlgorithm::DFS;
             else if (algorithm == "ga")
                 config.algorithm = RecommendAlgorithm::GA;
+            else if (algorithm == "dfs_ga")
+                config.algorithm = RecommendAlgorithm::DFS_GA;
+            else if (algorithm == "rl")
+                config.algorithm = RecommendAlgorithm::RL;
 
             // filter other unit
             if (pyoptions.filter_other_unit.has_value()) {
@@ -1046,49 +1005,8 @@ class SekaiDeckRecommend {
                 }
             }
 
-            // sa config
-            if (config.algorithm == RecommendAlgorithm::SA && pyoptions.sa_options.has_value()) {
-                auto sa_options = pyoptions.sa_options.value();
-
-                if (sa_options.run_num.has_value())
-                    config.saRunCount = sa_options.run_num.value();
-                if (config.saRunCount < 1)
-                    throw std::invalid_argument("Invalid sa run count: " + std::to_string(config.saRunCount));
-                
-                if (sa_options.seed.has_value())
-                    config.saSeed = sa_options.seed.value();
-                
-                if (sa_options.max_iter.has_value())
-                    config.saMaxIter = sa_options.max_iter.value();
-                if (config.saMaxIter < 1)
-                    throw std::invalid_argument("Invalid sa max iter: " + std::to_string(config.saMaxIter));
-
-                if (sa_options.max_no_improve_iter.has_value())
-                    config.saMaxIterNoImprove = sa_options.max_no_improve_iter.value();
-                if (config.saMaxIterNoImprove < 1)
-                    throw std::invalid_argument("Invalid sa max no improve iter: " + std::to_string(config.saMaxIterNoImprove));
-
-                if (sa_options.time_limit_ms.has_value())
-                    config.saMaxTimeMs = sa_options.time_limit_ms.value();
-                if (config.saMaxTimeMs < 0)
-                    throw std::invalid_argument("Invalid sa max time ms: " + std::to_string(config.saMaxTimeMs));
-
-                if (sa_options.start_temprature.has_value())
-                    config.saStartTemperature = sa_options.start_temprature.value();
-                if (config.saStartTemperature < 0)
-                    throw std::invalid_argument("Invalid sa start temperature: " + std::to_string(config.saStartTemperature));
-
-                if (sa_options.cooling_rate.has_value())
-                    config.saCoolingRate = sa_options.cooling_rate.value();
-                if (config.saCoolingRate < 0 || config.saCoolingRate > 1)
-                    throw std::invalid_argument("Invalid sa cooling rate: " + std::to_string(config.saCoolingRate));
-
-                if (sa_options.debug.has_value())
-                    config.saDebug = sa_options.debug.value();
-            }
-
             // ga config
-            if (config.algorithm == RecommendAlgorithm::GA && pyoptions.ga_options.has_value()) {
+            if (pyoptions.ga_options.has_value()) {
                 auto ga_options = pyoptions.ga_options.value();
 
                 if (ga_options.seed.has_value())
@@ -1294,20 +1212,6 @@ PYBIND11_MODULE(sekai_deck_recommend, m) {
         .def_readwrite("skill_max", &PySingleCardConfig::skill_max)
         .def_readwrite("canvas", &PySingleCardConfig::canvas);
 
-    py::class_<PySaOptions>(m, "DeckRecommendSaOptions")
-        .def(py::init<>())
-        .def(py::init<const PySaOptions&>())
-        .def("to_dict", &PySaOptions::to_dict)
-        .def_static("from_dict", &PySaOptions::from_dict)
-        .def_readwrite("run_num", &PySaOptions::run_num)
-        .def_readwrite("seed", &PySaOptions::seed)
-        .def_readwrite("max_iter", &PySaOptions::max_iter)
-        .def_readwrite("max_no_improve_iter", &PySaOptions::max_no_improve_iter)
-        .def_readwrite("time_limit_ms", &PySaOptions::time_limit_ms)
-        .def_readwrite("start_temprature", &PySaOptions::start_temprature)
-        .def_readwrite("cooling_rate", &PySaOptions::cooling_rate)
-        .def_readwrite("debug", &PySaOptions::debug);
-
     py::class_<PyGaOptions>(m, "DeckRecommendGaOptions")
         .def(py::init<>())
         .def(py::init<const PyGaOptions&>())
@@ -1369,7 +1273,6 @@ PYBIND11_MODULE(sekai_deck_recommend, m) {
         .def_readwrite("multi_live_score_up_lower_bound", &PyDeckRecommendOptions::multi_live_score_up_lower_bound)
         .def_readwrite("skill_order_choose_strategy", &PyDeckRecommendOptions::skill_order_choose_strategy)
         .def_readwrite("specific_skill_order", &PyDeckRecommendOptions::specific_skill_order)
-        .def_readwrite("sa_options", &PyDeckRecommendOptions::sa_options)
         .def_readwrite("ga_options", &PyDeckRecommendOptions::ga_options);
 
     py::class_<PyRecommendCard>(m, "RecommendCard")
@@ -1428,4 +1331,3 @@ PYBIND11_MODULE(sekai_deck_recommend, m) {
         .def("update_musicmetas_from_string", &SekaiDeckRecommend::update_musicmetas_from_string)
         .def("recommend", &SekaiDeckRecommend::recommend);
 }
-

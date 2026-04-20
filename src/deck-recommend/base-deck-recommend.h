@@ -12,8 +12,9 @@ using Rng = std::mt19937_64;
 
 enum class RecommendAlgorithm {
     DFS,
-    SA,
-    GA
+    GA,
+    DFS_GA,
+    RL
 };
 
 struct DeckRecommendConfig {
@@ -36,7 +37,7 @@ struct DeckRecommendConfig {
     bool filterOtherUnit = false; 
 
     // 推荐算法
-    RecommendAlgorithm algorithm = RecommendAlgorithm::SA; 
+    RecommendAlgorithm algorithm = RecommendAlgorithm::GA; 
 
     // 推荐优化目标
     RecommendTarget target = RecommendTarget::Score;
@@ -107,6 +108,10 @@ struct BestPermutationResult {
     double maxTargetValue = 0.0;
     double maxMultiLiveScoreUp = 0.0;
 };
+
+struct DfsScoreUpperBoundContext {
+    MusicMeta musicMeta;
+};
   
 
 class BaseDeckRecommend {
@@ -173,7 +178,8 @@ public:
         int honorBonus = 0,
         std::optional<int> eventType = std::nullopt,
         std::optional<int> eventId = std::nullopt,
-        const std::vector<CardDetail>& fixedCards = {}
+        const std::vector<CardDetail>& fixedCards = {},
+        const DfsScoreUpperBoundContext* scoreUpperBoundContext = nullptr
     );
 
     /**
@@ -235,7 +241,8 @@ public:
         int honorBonus = 0,
         std::optional<int> eventType = std::nullopt,
         std::optional<int> eventId = std::nullopt,
-        const std::vector<CardDetail>& fixedCards = {}
+        const std::vector<CardDetail>& fixedCards = {},
+        const std::vector<std::vector<const CardDetail*>>* seedDecks = nullptr
     );
 
     /**

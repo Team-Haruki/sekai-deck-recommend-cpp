@@ -44,7 +44,6 @@ struct Individual {
     }
 };
 
-
 // 计算随机选择权重（综合力/技能加成越大越容易被选中）
 std::vector<double> calcRandomSelectWeights(
     const std::vector<CardDetail>& cards, 
@@ -124,7 +123,8 @@ void BaseDeckRecommend::findBestCardsGA(
     int honorBonus, 
     std::optional<int> eventType, 
     std::optional<int> eventId,
-    const std::vector<CardDetail>& fixedCards
+    const std::vector<CardDetail>& fixedCards,
+    const std::vector<std::vector<const CardDetail*>>* seedDecks
 ) {
     int fixedSize = fixedCards.size();
 
@@ -171,6 +171,10 @@ void BaseDeckRecommend::findBestCardsGA(
 
     // 计算用于随机选择的卡牌权重，fixedCards不参与选择
     constexpr int MAX_CID = 27;
+    std::unordered_set<int> fixedCardIds{};
+    for (const auto& card : fixedCards) {
+        fixedCardIds.insert(card.cardId);
+    }
     auto allCardWeights = calcRandomSelectWeights(cardDetails, cfg.target, fixedCards);
 
     // 根据卡的角色map参与组队的卡牌
@@ -183,6 +187,72 @@ void BaseDeckRecommend::findBestCardsGA(
 
     // 生成初始种群
     std::vector<Individual> population;
+    std::unordered_set<uint64_t> seededHashes{};
+    if (seedDecks) {
+        for (const auto& seedDeck : *seedDecks) {
+            if ((int)population.size() >= cfg.gaPopSize) {
+                break;
+            }
+            if ((int)seedDeck.size() != member) {
+                continue;
+            }
+
+            Individual individual{};
+            bool valid = true;
+            std::unordered_set<int> cardIds{};
+            std::unordered_set<int> characterIds{};
+            std::unordered_map<int, const CardDetail*> seedCardById{};
+            std::vector<const CardDetail*> movableCards{};
+            for (const auto* card : seedDeck) {
+                if (!card) {
+                    valid = false;
+                    break;
+                }
+                if (!cardIds.insert(card->cardId).second) {
+                    valid = false;
+                    break;
+                }
+                if (!isChallengeLive && !characterIds.insert(card->characterId).second) {
+                    valid = false;
+                    break;
+                }
+                seedCardById[card->cardId] = card;
+                if (!fixedCardIds.count(card->cardId)) {
+                    movableCards.push_back(card);
+                }
+            }
+            if (!valid) {
+                continue;
+            }
+            if ((int)movableCards.size() != member - fixedSize) {
+                continue;
+            }
+            for (const auto* card : movableCards) {
+                individual.addCard(card);
+            }
+            for (const auto& fixedCard : fixedCards) {
+                auto it = seedCardById.find(fixedCard.cardId);
+                if (it == seedCardById.end()) {
+                    valid = false;
+                    break;
+                }
+                individual.addCard(it->second);
+            }
+            if (!valid) {
+                continue;
+            }
+            if (individual.cardNum != member) {
+                continue;
+            }
+
+            auto deckHash = individual.calcDeckHash();
+            if (!seededHashes.insert(deckHash).second) {
+                continue;
+            }
+            updateIndividualScore(individual);
+            population.push_back(individual);
+        }
+    }
     while((int)population.size() < cfg.gaPopSize) {
         Individual individual{};
         // 随机生成卡组
@@ -408,4 +478,3 @@ void BaseDeckRecommend::findBestCardsGA(
         }
     }
 }
-
