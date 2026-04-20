@@ -132,7 +132,9 @@ public:
     SupportDeckCard getSupportDeckCard(
         const UserCard& card,
         int eventId,
-        int specialCharacterId
+        int specialCharacterId,
+        bool masterMax = false,
+        bool skillMax = false
     );
 };
 

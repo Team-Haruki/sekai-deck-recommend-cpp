@@ -152,9 +152,27 @@ bool CardCalculator::isCertainlyLessThan(
     return ret;
 }
 
-SupportDeckCard CardCalculator::getSupportDeckCard(const UserCard &card, int eventId, int specialCharacterId)
+SupportDeckCard CardCalculator::getSupportDeckCard(
+    const UserCard &card,
+    int eventId,
+    int specialCharacterId,
+    bool masterMax,
+    bool skillMax
+)
 {
-    auto bonus = this->bloomEventCalculator.getCardSupportDeckBonus(card, eventId, specialCharacterId);
+    UserCard supportCard = card;
+    if (masterMax || skillMax) {
+        auto& cards = this->dataProvider.masterData->cards;
+        auto cardData = findOrThrow(cards, [&](const Card& it) {
+            return it.id == card.cardId;
+        }, [&]() { return "Support Deck Card not found for cardId=" + std::to_string(card.cardId); });
+        CardConfig cfg{};
+        cfg.masterMax = masterMax;
+        cfg.skillMax = skillMax;
+        supportCard = this->cardService.applyCardConfig(card, cardData, cfg);
+    }
+
+    auto bonus = this->bloomEventCalculator.getCardSupportDeckBonus(supportCard, eventId, specialCharacterId);
     return SupportDeckCard{
         .cardId = card.cardId,
         .bonus = bonus.value_or(0.0),

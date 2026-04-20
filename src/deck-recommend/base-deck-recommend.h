@@ -32,6 +32,9 @@ struct DeckRecommendConfig {
     std::unordered_map<int, CardConfig> cardConfig = {};
     // 单独卡牌设置
     std::unordered_map<int, CardConfig> singleCardConfig = {};
+    // 支援卡牌设置
+    bool supportMasterMax = false;
+    bool supportSkillMax = false;
 
     // 箱活是否过滤掉其他组合成员
     bool filterOtherUnit = false; 

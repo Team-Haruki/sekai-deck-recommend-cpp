@@ -123,7 +123,13 @@ std::vector<RecommendDeck> BaseDeckRecommend::recommendHighScoreDeck(
         for (int i = 1; i <= 26; i++) {
             std::vector<SupportDeckCard> sc{};
             for (const auto& card : userCards) 
-                sc.push_back(this->cardCalculator.getSupportDeckCard(card, eventConfig.eventId, i));
+                sc.push_back(this->cardCalculator.getSupportDeckCard(
+                    card,
+                    eventConfig.eventId,
+                    i,
+                    config.supportMasterMax,
+                    config.supportSkillMax
+                ));
             std::sort(sc.begin(), sc.end(), [](const SupportDeckCard& a, const SupportDeckCard& b) { return a.bonus > b.bonus; });
             supportCards[i] = sc;
         }
@@ -131,7 +137,13 @@ std::vector<RecommendDeck> BaseDeckRecommend::recommendHighScoreDeck(
         // 普通wl只算一个支援卡组排序
         std::vector<SupportDeckCard> sc{};
         for (const auto& card : userCards) 
-            sc.push_back(this->cardCalculator.getSupportDeckCard(card, eventConfig.eventId, eventConfig.specialCharacterId));
+            sc.push_back(this->cardCalculator.getSupportDeckCard(
+                card,
+                eventConfig.eventId,
+                eventConfig.specialCharacterId,
+                config.supportMasterMax,
+                config.supportSkillMax
+            ));
         std::sort(sc.begin(), sc.end(), [](const SupportDeckCard& a, const SupportDeckCard& b) { return a.bonus > b.bonus; });
         supportCards[0] = sc;
     }
