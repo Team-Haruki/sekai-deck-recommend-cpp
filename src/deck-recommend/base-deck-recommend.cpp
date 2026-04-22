@@ -636,6 +636,25 @@ std::vector<RecommendDeck> BaseDeckRecommend::recommendHighScoreDeck(
         return ensureResults(collectResults(hybridInfo));
     };
 
+    if (config.algorithm == RecommendAlgorithm::SA) {
+        auto calcInfo = makeCalcInfo(config.timeout_ms);
+        auto sortedCards = sortCardsByStrength(cards);
+        long long seed = config.saSeed;
+        if (seed == -1) {
+            seed = nowNs();
+        }
+        auto rng = Rng(seed);
+        for (int i = 0; i < config.saRunCount && !calcInfo.isTimeout(); ++i) {
+            findBestCardsSA(
+                liveType, config, rng, sortedCards, supportCards, sf,
+                calcInfo,
+                config.limit, Enums::LiveType::isChallenge(liveType), config.member, honorBonus,
+                eventConfig.eventType, eventConfig.eventId, fixedCards
+            );
+        }
+        return ensureResults(collectResults(calcInfo));
+    }
+
     if (config.algorithm == RecommendAlgorithm::GA) {
         auto calcInfo = makeCalcInfo(config.timeout_ms);
         runGaSearch(config, cards, calcInfo);

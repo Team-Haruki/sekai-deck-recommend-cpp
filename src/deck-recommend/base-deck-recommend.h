@@ -12,6 +12,7 @@ using Rng = std::mt19937_64;
 
 enum class RecommendAlgorithm {
     DFS,
+    SA,
     GA,
     DFS_GA,
     RL
