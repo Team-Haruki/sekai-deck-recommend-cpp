@@ -168,8 +168,8 @@ class DeckRecommendOptions:
         support_skill_max (bool): Whether to force max skill level when calculating support deck bonus.
         filter_other_unit (bool): Whether to filter out other units for banner event, default is False
         fixed_cards (List[int]): List of card IDs that always included in the deck, default is None
-        fixed_characters (List[int]): List of character IDs that always included in the deck (first is always leader unless forced_leader_character_id is set for final chapter), cannot used in challenge live, default is None
-        forced_leader_character_id (int): Optional final chapter only leader character ID. Ignored for non-final-chapter events.
+        fixed_characters (List[int]): List of character IDs that always included in the deck (first is always leader unless forcedLeaderCharacterId is set for final chapter), cannot be used in challenge live, default is None
+        forcedLeaderCharacterId (int): Optional final chapter only leader character ID. Ignored for non-final-chapter events.
         target_bonus_list (List[int]): List of target event bonus, required when target is "bonus"
         custom_bonus_character_ids (List[int]): Optional custom mixed bonus character IDs.
         custom_bonus_attr (str): Optional custom mixed bonus attr in ["mysterious", "cute", "cool", "pure", "happy"].
@@ -217,7 +217,7 @@ class DeckRecommendOptions:
     filter_other_unit: Optional[bool]
     fixed_cards: Optional[List[int]]
     fixed_characters: Optional[List[int]]
-    forced_leader_character_id: Optional[int]
+    forcedLeaderCharacterId: Optional[int]
     target_bonus_list: Optional[List[int]]
     custom_bonus_character_ids: Optional[List[int]]
     custom_bonus_attr: Optional[str]

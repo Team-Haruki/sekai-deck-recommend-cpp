@@ -299,7 +299,7 @@ struct PyDeckRecommendOptions {
     std::optional<bool> filter_other_unit;
     std::optional<std::vector<int>> fixed_cards;
     std::optional<std::vector<int>> fixed_characters;
-    std::optional<int> forced_leader_character_id;
+    std::optional<int> forcedLeaderCharacterId;
     std::optional<std::vector<int>> target_bonus_list;
     std::optional<std::vector<int>> custom_bonus_character_ids;
     std::optional<std::string> custom_bonus_attr;
@@ -366,8 +366,8 @@ struct PyDeckRecommendOptions {
             result["fixed_cards"] = fixed_cards.value();
         if (fixed_characters.has_value())
             result["fixed_characters"] = fixed_characters.value();
-        if (forced_leader_character_id.has_value())
-            result["forced_leader_character_id"] = forced_leader_character_id.value();
+        if (forcedLeaderCharacterId.has_value())
+            result["forcedLeaderCharacterId"] = forcedLeaderCharacterId.value();
         if (target_bonus_list.has_value())
             result["target_bonus_list"] = target_bonus_list.value();
         if (custom_bonus_character_ids.has_value())
@@ -450,10 +450,8 @@ struct PyDeckRecommendOptions {
             options.fixed_cards = dict["fixed_cards"].cast<std::vector<int>>();
         if (dict.contains("fixed_characters"))
             options.fixed_characters = dict["fixed_characters"].cast<std::vector<int>>();
-        if (dict.contains("forced_leader_character_id"))
-            options.forced_leader_character_id = dict["forced_leader_character_id"].cast<int>();
         if (dict.contains("forcedLeaderCharacterId"))
-            options.forced_leader_character_id = dict["forcedLeaderCharacterId"].cast<int>();
+            options.forcedLeaderCharacterId = dict["forcedLeaderCharacterId"].cast<int>();
         if (dict.contains("target_bonus_list"))
             options.target_bonus_list = dict["target_bonus_list"].cast<std::vector<int>>();
         if (dict.contains("custom_bonus_character_ids"))
@@ -957,8 +955,8 @@ class SekaiDeckRecommend {
             }
 
             // forced leader character
-            if (pyoptions.forced_leader_character_id.has_value()) {
-                auto character_id = pyoptions.forced_leader_character_id.value();
+            if (pyoptions.forcedLeaderCharacterId.has_value()) {
+                auto character_id = pyoptions.forcedLeaderCharacterId.value();
                 if (character_id < 1 || character_id > 26)
                     throw std::invalid_argument("Invalid forced leader character ID: " + std::to_string(character_id));
                 config.forcedLeaderCharacterId = character_id;
@@ -1322,11 +1320,13 @@ public:
         int characterId = 0;
         if (pyoptions.world_bloom_character_id.has_value()) {
             characterId = pyoptions.world_bloom_character_id.value();
-        } else if (pyoptions.forced_leader_character_id.has_value()) {
-            characterId = pyoptions.forced_leader_character_id.value();
+        } else if (pyoptions.forcedLeaderCharacterId.has_value()) {
+            characterId = pyoptions.forcedLeaderCharacterId.value();
         }
+        if (characterId == 0)
+            throw std::invalid_argument("world_bloom_character_id or forcedLeaderCharacterId is required.");
         if (characterId < 1 || characterId > 26)
-            throw std::invalid_argument("world_bloom_character_id or forced_leader_character_id is required.");
+            throw std::invalid_argument("Invalid world_bloom_character_id or forcedLeaderCharacterId: " + std::to_string(characterId));
 
         DataProvider dataProvider{
             region,
@@ -1494,7 +1494,7 @@ PYBIND11_MODULE(sekai_deck_recommend, m) {
         .def_readwrite("filter_other_unit", &PyDeckRecommendOptions::filter_other_unit)
         .def_readwrite("fixed_cards", &PyDeckRecommendOptions::fixed_cards)
         .def_readwrite("fixed_characters", &PyDeckRecommendOptions::fixed_characters)
-        .def_readwrite("forced_leader_character_id", &PyDeckRecommendOptions::forced_leader_character_id)
+        .def_readwrite("forcedLeaderCharacterId", &PyDeckRecommendOptions::forcedLeaderCharacterId)
         .def_readwrite("target_bonus_list", &PyDeckRecommendOptions::target_bonus_list)
         .def_readwrite("custom_bonus_character_ids", &PyDeckRecommendOptions::custom_bonus_character_ids)
         .def_readwrite("custom_bonus_attr", &PyDeckRecommendOptions::custom_bonus_attr)

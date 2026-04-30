@@ -871,7 +871,7 @@ std::vector<RecommendDeck> BaseDeckRecommend::recommendHighScoreDeck(
             }
 
             if (leaderCharacterId.has_value()) {
-                if (deck.empty() || deck.front()->characterId != leaderCharacterId.value()) {
+                if (!characterIds.count(leaderCharacterId.value())) {
                     return false;
                 }
             }
@@ -881,6 +881,21 @@ std::vector<RecommendDeck> BaseDeckRecommend::recommendHighScoreDeck(
                 }
             }
             return true;
+        };
+        auto normalizeDeckForLeader = [&](std::vector<const CardDetail*> deck) {
+            if (leaderCharacterId.has_value()) {
+                auto leaderIt = std::find_if(
+                    deck.begin(),
+                    deck.end(),
+                    [&](const CardDetail* card) {
+                        return card && card->characterId == leaderCharacterId.value();
+                    }
+                );
+                if (leaderIt != deck.end() && leaderIt != deck.begin()) {
+                    std::rotate(deck.begin(), leaderIt, leaderIt + 1);
+                }
+            }
+            return deck;
         };
         auto buildRlCandidateCards = [&](const std::vector<CardDetail>& sortedCards) {
             std::vector<CardDetail> pruned{};
@@ -1024,12 +1039,16 @@ std::vector<RecommendDeck> BaseDeckRecommend::recommendHighScoreDeck(
             return pruned;
         };
         auto evaluateDeckByCards = [&](const DeckRecommendConfig& runConfig, const std::vector<const CardDetail*>& deck, RecommendCalcInfo& info) {
-            auto deckHash = this->calcDeckHash(deck);
+            auto normalizedDeck = normalizeDeckForLeader(deck);
+            if (!deckMatchesFixedConstraints(normalizedDeck)) {
+                return -1e18;
+            }
+            auto deckHash = this->calcDeckHash(normalizedDeck);
             if (info.deckTargetValueMap.count(deckHash)) {
                 return info.deckTargetValueMap[deckHash];
             }
             auto ret = getBestPermutation(
-                this->deckCalculator, deck, supportCards, sf,
+                this->deckCalculator, normalizedDeck, supportCards, sf,
                 honorBonus, eventConfig.eventType, eventConfig.eventId, liveType, runConfig
             );
             double targetValue = -1e18;
@@ -1255,6 +1274,18 @@ std::vector<RecommendDeck> BaseDeckRecommend::recommendHighScoreDeck(
                 sharedUnitCount += sharesAnyUnit(*existing, candidate) ? 1 : 0;
             }
             const CardDetail* leader = deck.empty() ? nullptr : deck.front();
+            if (leaderCharacterId.has_value()) {
+                auto leaderIt = std::find_if(
+                    deck.begin(),
+                    deck.end(),
+                    [&](const CardDetail* card) {
+                        return card && card->characterId == leaderCharacterId.value();
+                    }
+                );
+                if (leaderIt != deck.end()) {
+                    leader = *leaderIt;
+                }
+            }
             auto fixedCharacterIndex = nextPos - int(fixedCards.size());
             bool requiredCharacter = fixedCharacterIndex >= 0
                 && remainingRequiredCharacters.size() > std::size_t(fixedCharacterIndex);
@@ -1473,9 +1504,10 @@ std::vector<RecommendDeck> BaseDeckRecommend::recommendHighScoreDeck(
             if (!deckMatchesFixedConstraints(seedDeck)) {
                 return;
             }
-            auto hash = this->calcDeckHash(seedDeck);
+            auto normalizedSeedDeck = normalizeDeckForLeader(seedDeck);
+            auto hash = this->calcDeckHash(normalizedSeedDeck);
             if (seedHashes.insert(hash).second) {
-                mergedSeedDecks.push_back(seedDeck);
+                mergedSeedDecks.push_back(std::move(normalizedSeedDeck));
             }
         };
         for (const auto& seedDeck : seedDecks) {
