@@ -10,54 +10,6 @@ bool containsAny(const std::vector<T>& collection, const std::vector<T>& contain
     return false;
 }
 
-static double calcSkillUpperBound(
-    const std::vector<const CardDetail*>& deckCards,
-    const std::bitset<32>& deckCharacters,
-    const std::vector<CardDetail>& cardDetails,
-    int member,
-    bool isChallengeLive,
-    double scoreTieBreakUpperBound
-) {
-    std::array<double, 5> skills{};
-    int skillCount = 0;
-    for (const auto* deckCard : deckCards) {
-        skills[skillCount++] = deckCard->skill.max;
-    }
-
-    for (const auto& card : cardDetails) {
-        if (skillCount >= member) {
-            break;
-        }
-
-        bool duplicated = false;
-        for (const auto* deckCard : deckCards) {
-            if (deckCard->cardId == card.cardId) {
-                duplicated = true;
-                break;
-            }
-        }
-        if (duplicated) {
-            continue;
-        }
-        if (!isChallengeLive && deckCharacters.test(card.characterId)) {
-            continue;
-        }
-
-        skills[skillCount++] = card.skill.max;
-    }
-
-    if (skillCount < member) {
-        return std::numeric_limits<double>::infinity();
-    }
-
-    std::sort(skills.begin(), skills.begin() + member, std::greater<>());
-    double upperBound = skills[0];
-    for (int i = 1; i < member; ++i) {
-        upperBound += skills[i] / 5.0;
-    }
-    return upperBound + scoreTieBreakUpperBound;
-}
-
 static int calcPowerUpperBound(
     const std::vector<const CardDetail*>& deckCards,
     const std::bitset<32>& deckCharacters,
@@ -222,7 +174,7 @@ void BaseDeckRecommend::findBestCardsDFS(
 
     auto& deckCards = dfsInfo.deckCards;
     auto& deckCharacters = dfsInfo.deckCharacters;
-    auto scoreTieBreakUpperBound = isChallengeLive ? 0.5 : 0.01;
+    auto remainingFixedCharacters = resolveRemainingFixedCharacters(cfg, fixedCards, eventId);
 
     // 防止挑战Live卡的数量小于允许上场的数量导致无法组队
     if (isChallengeLive) {
@@ -255,21 +207,26 @@ void BaseDeckRecommend::findBestCardsDFS(
 
         // 跳过重复角色
         if (!isChallengeLive && deckCharacters.test(card.characterId)) continue;
-        // 强制角色限制（不需要考虑固定卡牌，两个参数不允许同时存在）
-        if (cfg.fixedCharacters.size() > deckCards.size() && cfg.fixedCharacters[deckCards.size()] != card.characterId) {
+        // 固定角色中已经由 fixedCards 满足的部分不再额外占卡位。
+        auto fixedCharacterIndex = int(deckCards.size()) - int(fixedCards.size());
+        if (fixedCharacterIndex >= 0
+            && remainingFixedCharacters.size() > std::size_t(fixedCharacterIndex)
+            && remainingFixedCharacters[fixedCharacterIndex] != card.characterId) {
             continue;
         }
         
         // C位相关优化，如果使用固定卡牌，则认为C位是第一个不固定的位置，后面的同理（即固定卡牌不参加剪枝）
-        auto cIndex = fixedCards.size() + cfg.fixedCharacters.size();
-        // C位一定是技能最好的卡牌，跳过技能比C位还好的
-        if (deckCards.size() >= cIndex + 1 && deckCards[cIndex]->skill.isCertainlyLessThan(card.skill)) continue;
-        // 为了优化性能，必须和C位同色或同组
-        if (deckCards.size() >= cIndex + 1 && card.attr != deckCards[cIndex]->attr && !containsAny(deckCards[cIndex]->units, card.units)) {
-            continue;
+        auto cIndex = fixedCards.size() + remainingFixedCharacters.size();
+        if (cfg.target != RecommendTarget::Skill) {
+            // C位一定是技能最好的卡牌，跳过技能比C位还好的
+            if (deckCards.size() >= cIndex + 1 && deckCards[cIndex]->skill.isCertainlyLessThan(card.skill)) continue;
+            // 为了优化性能，必须和C位同色或同组
+            if (deckCards.size() >= cIndex + 1 && card.attr != deckCards[cIndex]->attr && !containsAny(deckCards[cIndex]->units, card.units)) {
+                continue;
+            }
         }
 
-        if (deckCards.size() >= cIndex + 2) {
+        if (cfg.target != RecommendTarget::Skill && deckCards.size() >= cIndex + 2) {
             auto& last = *deckCards.back();
             bool lessThan = false;
             bool greaterThan = false;
@@ -290,7 +247,7 @@ void BaseDeckRecommend::findBestCardsDFS(
             if (!greaterThan && card.cardId > last.cardId) continue;
         }
         
-        if (preCard) {
+        if (cfg.target != RecommendTarget::Skill && preCard) {
             auto& pre = *preCard;
             bool lessThan = false;
 
@@ -320,21 +277,6 @@ void BaseDeckRecommend::findBestCardsDFS(
         deckCharacters.flip(card.characterId);
 
         bool prunedByBound = false;
-        if (cfg.target == RecommendTarget::Skill
-            && cfg.fixedCharacters.empty()
-            && dfsInfo.deckQueue.size() >= std::size_t(limit)) {
-            auto optimistic = calcSkillUpperBound(
-                deckCards,
-                deckCharacters,
-                cardDetails,
-                member,
-                isChallengeLive,
-                scoreTieBreakUpperBound
-            );
-            if (optimistic <= dfsInfo.deckQueue.top().targetValue) {
-                prunedByBound = true;
-            }
-        }
 
         if (!prunedByBound) {
             if (cfg.target == RecommendTarget::Score

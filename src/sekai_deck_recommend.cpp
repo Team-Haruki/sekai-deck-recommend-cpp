@@ -4,8 +4,10 @@
 #include "data-provider/static-data.h"
 
 #include <iostream>
+#include <algorithm>
 #include <chrono>
 #include <fstream>
+#include <tuple>
 
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
@@ -297,6 +299,7 @@ struct PyDeckRecommendOptions {
     std::optional<bool> filter_other_unit;
     std::optional<std::vector<int>> fixed_cards;
     std::optional<std::vector<int>> fixed_characters;
+    std::optional<int> forced_leader_character_id;
     std::optional<std::vector<int>> target_bonus_list;
     std::optional<std::vector<int>> custom_bonus_character_ids;
     std::optional<std::string> custom_bonus_attr;
@@ -363,6 +366,8 @@ struct PyDeckRecommendOptions {
             result["fixed_cards"] = fixed_cards.value();
         if (fixed_characters.has_value())
             result["fixed_characters"] = fixed_characters.value();
+        if (forced_leader_character_id.has_value())
+            result["forced_leader_character_id"] = forced_leader_character_id.value();
         if (target_bonus_list.has_value())
             result["target_bonus_list"] = target_bonus_list.value();
         if (custom_bonus_character_ids.has_value())
@@ -445,6 +450,10 @@ struct PyDeckRecommendOptions {
             options.fixed_cards = dict["fixed_cards"].cast<std::vector<int>>();
         if (dict.contains("fixed_characters"))
             options.fixed_characters = dict["fixed_characters"].cast<std::vector<int>>();
+        if (dict.contains("forced_leader_character_id"))
+            options.forced_leader_character_id = dict["forced_leader_character_id"].cast<int>();
+        if (dict.contains("forcedLeaderCharacterId"))
+            options.forced_leader_character_id = dict["forcedLeaderCharacterId"].cast<int>();
         if (dict.contains("target_bonus_list"))
             options.target_bonus_list = dict["target_bonus_list"].cast<std::vector<int>>();
         if (dict.contains("custom_bonus_character_ids"))
@@ -528,6 +537,25 @@ struct PyRecommendCard {
         card.after_training = dict["after_training"].cast<bool>();
         card.default_image = dict["default_image"].cast<std::string>();
         card.has_canvas_bonus = dict["has_canvas_bonus"].cast<bool>();
+        return card;
+    }
+};
+
+struct PyRecommendSupportDeckCard {
+    int card_id;
+    double bonus;
+
+    py::dict to_dict() const {
+        py::dict result;
+        result["card_id"] = card_id;
+        result["bonus"] = bonus;
+        return result;
+    }
+
+    static PyRecommendSupportDeckCard from_dict(const py::dict& dict) {
+        PyRecommendSupportDeckCard card;
+        card.card_id = dict["card_id"].cast<int>();
+        card.bonus = dict["bonus"].cast<double>();
         return card;
     }
 };
@@ -919,8 +947,6 @@ class SekaiDeckRecommend {
                 auto fixed_characters = pyoptions.fixed_characters.value();
                 if (int(fixed_characters.size()) > config.member)
                     throw std::invalid_argument("Fixed characters size exceeds member count.");
-                if (config.fixedCards.size()) 
-                    throw std::invalid_argument("fixed_characters and fixed_cards cannot be used together.");
                 if (is_challenge_live)
                     throw std::invalid_argument("fixed_characters is not valid for challenge live.");
                 for (const auto& character_id : fixed_characters) {
@@ -928,6 +954,14 @@ class SekaiDeckRecommend {
                         throw std::invalid_argument("Invalid fixed character ID: " + std::to_string(character_id));
                 }
                 config.fixedCharacters = fixed_characters;
+            }
+
+            // forced leader character
+            if (pyoptions.forced_leader_character_id.has_value()) {
+                auto character_id = pyoptions.forced_leader_character_id.value();
+                if (character_id < 1 || character_id > 26)
+                    throw std::invalid_argument("Invalid forced leader character ID: " + std::to_string(character_id));
+                config.forcedLeaderCharacterId = character_id;
             }
 
             // skill reference choose strategy
@@ -1240,6 +1274,89 @@ public:
         region_musicmetas[REGION_ENUM_MAP.at(region)]->loadFromString(s);
     }
 
+    std::vector<PyRecommendSupportDeckCard> get_world_bloom_support_cards(const PyDeckRecommendOptions& pyoptions) const {
+        if (!pyoptions.region.has_value())
+            throw std::invalid_argument("region is required.");
+        if (!REGION_ENUM_MAP.count(pyoptions.region.value()))
+            throw std::invalid_argument("Invalid region: " + pyoptions.region.value());
+        Region region = REGION_ENUM_MAP.at(pyoptions.region.value());
+        if (!region_masterdata.count(region))
+            throw std::invalid_argument("Master data not found for region: " + pyoptions.region.value());
+
+        auto userdata = std::make_shared<UserData>();
+        if (pyoptions.user_data.has_value())
+            userdata = pyoptions.user_data.value().user_data;
+        else if (pyoptions.user_data_file_path.has_value())
+            userdata->loadFromFile(pyoptions.user_data_file_path.value());
+        else if (pyoptions.user_data_str.has_value())
+            userdata->loadFromString(pyoptions.user_data_str.value());
+        else
+            throw std::invalid_argument("Either user_data / user_data_file_path / user_data_str is required.");
+
+        int eventId = 0;
+        if (pyoptions.event_id.has_value()) {
+            eventId = pyoptions.event_id.value();
+        } else if (pyoptions.world_bloom_event_turn.has_value()) {
+            int turn = pyoptions.world_bloom_event_turn.value();
+            if (turn < 1 || turn > 3)
+                throw std::invalid_argument("Invalid world bloom event turn: " + std::to_string(turn));
+            if (turn == 3) {
+                if (!pyoptions.world_bloom_character_id.has_value())
+                    throw std::invalid_argument("world_bloom_character_id is required for world bloom 3 fake event.");
+                int part = region_masterdata[region]->getWorldBloom3PartByCharacterId(pyoptions.world_bloom_character_id.value());
+                eventId = region_masterdata[region]->getWorldBloomFakeEventId(turn, part);
+            } else {
+                if (!pyoptions.event_unit.has_value())
+                    throw std::invalid_argument("event_unit is required for world bloom fake event.");
+                if (!VALID_UNIT_TYPES.count(pyoptions.event_unit.value()))
+                    throw std::invalid_argument("Invalid event unit: " + pyoptions.event_unit.value());
+                eventId = region_masterdata[region]->getWorldBloomFakeEventId(
+                    turn,
+                    mapEnum(EnumMap::unit, pyoptions.event_unit.value())
+                );
+            }
+        } else {
+            throw std::invalid_argument("event_id or world_bloom_event_turn is required.");
+        }
+
+        int characterId = 0;
+        if (pyoptions.world_bloom_character_id.has_value()) {
+            characterId = pyoptions.world_bloom_character_id.value();
+        } else if (pyoptions.forced_leader_character_id.has_value()) {
+            characterId = pyoptions.forced_leader_character_id.value();
+        }
+        if (characterId < 1 || characterId > 26)
+            throw std::invalid_argument("world_bloom_character_id or forced_leader_character_id is required.");
+
+        DataProvider dataProvider{
+            region,
+            region_masterdata[region],
+            userdata,
+            region_musicmetas.count(region) ? region_musicmetas.at(region) : std::shared_ptr<MusicMetas>{}
+        };
+        dataProvider.init();
+
+        CardCalculator cardCalculator(dataProvider);
+        std::vector<PyRecommendSupportDeckCard> result{};
+        for (const auto& card : userdata->userCards) {
+            auto supportCard = cardCalculator.getSupportDeckCard(
+                card,
+                eventId,
+                characterId,
+                pyoptions.support_master_max.value_or(false),
+                pyoptions.support_skill_max.value_or(false)
+            );
+            result.push_back(PyRecommendSupportDeckCard{
+                .card_id = supportCard.cardId,
+                .bonus = supportCard.bonus,
+            });
+        }
+        std::sort(result.begin(), result.end(), [](const auto& a, const auto& b) {
+            return std::tuple(a.bonus, -a.card_id) > std::tuple(b.bonus, -b.card_id);
+        });
+        return result;
+    }
+
     // 推荐卡组
     PyDeckRecommendResult recommend(const PyDeckRecommendOptions& pyoptions) {
         auto options = construct_options_from_py(pyoptions);
@@ -1377,6 +1494,7 @@ PYBIND11_MODULE(sekai_deck_recommend, m) {
         .def_readwrite("filter_other_unit", &PyDeckRecommendOptions::filter_other_unit)
         .def_readwrite("fixed_cards", &PyDeckRecommendOptions::fixed_cards)
         .def_readwrite("fixed_characters", &PyDeckRecommendOptions::fixed_characters)
+        .def_readwrite("forced_leader_character_id", &PyDeckRecommendOptions::forced_leader_character_id)
         .def_readwrite("target_bonus_list", &PyDeckRecommendOptions::target_bonus_list)
         .def_readwrite("custom_bonus_character_ids", &PyDeckRecommendOptions::custom_bonus_character_ids)
         .def_readwrite("custom_bonus_attr", &PyDeckRecommendOptions::custom_bonus_attr)
@@ -1412,6 +1530,14 @@ PYBIND11_MODULE(sekai_deck_recommend, m) {
         .def_readwrite("default_image", &PyRecommendCard::default_image)
         .def_readwrite("has_canvas_bonus", &PyRecommendCard::has_canvas_bonus);
 
+    py::class_<PyRecommendSupportDeckCard>(m, "RecommendSupportDeckCard")
+        .def(py::init<>())
+        .def(py::init<const PyRecommendSupportDeckCard&>())
+        .def("to_dict", &PyRecommendSupportDeckCard::to_dict)
+        .def_static("from_dict", &PyRecommendSupportDeckCard::from_dict)
+        .def_readwrite("card_id", &PyRecommendSupportDeckCard::card_id)
+        .def_readwrite("bonus", &PyRecommendSupportDeckCard::bonus);
+
     py::class_<PyRecommendDeck>(m, "RecommendDeck")
         .def(py::init<>())
         .def(py::init<const PyRecommendDeck&>())
@@ -1446,5 +1572,6 @@ PYBIND11_MODULE(sekai_deck_recommend, m) {
         .def("update_masterdata_from_strings", &SekaiDeckRecommend::update_masterdata_from_strings)
         .def("update_musicmetas", &SekaiDeckRecommend::update_musicmetas)
         .def("update_musicmetas_from_string", &SekaiDeckRecommend::update_musicmetas_from_string)
+        .def("get_world_bloom_support_cards", &SekaiDeckRecommend::get_world_bloom_support_cards)
         .def("recommend", &SekaiDeckRecommend::recommend);
 }

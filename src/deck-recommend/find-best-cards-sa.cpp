@@ -24,15 +24,19 @@ void BaseDeckRecommend::findBestCardsSA(
     const std::vector<CardDetail>& fixedCards
 )
 {
-    if (!cfg.fixedCharacters.empty()) {
-        throw std::invalid_argument("SA does not support fixedCharacters");
-    }
-
     if (isChallengeLive) {
         member = std::min(member, int(cardDetails.size()));
     }
 
     member -= int(fixedCards.size());
+    auto remainingFixedCharacters = resolveRemainingFixedCharacters(cfg, fixedCards, eventId);
+    std::set<int> remainingFixedCharacterSet(
+        remainingFixedCharacters.begin(),
+        remainingFixedCharacters.end()
+    );
+    if (member < int(remainingFixedCharacters.size())) {
+        return;
+    }
 
     constexpr int MAX_CID = 27;
     std::vector<CardDetail> charaCardDetails[MAX_CID] = {};
@@ -75,6 +79,16 @@ void BaseDeckRecommend::findBestCardsSA(
     std::vector<const CardDetail*> deck{};
     if (member > 0) {
         if (!isChallengeLive) {
+            for (const auto& characterId : remainingFixedCharacters) {
+                auto& cards = charaCardDetails[characterId];
+                if (cards.empty()) {
+                    return;
+                }
+                auto& max_card = *std::max_element(cards.begin(), cards.end(), [](const CardDetail& a, const CardDetail& b) {
+                    return a.power.min != b.power.min ? a.power.min < b.power.min : a.cardId > b.cardId;
+                });
+                deck.push_back(&max_card);
+            }
             for (int i = 0; i < MAX_CID; ++i) {
                 auto& cards = charaCardDetails[i];
                 if (cards.empty()) {
@@ -83,6 +97,9 @@ void BaseDeckRecommend::findBestCardsSA(
                 if (std::find_if(fixedCards.begin(), fixedCards.end(), [&](const CardDetail& card) {
                         return card.characterId == i;
                     }) != fixedCards.end()) {
+                    continue;
+                }
+                if (remainingFixedCharacterSet.count(i)) {
                     continue;
                 }
                 auto& max_card = *std::max_element(cards.begin(), cards.end(), [](const CardDetail& a, const CardDetail& b) {
@@ -101,11 +118,32 @@ void BaseDeckRecommend::findBestCardsSA(
             }
         }
 
-        std::sort(deck.begin(), deck.end(), [](const CardDetail* a, const CardDetail* b) {
+        auto strongerCard = [](const CardDetail* a, const CardDetail* b) {
             return a->power.min != b->power.min ? a->power.min > b->power.min : a->cardId < b->cardId;
-        });
-        if (int(deck.size()) > member) {
-            deck.resize(member);
+        };
+        if (!isChallengeLive && !remainingFixedCharacterSet.empty()) {
+            std::vector<const CardDetail*> requiredDeck{};
+            std::vector<const CardDetail*> flexibleDeck{};
+            for (const auto* card : deck) {
+                if (remainingFixedCharacterSet.count(card->characterId)) {
+                    requiredDeck.push_back(card);
+                } else {
+                    flexibleDeck.push_back(card);
+                }
+            }
+            std::sort(flexibleDeck.begin(), flexibleDeck.end(), strongerCard);
+            deck = std::move(requiredDeck);
+            for (const auto* card : flexibleDeck) {
+                if (int(deck.size()) >= member) {
+                    break;
+                }
+                deck.push_back(card);
+            }
+        } else {
+            std::sort(deck.begin(), deck.end(), strongerCard);
+            if (int(deck.size()) > member) {
+                deck.resize(member);
+            }
         }
     }
 
@@ -138,6 +176,9 @@ void BaseDeckRecommend::findBestCardsSA(
 
         replacableCardIndices.clear();
         for (int i = 0; i < MAX_CID; ++i) {
+            if (!isChallengeLive && remainingFixedCharacterSet.count(deck[pos]->characterId) && i != deck[pos]->characterId) {
+                continue;
+            }
             if (!isChallengeLive && i != deck[pos]->characterId && deckCharacters.count(i)) {
                 continue;
             }

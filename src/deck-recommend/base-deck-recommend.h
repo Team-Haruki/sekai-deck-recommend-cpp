@@ -6,7 +6,10 @@
 #include "card-information/card-calculator.h"
 #include "live-score/live-calculator.h"
 #include "area-item-information/area-item-service.h"
+#include <algorithm>
+#include <optional>
 #include <random>
+#include <unordered_set>
 
 using Rng = std::mt19937_64;
 
@@ -41,7 +44,7 @@ struct DeckRecommendConfig {
     bool filterOtherUnit = false; 
 
     // 推荐算法
-    RecommendAlgorithm algorithm = RecommendAlgorithm::GA; 
+    RecommendAlgorithm algorithm = RecommendAlgorithm::GA;
 
     // 推荐优化目标
     RecommendTarget target = RecommendTarget::Score;
@@ -60,6 +63,9 @@ struct DeckRecommendConfig {
 
     // 指定从队长位开始的卡牌所属角色（队长后的顺序无所谓）
     std::vector<int> fixedCharacters = {};
+
+    // 终章活动专用：指定队长角色
+    std::optional<int> forcedLeaderCharacterId = std::nullopt;
 
     // bfes花前技能选择策略
     SkillReferenceChooseStrategy skillReferenceChooseStrategy = SkillReferenceChooseStrategy::Average;
@@ -116,6 +122,54 @@ struct BestPermutationResult {
 struct DfsScoreUpperBoundContext {
     MusicMeta musicMeta;
 };
+
+inline std::vector<int> resolveRequiredCharacters(
+    const DeckRecommendConfig& config,
+    std::optional<int> eventId
+) {
+    std::vector<int> requiredCharacters = config.fixedCharacters;
+    if (eventId.value_or(0) == finalChapterEventId && config.forcedLeaderCharacterId.has_value()) {
+        int leaderCharacterId = config.forcedLeaderCharacterId.value();
+        requiredCharacters.erase(
+            std::remove(requiredCharacters.begin(), requiredCharacters.end(), leaderCharacterId),
+            requiredCharacters.end()
+        );
+        requiredCharacters.insert(requiredCharacters.begin(), leaderCharacterId);
+    }
+    return requiredCharacters;
+}
+
+inline std::vector<int> resolveRemainingFixedCharacters(
+    const DeckRecommendConfig& config,
+    const std::vector<CardDetail>& fixedCards,
+    std::optional<int> eventId
+) {
+    std::unordered_set<int> fixedCardCharacters{};
+    for (const auto& card : fixedCards) {
+        fixedCardCharacters.insert(card.characterId);
+    }
+
+    std::vector<int> remainingCharacters{};
+    for (const auto& characterId : resolveRequiredCharacters(config, eventId)) {
+        if (!fixedCardCharacters.count(characterId)) {
+            remainingCharacters.push_back(characterId);
+        }
+    }
+    return remainingCharacters;
+}
+
+inline std::optional<int> resolveLeaderCharacterId(
+    const DeckRecommendConfig& config,
+    std::optional<int> eventId
+) {
+    if (eventId.value_or(0) == finalChapterEventId && config.forcedLeaderCharacterId.has_value()) {
+        return config.forcedLeaderCharacterId;
+    }
+    if (!config.fixedCharacters.empty()) {
+        return config.fixedCharacters.front();
+    }
+    return std::nullopt;
+}
   
 
 class BaseDeckRecommend {
