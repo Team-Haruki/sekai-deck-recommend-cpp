@@ -168,7 +168,8 @@ class DeckRecommendOptions:
         support_skill_max (bool): Whether to force max skill level when calculating support deck bonus.
         filter_other_unit (bool): Whether to filter out other units for banner event, default is False
         fixed_cards (List[int]): List of card IDs that always included in the deck, default is None
-        fixed_characters (List[int]): List of character IDs that always included in the deck (first is always leader), cannot used in challenge live, cannot used with fixed_cards together, default is None
+        fixed_characters (List[int]): List of character IDs that always included in the deck (first is always leader unless forcedLeaderCharacterId is set for final chapter), cannot be used in challenge live, default is None
+        forcedLeaderCharacterId (int): Optional final chapter only leader character ID. Ignored for non-final-chapter events.
         target_bonus_list (List[int]): List of target event bonus, required when target is "bonus"
         custom_bonus_character_ids (List[int]): Optional custom mixed bonus character IDs.
         custom_bonus_attr (str): Optional custom mixed bonus attr in ["mysterious", "cute", "cool", "pure", "happy"].
@@ -216,6 +217,7 @@ class DeckRecommendOptions:
     filter_other_unit: Optional[bool]
     fixed_cards: Optional[List[int]]
     fixed_characters: Optional[List[int]]
+    forcedLeaderCharacterId: Optional[int]
     target_bonus_list: Optional[List[int]]
     custom_bonus_character_ids: Optional[List[int]]
     custom_bonus_attr: Optional[str]
@@ -320,6 +322,23 @@ class RecommendDeck:
         ...
 
 
+class RecommendSupportDeckCard:
+    """
+    World bloom support deck card.
+    Attributes:
+        card_id (int): Card ID
+        bonus (float): Support deck bonus rate
+    """
+    card_id: int
+    bonus: float
+
+    def to_dict(self) -> Dict[str, Any]:
+        ...
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> 'RecommendSupportDeckCard':
+        ...
+
+
 class DeckRecommendResult:
     """
     Deck recommendation result
@@ -413,5 +432,15 @@ class SekaiDeckRecommend:
             options (DeckRecommendOptions): Options for deck recommendation
         Returns:
             DeckRecommendResult: Recommended decks sorted by score descending
+        """
+        ...
+
+    def get_world_bloom_support_cards(self, options: DeckRecommendOptions) -> List[RecommendSupportDeckCard]:
+        """
+        Get world bloom support deck cards for the specified event and character.
+        Args:
+            options (DeckRecommendOptions): Options with region, user data, event_id or world_bloom_event_turn, and world_bloom_character_id.
+        Returns:
+            List[RecommendSupportDeckCard]: Support deck cards sorted by bonus descending
         """
         ...

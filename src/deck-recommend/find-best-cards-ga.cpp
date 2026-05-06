@@ -44,6 +44,33 @@ struct Individual {
     }
 };
 
+static double calcSearchWeightValue(const CardDetail& card, RecommendTarget target) {
+    auto powerNorm = std::max(0.0, double(card.power.max) / POWER_MAX);
+    auto skillNorm = std::max(0.0, double(card.skill.max) / SKILL_MAX);
+    if (target == RecommendTarget::Skill) {
+        return std::max(1e-6, skillNorm);
+    }
+    if (target == RecommendTarget::Score) {
+        auto eventBonus = std::max(
+            card.maxEventBonus.value_or(0.0),
+            card.limitedEventBonus.value_or(0.0)
+        );
+        auto eventNorm = std::max(0.0, eventBonus / 70.0);
+        auto supportNorm = std::max(0.0, card.supportDeckBonus.value_or(0.0) / 50.0);
+        return std::max(1e-6, 0.70 * powerNorm + 0.95 * skillNorm + 0.20 * eventNorm + 0.10 * supportNorm);
+    }
+    if (target == RecommendTarget::Mysekai) {
+        auto eventBonus = std::max(
+            card.maxEventBonus.value_or(0.0),
+            card.limitedEventBonus.value_or(0.0)
+        );
+        auto eventNorm = std::max(0.0, eventBonus / 70.0);
+        auto supportNorm = std::max(0.0, card.supportDeckBonus.value_or(0.0) / 50.0);
+        return std::max(1e-6, 0.90 * powerNorm + 1.35 * eventNorm + 0.25 * supportNorm);
+    }
+    return std::max(1e-6, powerNorm);
+}
+
 // 计算随机选择权重（综合力/技能加成越大越容易被选中）
 std::vector<double> calcRandomSelectWeights(
     const std::vector<CardDetail>& cards, 
@@ -64,13 +91,8 @@ std::vector<double> calcRandomSelectWeights(
             continue;
         }
 
-        if (target == RecommendTarget::Skill) {
-            // 以技能加成的平方为权重以扩大差距
-            weights.push_back((double)card.skill.max * card.skill.max);
-        } else {
-            // 以综合力的平方为权重以扩大差距
-            weights.push_back((double)card.power.max * card.power.max);
-        }
+        auto value = calcSearchWeightValue(card, target);
+        weights.push_back(value * value);
     }
     // 归一化 & 计算前缀和
     double sum = std::accumulate(weights.begin(), weights.end(), 0.0);
@@ -127,6 +149,11 @@ void BaseDeckRecommend::findBestCardsGA(
     const std::vector<std::vector<const CardDetail*>>* seedDecks
 ) {
     int fixedSize = fixedCards.size();
+    auto remainingFixedCharacters = resolveRemainingFixedCharacters(cfg, fixedCards, eventId);
+    std::unordered_set<int> remainingFixedCharacterSet(
+        remainingFixedCharacters.begin(),
+        remainingFixedCharacters.end()
+    );
 
     // 参数检查
     if (cfg.gaParentSize < 0 || cfg.gaParentSize > cfg.gaPopSize) 
@@ -266,17 +293,17 @@ void BaseDeckRecommend::findBestCardsGA(
                 if (std::find_if(fixedCards.begin(), fixedCards.end(), [&](const CardDetail& card) {
                     return card.characterId == j;
                 }) != fixedCards.end()) continue;
-                // 不能是固定角色
-                if (std::find(cfg.fixedCharacters.begin(), cfg.fixedCharacters.end(), j) != cfg.fixedCharacters.end()) continue;
+                // 不能是还需要额外选择的固定角色
+                if (remainingFixedCharacterSet.count(j)) continue;
                 valid_charas.push_back(j);
             }
             // 不足member个角色直接不能组
-            if ((int)valid_charas.size() < member - fixedSize - (int)cfg.fixedCharacters.size())
+            if ((int)valid_charas.size() < member - fixedSize - (int)remainingFixedCharacters.size())
                 return;
             std::shuffle(valid_charas.begin(), valid_charas.end(), rng);
-            valid_charas.resize(member - fixedSize - cfg.fixedCharacters.size());
+            valid_charas.resize(member - fixedSize - remainingFixedCharacters.size());
             // 在开头添加固定角色
-            valid_charas.insert(valid_charas.begin(), cfg.fixedCharacters.begin(), cfg.fixedCharacters.end());
+            valid_charas.insert(valid_charas.begin(), remainingFixedCharacters.begin(), remainingFixedCharacters.end());
             // 每个角色随机1张
             for (const auto& chara : valid_charas) {
                 auto idx = randomSelectIndexByWeight(rng, charaCardWeights[chara]);
@@ -315,7 +342,7 @@ void BaseDeckRecommend::findBestCardsGA(
         pos.reserve(a.cardNum - fixedSize);
         for (int i = 0; i < a.cardNum - fixedSize; ++i) {
             // 如果是固定角色则一定保留
-            if (std::find(cfg.fixedCharacters.begin(), cfg.fixedCharacters.end(), a.deck[i]->characterId) != cfg.fixedCharacters.end()) {
+            if (remainingFixedCharacterSet.count(a.deck[i]->characterId)) {
                 pos.push_back(i);
                 continue;
             }
@@ -379,7 +406,7 @@ void BaseDeckRecommend::findBestCardsGA(
                 continue;
             // 随机选择一张卡进行替换，需要检查新卡是否重复，最多10次避免死循环
             for (int _ = 0; _ < 10; ++_) {
-                bool isFixedChara = std::find(cfg.fixedCharacters.begin(), cfg.fixedCharacters.end(), a.deck[pos]->characterId) != cfg.fixedCharacters.end();
+                bool isFixedChara = remainingFixedCharacterSet.count(a.deck[pos]->characterId);
                 int index = 0;
                 const CardDetail* newCard = nullptr;
                 if (isFixedChara) {

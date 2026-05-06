@@ -34,19 +34,52 @@ BestPermutationResult BaseDeckRecommend::getBestPermutation(
     int liveType,
     const DeckRecommendConfig& config
 ) const {
+    auto orderedDeckCards = deckCards;
     {
         std::unordered_set<int> cardIds{};
         std::unordered_set<int> characterIds{};
-        for (const auto* card : deckCards) {
+        for (const auto* card : orderedDeckCards) {
             if (!card) {
                 return {};
             }
             if (!cardIds.insert(card->cardId).second) {
                 return {};
             }
-            if (!Enums::LiveType::isChallenge(liveType) && !characterIds.insert(card->characterId).second) {
+            if (!Enums::LiveType::isChallenge(liveType)) {
+                if (!characterIds.insert(card->characterId).second) {
+                    return {};
+                }
+            } else {
+                characterIds.insert(card->characterId);
+            }
+        }
+
+        for (const auto& fixedCardId : config.fixedCards) {
+            if (!cardIds.count(fixedCardId)) {
                 return {};
             }
+        }
+
+        for (const auto& characterId : resolveRequiredCharacters(config, eventId)) {
+            if (!characterIds.count(characterId)) {
+                return {};
+            }
+        }
+    }
+
+    if (auto leaderCharacterId = resolveLeaderCharacterId(config, eventId)) {
+        auto leaderIt = std::find_if(
+            orderedDeckCards.begin(),
+            orderedDeckCards.end(),
+            [&](const CardDetail* card) {
+                return card->characterId == leaderCharacterId.value();
+            }
+        );
+        if (leaderIt == orderedDeckCards.end()) {
+            return {};
+        }
+        if (leaderIt != orderedDeckCards.begin()) {
+            std::rotate(orderedDeckCards.begin(), leaderIt, leaderIt + 1);
         }
     }
 
@@ -57,7 +90,7 @@ BestPermutationResult BaseDeckRecommend::getBestPermutation(
     if (eventId.has_value() && eventId.value() == finalChapterEventId) bestSkillAsLeader = false;
     // 获取当前卡组的详情
     auto deckDetails = deckCalculator.getDeckDetailByCards(
-        deckCards, supportCards, honorBonus, eventType, eventId, 
+        orderedDeckCards, supportCards, honorBonus, eventType, eventId,
         config.skillReferenceChooseStrategy, config.keepAfterTrainingState, bestSkillAsLeader
     );
     // 获取目标值最高的卡组
@@ -93,11 +126,25 @@ std::vector<RecommendDeck> BaseDeckRecommend::recommendHighScoreDeck(
 {
     this->dataProvider.init();
 
-    // 暂不支持同时指定固定卡牌和固定角色
-    if (config.fixedCards.size() && config.fixedCharacters.size())
-        throw std::runtime_error("Cannot set both fixed cards and fixed characters");
+    std::set<int> configuredFixedCharacterSet{};
+    for (const auto& characterId : config.fixedCharacters) {
+        if (characterId < 1 || characterId > 26)
+            throw std::runtime_error("Invalid fixed character ID: " + std::to_string(characterId));
+        configuredFixedCharacterSet.insert(characterId);
+    }
+    if (configuredFixedCharacterSet.size() != config.fixedCharacters.size())
+        throw std::runtime_error("Fixed characters have duplicate characters");
+    if (config.forcedLeaderCharacterId.has_value()
+        && (config.forcedLeaderCharacterId.value() < 1 || config.forcedLeaderCharacterId.value() > 26))
+        throw std::runtime_error("Invalid forced leader character ID: " + std::to_string(config.forcedLeaderCharacterId.value()));
+
+    auto requiredCharacters = resolveRequiredCharacters(config, eventConfig.eventId);
+    std::set<int> requiredCharacterSet{};
+    for (const auto& characterId : requiredCharacters) {
+        requiredCharacterSet.insert(characterId);
+    }
     // 挑战live不允许指定固定角色
-    if (Enums::LiveType::isChallenge(liveType) && config.fixedCharacters.size())
+    if (Enums::LiveType::isChallenge(liveType) && requiredCharacters.size())
         throw std::runtime_error("Cannot set fixed characters in challenge live");
 
     auto musicMeta = this->liveCalculator.getMusicMeta(config.musicId, config.musicDiff);
@@ -206,9 +253,9 @@ std::vector<RecommendDeck> BaseDeckRecommend::recommendHighScoreDeck(
         }
     }
     // 检查固定卡牌是否有效
+    std::set<int> fixedCardIds{};
+    std::set<int> fixedCardCharacterIds{};
     if (fixedCards.size()) {
-        std::set<int> fixedCardIds{};
-        std::set<int> fixedCardCharacterIds{};
         for (const auto& card : fixedCards) {
             fixedCardIds.insert(card.cardId);
             fixedCardCharacterIds.insert(card.characterId);
@@ -228,6 +275,11 @@ std::vector<RecommendDeck> BaseDeckRecommend::recommendHighScoreDeck(
                 throw std::runtime_error("Fixed cards have duplicate characters");
             }
         }
+    }
+    auto occupiedCharacterIds = fixedCardCharacterIds;
+    occupiedCharacterIds.insert(requiredCharacterSet.begin(), requiredCharacterSet.end());
+    if (int(occupiedCharacterIds.size()) > config.member) {
+        throw std::runtime_error("Fixed cards and fixed characters exceed member count");
     }
 
     auto honorBonus = deckCalculator.getHonorBonusPower();
@@ -255,15 +307,23 @@ std::vector<RecommendDeck> BaseDeckRecommend::recommendHighScoreDeck(
         auto scaled = int(double(timeoutMs) * ratio);
         return std::max(1, std::min(maxMs, std::max(minMs, scaled)));
     };
-    auto scoreHeuristic = [](const CardDetail& card) {
-        double powerNorm = std::max(0.0, double(card.power.max) / POWER_MAX);
-        double skillNorm = std::max(0.0, double(card.skill.max) / SKILL_MAX);
-        double eventBonus = std::max(
+    auto cardEventBonus = [](const CardDetail& card) {
+        return std::max(
             card.maxEventBonus.value_or(0.0),
             card.limitedEventBonus.value_or(0.0)
         );
+    };
+    auto scoreHeuristic = [&](const CardDetail& card) {
+        double powerNorm = std::max(0.0, double(card.power.max) / POWER_MAX);
+        double skillNorm = std::max(0.0, double(card.skill.max) / SKILL_MAX);
+        double eventBonus = cardEventBonus(card);
         double eventNorm = std::max(0.0, eventBonus / 70.0);
         double supportNorm = std::max(0.0, card.supportDeckBonus.value_or(0.0) / 50.0);
+        if (config.target == RecommendTarget::Mysekai) {
+            return 0.90 * powerNorm
+                + 1.35 * eventNorm
+                + 0.25 * supportNorm;
+        }
         return 0.55 * powerNorm
             + 0.75 * skillNorm
             + 0.30 * eventNorm
@@ -274,6 +334,11 @@ std::vector<RecommendDeck> BaseDeckRecommend::recommendHighScoreDeck(
             std::sort(input.begin(), input.end(), [](const CardDetail& a, const CardDetail& b) {
                 return std::make_tuple(a.skill.max, a.skill.min, a.cardId)
                     > std::make_tuple(b.skill.max, b.skill.min, b.cardId);
+            });
+        } else if (config.target == RecommendTarget::Score || config.target == RecommendTarget::Mysekai) {
+            std::sort(input.begin(), input.end(), [&](const CardDetail& a, const CardDetail& b) {
+                return std::make_tuple(scoreHeuristic(a), a.skill.max, cardEventBonus(a), a.power.max, a.cardId)
+                    > std::make_tuple(scoreHeuristic(b), b.skill.max, cardEventBonus(b), b.power.max, b.cardId);
             });
         } else {
             std::sort(input.begin(), input.end(), [](const CardDetail& a, const CardDetail& b) {
@@ -406,6 +471,11 @@ std::vector<RecommendDeck> BaseDeckRecommend::recommendHighScoreDeck(
         for (const auto& card : fixedCards) {
             tryAdd(card);
         }
+        for (const auto& card : sortedCards) {
+            if (requiredCharacterSet.count(card.characterId)) {
+                tryAdd(card);
+            }
+        }
 
         auto gaDecks = collectResults(gaInfo);
         int deckLimit = std::max(config.limit * 4, 8);
@@ -435,6 +505,28 @@ std::vector<RecommendDeck> BaseDeckRecommend::recommendHighScoreDeck(
         int globalKeep = std::min(int(sortedCards.size()), std::max(config.member * 12, 60));
         for (int i = 0; i < globalKeep; ++i) {
             tryAdd(sortedCards[i]);
+        }
+
+        if (config.target == RecommendTarget::Mysekai) {
+            auto eventSorted = sortedCards;
+            std::sort(eventSorted.begin(), eventSorted.end(), [&](const CardDetail& a, const CardDetail& b) {
+                return std::make_tuple(cardEventBonus(a), a.power.max, a.cardId)
+                    > std::make_tuple(cardEventBonus(b), b.power.max, b.cardId);
+            });
+            int eventKeep = std::min(int(eventSorted.size()), std::max(config.member * 18, 90));
+            for (int i = 0; i < eventKeep; ++i) {
+                tryAdd(eventSorted[i]);
+            }
+
+            std::array<int, 32> perCharacterEventCount{};
+            int perCharacterEventKeep = Enums::LiveType::isChallenge(liveType) ? std::max(config.member, 3) : 4;
+            for (const auto& card : eventSorted) {
+                auto& count = perCharacterEventCount[card.characterId];
+                if (count < perCharacterEventKeep) {
+                    tryAdd(card);
+                    count++;
+                }
+            }
         }
 
         auto candidate = pruned;
@@ -554,6 +646,44 @@ std::vector<RecommendDeck> BaseDeckRecommend::recommendHighScoreDeck(
             }
 
             auto minKeep = std::min(sortedCards.size(), std::size_t(std::max(config.member * 18, 80)));
+            for (const auto& card : sortedCards) {
+                if (pruned.size() >= minKeep) {
+                    break;
+                }
+                tryAdd(card);
+            }
+        } else if (config.target == RecommendTarget::Mysekai) {
+            auto eventSorted = sortedCards;
+            std::sort(eventSorted.begin(), eventSorted.end(), [&](const CardDetail& a, const CardDetail& b) {
+                return std::make_tuple(cardEventBonus(a), a.power.max, a.cardId)
+                    > std::make_tuple(cardEventBonus(b), b.power.max, b.cardId);
+            });
+            int eventKeep = std::min(int(eventSorted.size()), std::max(config.member * 24, 120));
+            for (int i = 0; i < eventKeep; ++i) {
+                tryAdd(eventSorted[i]);
+            }
+
+            std::array<int, 32> perCharacterEventCount{};
+            int perCharacterEventKeep = Enums::LiveType::isChallenge(liveType) ? std::max(config.member, 3) : 5;
+            for (const auto& card : eventSorted) {
+                auto& count = perCharacterEventCount[card.characterId];
+                if (count < perCharacterEventKeep) {
+                    tryAdd(card);
+                    count++;
+                }
+            }
+
+            auto heuristicSorted = sortedCards;
+            std::sort(heuristicSorted.begin(), heuristicSorted.end(), [&](const CardDetail& a, const CardDetail& b) {
+                return std::make_tuple(scoreHeuristic(a), cardEventBonus(a), a.power.max, a.cardId)
+                    > std::make_tuple(scoreHeuristic(b), cardEventBonus(b), b.power.max, b.cardId);
+            });
+            int heuristicKeep = std::min(int(heuristicSorted.size()), std::max(config.member * 28, 140));
+            for (int i = 0; i < heuristicKeep; ++i) {
+                tryAdd(heuristicSorted[i]);
+            }
+
+            auto minKeep = std::min(sortedCards.size(), std::size_t(std::max(config.member * 24, 120)));
             for (const auto& card : sortedCards) {
                 if (pruned.size() >= minKeep) {
                     break;
@@ -694,6 +824,8 @@ std::vector<RecommendDeck> BaseDeckRecommend::recommendHighScoreDeck(
         static std::unordered_map<std::string, RlSeedBucket> rlSeedBuckets{};
 
         auto fullSorted = sortCardsByStrength(cards);
+        auto remainingRequiredCharacters = resolveRemainingFixedCharacters(config, fixedCards, eventConfig.eventId);
+        auto leaderCharacterId = resolveLeaderCharacterId(config, eventConfig.eventId);
         auto appendConstraintKey = [](std::string& key, const char* name, const std::vector<int>& values, bool sortValues) {
             key += ":";
             key += name;
@@ -738,17 +870,32 @@ std::vector<RecommendDeck> BaseDeckRecommend::recommendHighScoreDeck(
                 }
             }
 
-            if (!config.fixedCharacters.empty()) {
-                if (deck.empty() || deck.front()->characterId != config.fixedCharacters.front()) {
+            if (leaderCharacterId.has_value()) {
+                if (!characterIds.count(leaderCharacterId.value())) {
                     return false;
                 }
-                for (const auto characterId : config.fixedCharacters) {
-                    if (!characterIds.count(characterId)) {
-                        return false;
-                    }
+            }
+            for (const auto characterId : requiredCharacters) {
+                if (!characterIds.count(characterId)) {
+                    return false;
                 }
             }
             return true;
+        };
+        auto normalizeDeckForLeader = [&](std::vector<const CardDetail*> deck) {
+            if (leaderCharacterId.has_value()) {
+                auto leaderIt = std::find_if(
+                    deck.begin(),
+                    deck.end(),
+                    [&](const CardDetail* card) {
+                        return card && card->characterId == leaderCharacterId.value();
+                    }
+                );
+                if (leaderIt != deck.end() && leaderIt != deck.begin()) {
+                    std::rotate(deck.begin(), leaderIt, leaderIt + 1);
+                }
+            }
+            return deck;
         };
         auto buildRlCandidateCards = [&](const std::vector<CardDetail>& sortedCards) {
             std::vector<CardDetail> pruned{};
@@ -761,6 +908,11 @@ std::vector<RecommendDeck> BaseDeckRecommend::recommendHighScoreDeck(
 
             for (const auto& card : fixedCards) {
                 tryAdd(card);
+            }
+            for (const auto& card : sortedCards) {
+                if (requiredCharacterSet.count(card.characterId)) {
+                    tryAdd(card);
+                }
             }
 
             std::array<int, 32> perCharacterCount{};
@@ -783,7 +935,39 @@ std::vector<RecommendDeck> BaseDeckRecommend::recommendHighScoreDeck(
                 tryAdd(sortedCards[i]);
             }
 
-            if (config.target != RecommendTarget::Skill) {
+            if (config.target == RecommendTarget::Mysekai) {
+                auto eventSorted = sortedCards;
+                std::sort(eventSorted.begin(), eventSorted.end(), [&](const CardDetail& a, const CardDetail& b) {
+                    return std::make_tuple(cardEventBonus(a), a.power.max, a.cardId)
+                        > std::make_tuple(cardEventBonus(b), b.power.max, b.cardId);
+                });
+                int eventKeep = std::min(int(eventSorted.size()), std::max(config.member * 26, 130));
+                for (int i = 0; i < eventKeep; ++i) {
+                    tryAdd(eventSorted[i]);
+                }
+
+                std::array<int, 32> perCharacterEventCount{};
+                int perCharacterEventKeep = Enums::LiveType::isChallenge(liveType) ? std::max(config.member + 1, 4) : 6;
+                for (const auto& card : eventSorted) {
+                    auto& count = perCharacterEventCount[card.characterId];
+                    if (count < perCharacterEventKeep) {
+                        tryAdd(card);
+                        count++;
+                    }
+                }
+
+                auto heuristicSorted = sortedCards;
+                std::sort(heuristicSorted.begin(), heuristicSorted.end(), [&](const CardDetail& a, const CardDetail& b) {
+                    return std::make_tuple(scoreHeuristic(a), cardEventBonus(a), a.power.max, a.cardId)
+                        > std::make_tuple(scoreHeuristic(b), cardEventBonus(b), b.power.max, b.cardId);
+                });
+                int heuristicKeep = std::min(int(heuristicSorted.size()), std::max(config.member * 30, 150));
+                for (int i = 0; i < heuristicKeep; ++i) {
+                    tryAdd(heuristicSorted[i]);
+                }
+            }
+
+            if (config.target != RecommendTarget::Skill && config.target != RecommendTarget::Mysekai) {
                 auto skillSorted = sortedCards;
                 std::sort(skillSorted.begin(), skillSorted.end(), [](const CardDetail& a, const CardDetail& b) {
                     return std::make_tuple(a.skill.max, a.skill.min, a.cardId)
@@ -855,12 +1039,16 @@ std::vector<RecommendDeck> BaseDeckRecommend::recommendHighScoreDeck(
             return pruned;
         };
         auto evaluateDeckByCards = [&](const DeckRecommendConfig& runConfig, const std::vector<const CardDetail*>& deck, RecommendCalcInfo& info) {
-            auto deckHash = this->calcDeckHash(deck);
+            auto normalizedDeck = normalizeDeckForLeader(deck);
+            if (!deckMatchesFixedConstraints(normalizedDeck)) {
+                return -1e18;
+            }
+            auto deckHash = this->calcDeckHash(normalizedDeck);
             if (info.deckTargetValueMap.count(deckHash)) {
                 return info.deckTargetValueMap[deckHash];
             }
             auto ret = getBestPermutation(
-                this->deckCalculator, deck, supportCards, sf,
+                this->deckCalculator, normalizedDeck, supportCards, sf,
                 honorBonus, eventConfig.eventType, eventConfig.eventId, liveType, runConfig
             );
             double targetValue = -1e18;
@@ -894,8 +1082,18 @@ std::vector<RecommendDeck> BaseDeckRecommend::recommendHighScoreDeck(
             + ":" + sizeBucket;
         appendConstraintKey(policyKey, "fixed_cards", config.fixedCards, true);
         appendConstraintKey(policyKey, "fixed_characters", config.fixedCharacters, false);
+        if (leaderCharacterId.has_value()) {
+            policyKey += ":leader=" + std::to_string(leaderCharacterId.value());
+        }
         auto seedKey = policyKey + ":" + std::to_string(cardFingerprint);
         auto& bucket = rlPolicyBuckets[policyKey];
+        if (config.target == RecommendTarget::Mysekai && bucket.episodes == 0) {
+            bucket.weights = {
+                0.10, 1.20, 1.45, 0.15, 0.10,
+                0.90, 0.35, 0.20, -0.05, 1.10,
+                1.55, 0.25, 1.50
+            };
+        }
         auto& seedBucket = rlSeedBuckets[seedKey];
 
         auto rlCards = buildRlCandidateCards(fullSorted);
@@ -963,6 +1161,12 @@ std::vector<RecommendDeck> BaseDeckRecommend::recommendHighScoreDeck(
 
         long long rlSeedBase = config.gaSeed == -1 ? nowNs() : config.gaSeed;
         Rng rlRng(rlSeedBase);
+        double rlMaxPower = 1.0;
+        double rlMaxSkill = 1.0;
+        for (const auto& card : fullSorted) {
+            rlMaxPower = std::max(rlMaxPower, double(card.power.max));
+            rlMaxSkill = std::max(rlMaxSkill, double(card.skill.max));
+        }
 
         auto calcStoredSeedHash = [&](const std::array<int, 5>& cardIds, int size) {
             auto ids = cardIds;
@@ -1065,8 +1269,7 @@ std::vector<RecommendDeck> BaseDeckRecommend::recommendHighScoreDeck(
 
         auto calcActionFeatures = [&](const std::vector<const CardDetail*>& deck, const CardDetail& candidate) {
             std::array<double, RL_FEATURE_DIM> features{};
-            double maxPower = std::max(1, fullSorted.empty() ? 1 : fullSorted.front().power.max);
-            double maxSkill = std::max(1, fullSorted.empty() ? 1 : fullSorted.front().skill.max);
+            double eventNorm = cardEventBonus(candidate) / 70.0;
             int nextPos = int(deck.size());
             int sameAttrCount = 0;
             int sharedUnitCount = 0;
@@ -1075,22 +1278,37 @@ std::vector<RecommendDeck> BaseDeckRecommend::recommendHighScoreDeck(
                 sharedUnitCount += sharesAnyUnit(*existing, candidate) ? 1 : 0;
             }
             const CardDetail* leader = deck.empty() ? nullptr : deck.front();
-            bool requiredCharacter = config.fixedCharacters.size() > std::size_t(nextPos);
+            if (leaderCharacterId.has_value()) {
+                auto leaderIt = std::find_if(
+                    deck.begin(),
+                    deck.end(),
+                    [&](const CardDetail* card) {
+                        return card && card->characterId == leaderCharacterId.value();
+                    }
+                );
+                if (leaderIt != deck.end()) {
+                    leader = *leaderIt;
+                }
+            }
+            auto fixedCharacterIndex = nextPos - int(fixedCards.size());
+            bool requiredCharacter = fixedCharacterIndex >= 0
+                && remainingRequiredCharacters.size() > std::size_t(fixedCharacterIndex);
 
             features[0] = 1.0;
-            features[1] = candidate.power.max / maxPower;
-            features[2] = candidate.skill.max / maxSkill;
+            features[1] = candidate.power.max / rlMaxPower;
+            features[2] = config.target == RecommendTarget::Mysekai ? eventNorm : candidate.skill.max / rlMaxSkill;
             features[3] = leader ? double(candidate.attr == leader->attr) : 0.0;
             features[4] = leader ? double(sharesAnyUnit(*leader, candidate)) : 0.0;
-            features[5] = requiredCharacter ? double(candidate.characterId == config.fixedCharacters[nextPos]) : 0.0;
+            features[5] = requiredCharacter
+                ? double(candidate.characterId == remainingRequiredCharacters[fixedCharacterIndex])
+                : 0.0;
             features[6] = double(sameAttrCount + 1) / double(std::max(1, config.member));
             features[7] = double(sharedUnitCount + 1) / double(std::max(1, config.member));
             features[8] = double(nextPos) / double(std::max(1, config.member));
-            features[9] = nextPos == int(fixedCards.size()) ? candidate.skill.max / maxSkill : 0.0;
-            features[10] = std::max(
-                candidate.maxEventBonus.value_or(0.0),
-                candidate.limitedEventBonus.value_or(0.0)
-            ) / 70.0;
+            features[9] = nextPos == int(fixedCards.size())
+                ? (config.target == RecommendTarget::Mysekai ? scoreHeuristic(candidate) : candidate.skill.max / rlMaxSkill)
+                : 0.0;
+            features[10] = eventNorm;
             features[11] = candidate.supportDeckBonus.value_or(0.0) / 50.0;
             features[12] = scoreHeuristic(candidate);
             return features;
@@ -1126,7 +1344,10 @@ std::vector<RecommendDeck> BaseDeckRecommend::recommendHighScoreDeck(
                     if (!Enums::LiveType::isChallenge(liveType) && usedCharacterIds.count(card.characterId)) {
                         continue;
                     }
-                    if (config.fixedCharacters.size() > std::size_t(nextPos) && config.fixedCharacters[nextPos] != card.characterId) {
+                    auto fixedCharacterIndex = nextPos - int(fixedCards.size());
+                    if (fixedCharacterIndex >= 0
+                        && remainingRequiredCharacters.size() > std::size_t(fixedCharacterIndex)
+                        && remainingRequiredCharacters[fixedCharacterIndex] != card.characterId) {
                         continue;
                     }
                     options.push_back(&card);
@@ -1287,9 +1508,10 @@ std::vector<RecommendDeck> BaseDeckRecommend::recommendHighScoreDeck(
             if (!deckMatchesFixedConstraints(seedDeck)) {
                 return;
             }
-            auto hash = this->calcDeckHash(seedDeck);
+            auto normalizedSeedDeck = normalizeDeckForLeader(seedDeck);
+            auto hash = this->calcDeckHash(normalizedSeedDeck);
             if (seedHashes.insert(hash).second) {
-                mergedSeedDecks.push_back(seedDeck);
+                mergedSeedDecks.push_back(std::move(normalizedSeedDeck));
             }
         };
         for (const auto& seedDeck : seedDecks) {
