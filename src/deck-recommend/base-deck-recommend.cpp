@@ -387,7 +387,7 @@ std::vector<RecommendDeck> BaseDeckRecommend::recommendHighScoreDeck(
         auto sortedCards = sortCardsByStrength(sourceCards);
         initDfsState(info);
         std::optional<DfsScoreUpperBoundContext> scoreUpperBoundContext = std::nullopt;
-        if (runConfig.target == RecommendTarget::Score) {
+        if (runConfig.target == RecommendTarget::Score || runConfig.target == RecommendTarget::Skill) {
             scoreUpperBoundContext = DfsScoreUpperBoundContext{ .musicMeta = musicMeta };
         }
         findBestCardsDFS(

@@ -237,7 +237,7 @@ std::vector<DeckDetail> DeckCalculator::getDeckDetailByCards(
     std::array<DeckCardSkillDetail, 5> skills{};
     std::array<int, 5> order{};
     std::vector<double> memberSkillMaxs{};
-    std::vector<std::pair<int, int>> scoreUps{};
+    std::vector<std::pair<double, double>> scoreUps{};
     scoreUps.reserve(1 << needEnumerateCount);
     std::vector<DeckDetail> ret{};
     for (int mask = needEnumerateStatusMask; mask >= 0; mask = mask ? (mask - 1) & needEnumerateStatusMask : -1) {
@@ -293,8 +293,9 @@ std::vector<DeckDetail> DeckCalculator::getDeckDetailByCards(
         // 检查当前队长技能/其他成员技能的总和，如果都劣于或等于之前某组，则不用考虑该组
         // 分开考虑队长和其他成员，是考虑到协力和单人live技能机制不同
         double leaderScoreUp = 0, otherScoreUpSum = 0;
-        for (auto i : order) {
-            if (i == 0) leaderScoreUp = skills[i].scoreUp;
+        for (int pos = 0; pos < card_num; ++pos) {
+            int i = order[pos];
+            if (pos == 0) leaderScoreUp = skills[i].scoreUp;
             else otherScoreUpSum += skills[i].scoreUp;
         }
         bool skip = false;

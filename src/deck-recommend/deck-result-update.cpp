@@ -1,5 +1,8 @@
 #include "deck-recommend/deck-result-update.h"
 
+#include <algorithm>
+#include <array>
+
 bool RecommendDeck::operator>(const RecommendDeck &other) const
 {
     // 先按目标值
@@ -10,14 +13,24 @@ bool RecommendDeck::operator>(const RecommendDeck &other) const
 
 uint64_t getRecommendDeckHash(const RecommendDeck &deck)
 {
-    // 计算卡组的哈希值
-    // 如果分数或者综合不一样，说明肯定不是同一队
-    // 如果C位不一样，也不认为是同一队
-    uint64_t hash = 0;
-    constexpr uint64_t base = 10007;
-    hash = hash * base + deck.score;
-    hash = hash * base + deck.power.total;
-    hash = hash * base + deck.cards[0].cardId;
+    // 结果去重必须按队长和完整卡组集合判断；只看分数/综合/队长会把实效不同的近似同分卡组吞掉。
+    std::array<int, 5> cardIds{};
+    int cardCount = std::min<int>(deck.cards.size(), cardIds.size());
+    for (int i = 0; i < cardCount; ++i) {
+        cardIds[i] = deck.cards[i].cardId;
+    }
+    std::sort(cardIds.begin(), cardIds.begin() + cardCount);
+
+    uint64_t hash = 1469598103934665603ULL;
+    constexpr uint64_t prime = 1099511628211ULL;
+    hash ^= static_cast<uint64_t>(deck.cards.empty() ? 0 : deck.cards[0].cardId);
+    hash *= prime;
+    hash ^= static_cast<uint64_t>(cardCount);
+    hash *= prime;
+    for (int i = 0; i < cardCount; ++i) {
+        hash ^= static_cast<uint64_t>(cardIds[i]);
+        hash *= prime;
+    }
     return hash;
 }
 
