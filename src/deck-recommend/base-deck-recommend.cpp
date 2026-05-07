@@ -470,7 +470,9 @@ std::vector<RecommendDeck> BaseDeckRecommend::recommendHighScoreDeck(
         }
 
         std::unordered_map<int, std::vector<CardDetail>> attrBuckets{};
+        std::unordered_map<int, const CardDetail*> stableCardById{};
         for (const auto& card : cards) {
+            stableCardById.emplace(card.cardId, &card);
             if (fixedAttr.has_value() && card.attr != fixedAttr.value()) {
                 continue;
             }
@@ -496,9 +498,27 @@ std::vector<RecommendDeck> BaseDeckRecommend::recommendHighScoreDeck(
                 if (int(seedDeck.size()) != runConfig.member) {
                     continue;
                 }
-                auto hash = this->calcDeckHash(seedDeck);
+                std::vector<const CardDetail*> stableSeedDeck{};
+                stableSeedDeck.reserve(seedDeck.size());
+                bool valid = true;
+                for (const auto* card : seedDeck) {
+                    if (card == nullptr) {
+                        valid = false;
+                        break;
+                    }
+                    auto it = stableCardById.find(card->cardId);
+                    if (it == stableCardById.end()) {
+                        valid = false;
+                        break;
+                    }
+                    stableSeedDeck.push_back(it->second);
+                }
+                if (!valid) {
+                    continue;
+                }
+                auto hash = this->calcDeckHash(stableSeedDeck);
                 if (seedHashes.insert(hash).second) {
-                    seeds.push_back(std::move(seedDeck));
+                    seeds.push_back(std::move(stableSeedDeck));
                 }
             }
         }
