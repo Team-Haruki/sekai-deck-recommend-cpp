@@ -28,14 +28,22 @@ std::vector<T> loadUserDataJsonList(const json& j, const std::string& key, bool 
     return {};
 }
 
+template<typename T>
+std::vector<T> loadOptionalUserDataJsonList(const json& j, const std::string& key) {
+    if (j.contains(key)) {
+        return T::fromJsonList(j[key]);
+    }
+    return {};
+}
+
 
 void UserData::loadFromJson(const json& j) {
     this->userGamedata = loadUserDataJson<UserGameData>(j, "userGamedata");
     this->userAreas = loadUserDataJsonList<UserArea>(j, "userAreas");
     this->userCards = loadUserDataJsonList<UserCard>(j, "userCards");
-    this->userChallengeLiveSoloDecks = loadUserDataJsonList<UserChallengeLiveSoloDeck>(j, "userChallengeLiveSoloDecks", false);
+    this->userChallengeLiveSoloDecks = loadOptionalUserDataJsonList<UserChallengeLiveSoloDeck>(j, "userChallengeLiveSoloDecks");
     this->userCharacters = loadUserDataJsonList<UserCharacter>(j, "userCharacters");
-    this->userDecks = loadUserDataJsonList<UserDeck>(j, "userDecks", false);
+    this->userDecks = loadOptionalUserDataJsonList<UserDeck>(j, "userDecks");
     this->userHonors = loadUserDataJsonList<UserHonor>(j, "userHonors");
 
     this->userMysekaiCanvases = loadUserDataJsonList<UserMysekaiCanvas>(j, "userMysekaiCanvases", false);
