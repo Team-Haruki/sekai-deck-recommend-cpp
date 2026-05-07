@@ -20,7 +20,7 @@ pip install sekai-deck-recommend-cpp
 
 ```bash
 # Clone with submodules
-git clone --recursive https://github.com/NeuraXmy/sekai-deck-recommend-cpp.git
+git clone --recursive https://github.com/Team-Haruki/sekai-deck-recommend-cpp.git
 cd sekai-deck-recommend-cpp
 
 # Install via pip
