@@ -454,6 +454,56 @@ std::vector<RecommendDeck> BaseDeckRecommend::recommendHighScoreDeck(
         }
         return seeds;
     };
+    auto collectChallengeMonoAttrSeedDecks = [&](const DeckRecommendConfig& runConfig, RecommendCalcInfo* warmupInfo, int maxSeedCount) {
+        std::vector<std::vector<const CardDetail*>> seeds{};
+        if (!Enums::LiveType::isChallenge(liveType) || runConfig.member < 5) {
+            return seeds;
+        }
+
+        std::optional<int> fixedAttr = std::nullopt;
+        for (const auto& fixedCard : fixedCards) {
+            if (!fixedAttr.has_value()) {
+                fixedAttr = fixedCard.attr;
+            } else if (fixedAttr.value() != fixedCard.attr) {
+                return seeds;
+            }
+        }
+
+        std::unordered_map<int, std::vector<CardDetail>> attrBuckets{};
+        for (const auto& card : cards) {
+            if (fixedAttr.has_value() && card.attr != fixedAttr.value()) {
+                continue;
+            }
+            attrBuckets[card.attr].push_back(card);
+        }
+
+        int perAttrBudgetMs = std::min(runConfig.timeout_ms, resolveBudgetMs(runConfig.timeout_ms, 0.05, 12, 60));
+        std::unordered_set<uint64_t> seedHashes{};
+        for (auto& [attr, bucket] : attrBuckets) {
+            if (fixedAttr.has_value() && attr != fixedAttr.value()) {
+                continue;
+            }
+            if (int(bucket.size()) < runConfig.member || !canMakeDeck(liveType, eventConfig.eventType, bucket, runConfig.member)) {
+                continue;
+            }
+
+            auto attrInfo = makeCalcInfo(perAttrBudgetMs);
+            runDfsExact(runConfig, bucket, attrInfo);
+            if (warmupInfo != nullptr) {
+                mergeCalcInfo(*warmupInfo, attrInfo);
+            }
+            for (auto& seedDeck : collectSeedDecks(attrInfo, bucket, maxSeedCount)) {
+                if (int(seedDeck.size()) != runConfig.member) {
+                    continue;
+                }
+                auto hash = this->calcDeckHash(seedDeck);
+                if (seedHashes.insert(hash).second) {
+                    seeds.push_back(std::move(seedDeck));
+                }
+            }
+        }
+        return seeds;
+    };
     auto buildGaPrunedCards = [&](const std::vector<CardDetail>& sortedCards, const RecommendCalcInfo& gaInfo) {
         std::unordered_map<int, const CardDetail*> cardById{};
         for (const auto& card : sortedCards) {
@@ -787,7 +837,8 @@ std::vector<RecommendDeck> BaseDeckRecommend::recommendHighScoreDeck(
 
     if (config.algorithm == RecommendAlgorithm::GA) {
         auto calcInfo = makeCalcInfo(config.timeout_ms);
-        runGaSearch(config, cards, calcInfo);
+        auto monoAttrSeedDecks = collectChallengeMonoAttrSeedDecks(config, &calcInfo, std::max(config.limit, 2));
+        runGaSearch(config, cards, calcInfo, monoAttrSeedDecks.empty() ? nullptr : &monoAttrSeedDecks);
         return ensureResults(collectResults(calcInfo));
     }
 
@@ -1255,6 +1306,7 @@ std::vector<RecommendDeck> BaseDeckRecommend::recommendHighScoreDeck(
             }
         };
         auto rememberedSeedDecks = loadStoredSeedDecks(fullSorted);
+        auto monoAttrSeedDecks = collectChallengeMonoAttrSeedDecks(config, &totalInfo, std::max(config.limit, 2));
         if (!rememberedSeedDecks.empty()) {
             int replayLimit = std::min(
                 int(rememberedSeedDecks.size()),
@@ -1515,6 +1567,9 @@ std::vector<RecommendDeck> BaseDeckRecommend::recommendHighScoreDeck(
             }
         };
         for (const auto& seedDeck : seedDecks) {
+            tryAddSeedDeck(seedDeck);
+        }
+        for (const auto& seedDeck : monoAttrSeedDecks) {
             tryAddSeedDeck(seedDeck);
         }
         for (const auto& seedDeck : rememberedSeedDecks) {
