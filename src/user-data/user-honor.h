@@ -11,8 +11,13 @@ struct UserHonor {
         std::vector<UserHonor> userHonors;
         for (const auto& item : jsonData) {
             UserHonor userHonor;
-            userHonor.honorId = item.value("honorId", 0);
-            userHonor.level = item.value("level", 0);
+            if (item.is_array()) {
+                userHonor.honorId = item.size() > 0 && item[0].is_number_integer() ? item[0].get<int>() : 0;
+                userHonor.level = item.size() > 1 && item[1].is_number_integer() ? item[1].get<int>() : 0;
+            } else {
+                userHonor.honorId = item.value("honorId", 0);
+                userHonor.level = item.value("level", 0);
+            }
             userHonors.push_back(userHonor);
         }
         return userHonors;

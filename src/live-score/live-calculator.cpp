@@ -168,7 +168,7 @@ LiveDetail LiveCalculator::getLiveDetailByDeck(
         powerSum = multiPowerSum;   // 指定总和
     if (multiTeammatePower.has_value())
         powerSum = deckDetail.power.total + multiTeammatePower.value() * 4; // 指定队友综合力 自己+4*队友
-    double activeBonus = liveType == Enums::LiveType::isMulti(liveType) ? 5 * 0.015 * powerSum : 0;
+    double activeBonus = Enums::LiveType::isMulti(liveType) ? 5 * 0.015 * powerSum : 0;
     return LiveDetail{
         int(rate * deckDetail.power.total * 4 + activeBonus),
         musicMeta.music_time,

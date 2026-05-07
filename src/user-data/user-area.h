@@ -11,8 +11,13 @@ struct UserAreaActionSets {
         std::vector<UserAreaActionSets> actionSets;
         for (const auto& item : jsonData) {
             UserAreaActionSets actionSet;
-            actionSet.id = item.value("id", 0);
-            actionSet.status = mapEnum(EnumMap::actionSetStatus, item.value("status", ""));
+            if (item.is_array()) {
+                actionSet.id = item.size() > 0 && item[0].is_number_integer() ? item[0].get<int>() : 0;
+                actionSet.status = mapEnum(EnumMap::actionSetStatus, item.size() > 1 && item[1].is_string() ? item[1].get<std::string>() : "");
+            } else {
+                actionSet.id = item.value("id", 0);
+                actionSet.status = mapEnum(EnumMap::actionSetStatus, item.value("status", ""));
+            }
             actionSets.push_back(actionSet);
         }
         return actionSets;
