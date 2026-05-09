@@ -57,6 +57,21 @@ If submodules are missing after cloning:
 git submodule update --init --recursive
 ```
 
+### WebAssembly build
+
+Browser/Worker target (Embind binding via `src/sekai_deck_recommend_wasm.cpp`).
+Requires `emsdk` activated in the shell:
+
+```bash
+mkdir build_wasm && cd build_wasm
+emcmake cmake .. -DCMAKE_BUILD_TYPE=Release
+cmake --build . -j
+```
+
+Outputs ES6 module glue (`sekai_deck_recommend.js`) + `sekai_deck_recommend.wasm`.
+Static files in `data/` are embedded into the wasm via `--embed-file`; runtime
+masterdata/music-metas are pushed in by the JS caller.
+
 ## Engineering Rules
 
 - Prefer small, behavior-focused changes over broad refactors.
@@ -71,6 +86,20 @@ git submodule update --init --recursive
 - For code used through deck-service, remember that C++ exceptions cross the
   boundary as error strings; write messages that help identify the bad input.
 - Use concise comments only when the calculation or data shape is not obvious.
+
+## Bindings
+
+Two parallel binding files live next to the engine:
+
+- `src/sekai_deck_recommend.cpp` — pybind11 binding for the Python wheel and
+  the `deck-service` FFI bridge.
+- `src/sekai_deck_recommend_wasm.cpp` — Embind binding for the WebAssembly
+  build. JSON-in / JSON-out surface (`recommend(optionsJson)` returns a JSON
+  string).
+
+Option validation logic is duplicated between the two until a shared core is
+extracted; when adding a field to `DeckRecommendOptions`, update both files
+and keep their schemas identical.
 
 ## High-Risk Areas
 

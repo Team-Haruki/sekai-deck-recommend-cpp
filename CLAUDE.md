@@ -61,6 +61,19 @@ cargo check
 cargo build
 ```
 
+For the browser/Worker WebAssembly target (Embind), with `emsdk` activated:
+
+```bash
+mkdir build_wasm && cd build_wasm
+emcmake cmake .. -DCMAKE_BUILD_TYPE=Release
+cmake --build . -j
+```
+
+Produces `sekai_deck_recommend.js` (ES6 module) + `sekai_deck_recommend.wasm`.
+The CMakeLists branches on `EMSCRIPTEN`: pybind11 binding is dropped, the
+Embind binding in `src/sekai_deck_recommend_wasm.cpp` is linked instead, and
+`data/` is embedded into the wasm with `--embed-file`.
+
 ## Code Conventions
 
 - C++20, headers and implementations live next to each other in `src/<area>/`.
@@ -75,6 +88,19 @@ cargo build
   data must not silently turn into a different calculation result.
 - Use concise comments only when the calculation or data shape is non-obvious.
   Don't restate what the code already says.
+
+## Bindings
+
+The engine has two parallel binding files. Pick the right one for the target
+and keep their option/result schemas in sync:
+
+- `src/sekai_deck_recommend.cpp` — pybind11 (Python wheel + deck-service FFI).
+- `src/sekai_deck_recommend_wasm.cpp` — Embind (browser/Worker WebAssembly),
+  JSON-in / JSON-out surface so the JS side never needs per-field glue.
+
+Option validation logic is currently duplicated between the two; when adding
+a `DeckRecommendOptions` field, update both. A shared core extraction is the
+intended follow-up.
 
 ## High-Risk Areas
 

@@ -46,6 +46,19 @@ cargo check
 cargo build
 ```
 
+For the WebAssembly target (Embind binding, browser/Worker), with `emsdk`
+activated:
+
+```bash
+mkdir build_wasm && cd build_wasm
+emcmake cmake .. -DCMAKE_BUILD_TYPE=Release
+cmake --build . -j
+```
+
+Two parallel binding files live in `src/`: `sekai_deck_recommend.cpp`
+(pybind11) and `sekai_deck_recommend_wasm.cpp` (Embind, JSON-in / JSON-out).
+Option validation is duplicated; keep both in sync when adding a field.
+
 ## Git Commits
 
 All commit subjects must follow:
