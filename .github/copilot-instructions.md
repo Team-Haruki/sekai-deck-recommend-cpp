@@ -1,7 +1,8 @@
 # Copilot Instructions
 
 Treat this repository as production C++ scoring code for Project Sekai deck
-recommendation and live calculation.
+recommendation and live calculation. The same engineering rules also live in
+`AGENTS.md` and `CLAUDE.md` — keep all three in sync when changing guidance.
 
 ## Project Context
 

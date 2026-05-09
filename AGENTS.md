@@ -1,6 +1,9 @@
 # AGENTS.md
 
-This file applies to the entire `sekai-deck-recommend-cpp` repository.
+This file applies to the entire `sekai-deck-recommend-cpp` repository. The
+same engineering rules also live in `CLAUDE.md` and
+`.github/copilot-instructions.md` — keep all three in sync when changing
+guidance.
 
 ## Project Overview
 
