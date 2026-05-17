@@ -80,6 +80,10 @@ SupportDeckBonus DeckCalculator::getSupportDeckBonus(
             return it->cardId == card.cardId;
         }) != deckCards.end()) 
             continue;
+        CardDetail supportCard{};
+        supportCard.cardId = card.cardId;
+        supportCard.supportDeckBonus = card.bonus;
+        cards.push_back(supportCard);
         bonus += card.bonus;
         count++;
         if (count >= supportDeckCount) return { bonus, cards };
@@ -346,7 +350,7 @@ std::vector<DeckDetail> DeckCalculator::getDeckDetailByCards(
             .power = power, 
             .eventBonus = eventBonusInfo.totalBonus,
             .supportDeckBonus = supportDeckBonus.bonus,
-            .supportDeckCards = std::nullopt, // supportDeckBonus.cards
+            .supportDeckCards = supportDeckBonus.cards,
             .cards = std::move(cards),
             .multiLiveScoreUp = multiLiveScoreUp
         });
