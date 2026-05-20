@@ -575,8 +575,8 @@ json deckToJson(const RecommendDeck& deck) {
         cj["master_rank"] = c.masterRank;
         cj["level"] = c.level;
         cj["skill_level"] = c.skillLevel;
-        cj["skill_score_up"] = static_cast<int>(c.skill.scoreUp);
-        cj["skill_life_recovery"] = static_cast<int>(c.skill.lifeRecovery);
+        cj["skill_score_up"] = c.skill.scoreUp;
+        cj["skill_life_recovery"] = c.skill.lifeRecovery;
         cj["episode1_read"] = c.episode1Read;
         cj["episode2_read"] = c.episode2Read;
         cj["after_training"] = c.afterTraining;
