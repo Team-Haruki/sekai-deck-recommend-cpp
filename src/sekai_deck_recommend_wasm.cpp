@@ -299,7 +299,19 @@ PreparedOptions buildOptions(
         std::unordered_map<int, int> supportUnits;
         for (auto it = opts["custom_bonus_character_support_units"].begin();
              it != opts["custom_bonus_character_support_units"].end(); ++it) {
-            int cid = std::stoi(it.key());
+            const std::string cidKey = it.key();
+            int cid = 0;
+            try {
+                size_t parsed = 0;
+                cid = std::stoi(cidKey, &parsed);
+                if (parsed != cidKey.size()) {
+                    throw std::invalid_argument("invalid key");
+                }
+            } catch (const std::exception &) {
+                throw std::invalid_argument(
+                    "Invalid custom bonus support unit character ID key: " + cidKey +
+                    " (value: " + it.value().dump() + ")");
+            }
             std::string unitName = it.value().get<std::string>();
             if (cid < 1 || cid > 26)
                 throw std::invalid_argument("Invalid custom bonus support unit character ID: " + std::to_string(cid));
