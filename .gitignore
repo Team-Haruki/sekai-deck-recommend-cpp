@@ -1,3 +1,6 @@
 build/
+build_wasm/
 sandbox/
 .vscode/
+npm/haruki-sekai-deck-recommend-cpp/sekai_deck_recommend.js
+npm/haruki-sekai-deck-recommend-cpp/sekai_deck_recommend.wasm
