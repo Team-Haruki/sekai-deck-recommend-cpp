@@ -19,7 +19,7 @@ struct DeckBonusInfo {
 };
 
 struct SupportDeckBonus {
-    double bonus;
+    double bonus = 0.;
     std::vector<CardDetail> cards;
 };
 
@@ -60,7 +60,8 @@ public:
     SupportDeckBonus getSupportDeckBonus(
         const std::vector<const CardDetail*>& deckCards, 
         const std::vector<SupportDeckCard>& supportCards, 
-        int supportDeckCount
+        int supportDeckCount,
+        bool includeCards = false
     );
 
 

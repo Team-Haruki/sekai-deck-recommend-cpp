@@ -775,11 +775,57 @@ std::vector<RecommendDeck> BaseDeckRecommend::recommendHighScoreDeck(
         }
         return pruned;
     };
+    auto attachSupportDeckCards = [&](std::vector<RecommendDeck> decks) {
+        if (supportCards.empty()) {
+            return decks;
+        }
+        std::unordered_map<int, const CardDetail*> cardById{};
+        for (const auto& card : cards) {
+            cardById.emplace(card.cardId, &card);
+        }
+        for (auto& deck : decks) {
+            std::vector<const CardDetail*> deckCardDetails{};
+            deckCardDetails.reserve(deck.cards.size());
+            bool valid = true;
+            for (const auto& card : deck.cards) {
+                auto it = cardById.find(card.cardId);
+                if (it == cardById.end()) {
+                    valid = false;
+                    break;
+                }
+                deckCardDetails.push_back(it->second);
+            }
+            if (!valid || deckCardDetails.empty()) {
+                continue;
+            }
+
+            const std::vector<SupportDeckCard>* pSupportCards = nullptr;
+            if (eventConfig.eventId == finalChapterEventId) {
+                auto it = supportCards.find(deckCardDetails[0]->characterId);
+                if (it == supportCards.end()) {
+                    continue;
+                }
+                pSupportCards = &it->second;
+            } else {
+                pSupportCards = &supportCards.begin()->second;
+            }
+
+            auto supportDeckBonus = deckCalculator.getSupportDeckBonus(
+                deckCardDetails,
+                *pSupportCards,
+                deckCalculator.getWorldBloomSupportDeckCount(eventConfig.eventId),
+                true
+            );
+            deck.supportDeckBonus = supportDeckBonus.bonus;
+            deck.supportDeckCards = std::move(supportDeckBonus.cards);
+        }
+        return decks;
+    };
     auto ensureResults = [&](std::vector<RecommendDeck> decks) {
         if (decks.empty()) {
             throw std::runtime_error("Cannot recommend any deck in " + std::to_string(cards.size()) + " cards");
         }
-        return decks;
+        return attachSupportDeckCards(std::move(decks));
     };
 
     // 指定活动加成组卡
@@ -813,7 +859,7 @@ std::vector<RecommendDeck> BaseDeckRecommend::recommendHighScoreDeck(
         std::sort(ans.begin(), ans.end(), [](const RecommendDeck& a, const RecommendDeck& b) {
             return std::tuple(-a.eventBonus.value_or(0), a.targetValue) > std::tuple(-b.eventBonus.value_or(0), b.targetValue);
         });
-        return ans;
+        return attachSupportDeckCards(std::move(ans));
     }
     auto runDfsGaHybrid = [&](const DeckRecommendConfig& baseConfig) {
         auto hybridInfo = makeCalcInfo(baseConfig.timeout_ms);
@@ -1653,7 +1699,7 @@ std::vector<RecommendDeck> BaseDeckRecommend::recommendHighScoreDeck(
                 break;
             }
         }
-        return ans;
+        return attachSupportDeckCards(std::move(ans));
     }
 
     throw std::runtime_error("Unknown algorithm: " + std::to_string(int(config.algorithm)));

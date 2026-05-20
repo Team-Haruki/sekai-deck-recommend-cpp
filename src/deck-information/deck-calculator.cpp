@@ -67,25 +67,34 @@ DeckBonusInfo DeckCalculator::getDeckBonus(
 SupportDeckBonus DeckCalculator::getSupportDeckBonus(
     const std::vector<const CardDetail*> &deckCards, 
     const std::vector<SupportDeckCard>& supportCards, 
-    int supportDeckCount
+    int supportDeckCount,
+    bool includeCards
 )
 {
-    double bonus = 0;
+    SupportDeckBonus ret{};
+    if (includeCards) {
+        ret.cards.reserve(supportDeckCount);
+    }
     int count = 0;
-    
-    std::vector<CardDetail> cards{};
+
     for (const auto &card : supportCards) {
         // 支援卡组的卡不能和主队伍重复，需要排除掉
         if (std::find_if(deckCards.begin(), deckCards.end(), [&](const auto &it) { 
             return it->cardId == card.cardId;
         }) != deckCards.end()) 
             continue;
-        bonus += card.bonus;
+        if (includeCards) {
+            CardDetail supportCard{};
+            supportCard.cardId = card.cardId;
+            supportCard.supportDeckBonus = card.bonus;
+            ret.cards.push_back(supportCard);
+        }
+        ret.bonus += card.bonus;
         count++;
-        if (count >= supportDeckCount) return { bonus, cards };
+        if (count >= supportDeckCount) return ret;
     }
     // 就算组不出完整的支援卡组也得返回
-    return { bonus, cards };
+    return ret;
 }
 
 int DeckCalculator::getHonorBonusPower()
@@ -346,7 +355,7 @@ std::vector<DeckDetail> DeckCalculator::getDeckDetailByCards(
             .power = power, 
             .eventBonus = eventBonusInfo.totalBonus,
             .supportDeckBonus = supportDeckBonus.bonus,
-            .supportDeckCards = std::nullopt, // supportDeckBonus.cards
+            .supportDeckCards = std::nullopt,
             .cards = std::move(cards),
             .multiLiveScoreUp = multiLiveScoreUp
         });
