@@ -7,7 +7,8 @@ recommendation and live calculation. The same engineering rules also live in
 ## Project Context
 
 - Core language: C++20.
-- Bindings: Python extension via pybind11.
+- Bindings: Python extension via pybind11 and WebAssembly via Embind.
+- Package names: PyPI and npm both use `haruki-sekai-deck-recommend-cpp`.
 - JSON: nlohmann/json from `3rdparty/json`.
 - Downstream runtime: Team Haruki `deck-service` builds this repository and
   calls it through a C/Rust FFI bridge.
@@ -15,7 +16,9 @@ recommendation and live calculation. The same engineering rules also live in
 ## Work Safely
 
 - Keep changes narrow and calculation-focused.
-- Preserve compatibility with object-shaped and compact array-shaped userdata.
+- Treat production userdata as object/dictionary shaped. Compact arrays can
+  appear in Mongo-exported local fixtures, but they are not the runtime API
+  contract.
 - Do not rewrite scoring, event bonus, support deck, or skill order logic unless
   the task explicitly requires it.
 - Avoid changing static data in `data/` unless the task is about static data.
@@ -46,6 +49,30 @@ cargo check
 cargo build
 ```
 
+For the WebAssembly target (Embind binding, browser/Worker), with `emsdk`
+activated:
+
+```bash
+mkdir build_wasm && cd build_wasm
+emcmake cmake .. -DCMAKE_BUILD_TYPE=Release
+cmake --build . -j
+```
+
+Two parallel binding files live in `src/`: `sekai_deck_recommend.cpp`
+(pybind11) and `sekai_deck_recommend_wasm.cpp` (Embind, JSON-in / JSON-out).
+Option validation is duplicated; keep both in sync when adding a field.
+
+The npm package scaffold lives in `npm/haruki-sekai-deck-recommend-cpp`. Do not
+bundle masterdata, music metas, or user data into the npm package; the
+application provides them at runtime. Local benchmark fixtures may live beside
+this repository as `../haruki-sekai-master`, `../music_metas.json`, and
+`../collections.suite.json`; do not commit those fixture files.
+
+Release workflows build PyPI wheels, PyPI sdist, and the npm wasm package. PyPI
+and npm publishing use Trusted Publishing/OIDC through the `pypi-publish` and
+`npm-publish` environments. PyPI publishing should only download artifacts
+prefixed with `pypi-`.
+
 ## Git Commits
 
 All commit subjects must follow:
@@ -64,6 +91,13 @@ Rules:
 - Keep the subject at or below roughly 70 characters.
 - Agent attribution uses a standard `Co-authored-by:` trailer in the commit
   body, separated from the subject by a blank line.
+- Before creating any commit, ask the user whether this commit should publish a
+  new version.
+- If the user wants a new version, bump the relevant package versions according
+  to the user's requested release level. Versions must use `major.minor.patch`
+  format.
+- If the user does not want a new version, create the commit without changing
+  package versions.
 
 Project examples:
 

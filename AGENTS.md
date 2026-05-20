@@ -7,9 +7,12 @@ guidance.
 
 ## Project Overview
 
-`sekai-deck-recommend-cpp` is a C++20 Project Sekai deck recommendation and
-calculation engine with Python bindings. It is used directly by Python callers
-and by Team Haruki's `deck-service` through a C/Rust FFI bridge.
+`sekai-deck-recommend-cpp` is Team Haruki's maintained fork of the C++ Project
+Sekai deck recommendation and calculation engine. The previous C++ optimization
+project is [NeuraXmy/sekai-deck-recommend-cpp](https://github.com/NeuraXmy/sekai-deck-recommend-cpp).
+This fork ships Python bindings and a WebAssembly/npm package target. It is
+used directly by Python callers, by browser/Worker callers through wasm, and by
+Team Haruki's `deck-service` through a C/Rust FFI bridge.
 
 This is production scoring code. Changes to card power, deck selection, event
 bonus, support deck, live score, userdata parsing, or masterdata loading can
@@ -26,8 +29,9 @@ change live automation behavior downstream.
 - `src/event-point/`: event point and event bonus calculations.
 - `src/data-provider/`: static data, masterdata, music metas, and userdata
   loading.
-- `src/user-data/`: user-data model parsers. This area must support both normal
-  object payloads and compact array payloads used by downstream services.
+- `src/user-data/`: user-data model parsers. Production API payloads are
+  object/dictionary shaped. Compact arrays can appear in Mongo-exported local
+  fixtures, but they are not the runtime API contract.
 - `src/master-data/`: masterdata model structs.
 - `3rdparty/json/`: vendored nlohmann/json dependency.
 - `sekai_deck_recommend.cpp` and `.pyi`: Python binding surface.
@@ -38,9 +42,11 @@ change live automation behavior downstream.
 Common local checks:
 
 ```bash
-pip install -e . -v
-python -c "import sekai_deck_recommend_cpp"
+uv pip install -e . -v
+uv run python -c "import sekai_deck_recommend_cpp"
 ```
+
+`pip install -e . -v` remains supported for callers that are not using uv.
 
 When this repository is being changed for `deck-service`, also validate from
 that sibling repository:
@@ -57,13 +63,55 @@ If submodules are missing after cloning:
 git submodule update --init --recursive
 ```
 
+### WebAssembly build
+
+Browser/Worker target (Embind binding via `src/sekai_deck_recommend_wasm.cpp`).
+Requires `emsdk` activated in the shell:
+
+```bash
+mkdir build_wasm && cd build_wasm
+emcmake cmake .. -DCMAKE_BUILD_TYPE=Release
+cmake --build . -j
+```
+
+Outputs ES6 module glue (`sekai_deck_recommend.js`) + `sekai_deck_recommend.wasm`.
+Static files in `data/` are embedded into the wasm via `--embed-file`; runtime
+masterdata/music-metas are pushed in by the JS caller.
+
+The npm package scaffold lives in `npm/haruki-sekai-deck-recommend-cpp` and is
+reserved as `haruki-sekai-deck-recommend-cpp`. It should contain only the wasm
+loader, `.wasm` binary, wrapper helpers, and TypeScript declarations. Do not
+bundle masterdata, music metas, or user data in the npm package; the application
+provides them at runtime.
+
+Common local benchmark fixtures in this workspace use:
+
+- masterdata: `../haruki-sekai-master`
+- music metas: `../music_metas.json`
+- user data: `../collections.suite.json`
+
+These fixtures are not package assets and should not be committed from this
+repository.
+
+## Packaging And Release
+
+- PyPI package name: `haruki-sekai-deck-recommend-cpp`.
+- npm package name: `haruki-sekai-deck-recommend-cpp`.
+- Release workflows build PyPI wheels, PyPI sdist, and the npm wasm package.
+- PyPI and npm publishing use Trusted Publishing/OIDC. Keep the GitHub
+  environments named `pypi-publish` and `npm-publish` unless the publishing
+  setup is intentionally redesigned.
+- GitHub Release artifacts may include both PyPI artifacts and the npm tarball;
+  PyPI publishing must only download artifacts prefixed with `pypi-`.
+
 ## Engineering Rules
 
 - Prefer small, behavior-focused changes over broad refactors.
 - Preserve existing enum mapping and validation behavior unless a caller-visible
   migration is intentional.
-- Keep parsers backward compatible with both object-shaped and compact
-  array-shaped userdata when the field is used by downstream services.
+- Treat production userdata as object/dictionary shaped. Do not add runtime API
+  behavior for Mongo-exported compact arrays unless the task is specifically
+  about local fixtures or migration tooling.
 - Be careful with `std::optional` fields in score details; missing bonus data
   should not silently become a different calculation.
 - Do not change static data or generated assets unless the task explicitly
@@ -71,6 +119,20 @@ git submodule update --init --recursive
 - For code used through deck-service, remember that C++ exceptions cross the
   boundary as error strings; write messages that help identify the bad input.
 - Use concise comments only when the calculation or data shape is not obvious.
+
+## Bindings
+
+Two parallel binding files live next to the engine:
+
+- `src/sekai_deck_recommend.cpp` — pybind11 binding for the Python wheel and
+  the `deck-service` FFI bridge.
+- `src/sekai_deck_recommend_wasm.cpp` — Embind binding for the WebAssembly
+  build. JSON-in / JSON-out surface (`recommend(optionsJson)` returns a JSON
+  string).
+
+Option validation logic is duplicated between the two until a shared core is
+extracted; when adding a field to `DeckRecommendOptions`, update both files
+and keep their schemas identical.
 
 ## High-Risk Areas
 
@@ -112,6 +174,14 @@ Rules:
   co-author avatar on the commit page.
 - The trailer must be on its own line, separated from the subject by a blank
   line, in the form `Co-authored-by: <Display Name> <email>`.
+- Before creating any commit, ask the user whether this commit should publish a
+  new version.
+- If the user wants a new version, bump the relevant package versions according
+  to the user's requested release level. For this repository that normally means
+  `pyproject.toml` and, when npm is affected, `npm/haruki-sekai-deck-recommend-cpp/package.json`.
+- Version values for release bumps must use `major.minor.patch` format.
+- If the user does not want a new version, create the commit without changing
+  package versions.
 
 Suggested values per agent:
 
