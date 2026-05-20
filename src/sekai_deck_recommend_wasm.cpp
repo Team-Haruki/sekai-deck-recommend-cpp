@@ -25,12 +25,15 @@
 
 #include <nlohmann/json.hpp>
 
+#include <algorithm>
 #include <map>
 #include <memory>
 #include <optional>
 #include <set>
+#include <stdexcept>
 #include <string>
 #include <tuple>
+#include <unordered_map>
 #include <vector>
 
 using json = nlohmann::json;
