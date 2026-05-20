@@ -35,7 +35,7 @@ pip install haruki-sekai-deck-recommend-cpp
 - CMake ≥ 3.15
 - C++20 compatible compiler (GCC/Clang/MSVC)
 - Python 3.10+ with development headers
-- uv
+- uv (recommended; pip workflows are also supported)
 
 ### Steps
 
