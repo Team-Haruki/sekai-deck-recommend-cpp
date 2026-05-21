@@ -234,8 +234,9 @@ std::vector<DeckDetail> DeckCalculator::getDeckDetailByCards(
                 needEnumerateStatusMask |= (1 << i);   
                 needEnumerateCount++;
             } else {
-                // 不需要枚举则花后设置为两个技能的最大 
-                s2 = (s2.scoreUp >= s1.scoreUp ? s2 : s1); 
+                // 不需要枚举则固定为两个技能的最大值；平分时保留花前技能，
+                // 否则 BFes/双技能卡会显示花前技能数值但回到花后缩略图。
+                s2 = (s2.scoreUp > s1.scoreUp ? s2 : s1); 
             }
         }
 
