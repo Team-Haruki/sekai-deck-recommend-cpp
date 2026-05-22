@@ -3,6 +3,8 @@
 
 #include "data-provider/data-provider.h"
 
+#include <optional>
+
 struct CardConfig {
     bool disable = false;       // 禁用此稀有度卡牌
     bool rankMax = false;       // 强制满级
@@ -10,6 +12,10 @@ struct CardConfig {
     bool masterMax = false;     // 强制满破
     bool skillMax = false;      // 强制满技能
     bool canvas = false;        // 强制使用画布加成
+    std::optional<int> level = std::nullopt;            // 精确等级
+    std::optional<int> skillLevel = std::nullopt;       // 精确技能等级
+    std::optional<int> masterRank = std::nullopt;       // 精确专家等级
+    std::optional<int> episodeReadCount = std::nullopt; // 精确已读剧情数
 };
 
 class CardService {

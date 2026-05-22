@@ -95,7 +95,7 @@ std::optional<CardDetail> CardCalculator::getCardDetail(
         .episode1Read = episode1Read,
         .episode2Read = episode2Read,
         .afterTraining = afterTraining,
-        .defaultImage = userCard.defaultImage
+        .defaultImage = userCard0.defaultImage
     };
 }
 

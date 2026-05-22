@@ -128,6 +128,10 @@ struct PyCardConfig {
     std::optional<bool> master_max;
     std::optional<bool> skill_max;
     std::optional<bool> canvas;
+    std::optional<int> level;
+    std::optional<int> skill_level;
+    std::optional<int> master_rank;
+    std::optional<int> episode_read_count;
 
     py::dict to_dict() const {
         py::dict result;
@@ -137,6 +141,10 @@ struct PyCardConfig {
         if (master_max.has_value())     result["master_max"] = master_max.value();
         if (skill_max.has_value())      result["skill_max"] = skill_max.value();
         if (canvas.has_value())         result["canvas"] = canvas.value();
+        if (level.has_value())          result["level"] = level.value();
+        if (skill_level.has_value())    result["skill_level"] = skill_level.value();
+        if (master_rank.has_value())    result["master_rank"] = master_rank.value();
+        if (episode_read_count.has_value()) result["episode_read_count"] = episode_read_count.value();
         return result;
     }
     static PyCardConfig from_dict(const py::dict& dict) {
@@ -147,6 +155,10 @@ struct PyCardConfig {
         if (dict.contains("master_max"))     config.master_max = dict["master_max"].cast<bool>();
         if (dict.contains("skill_max"))      config.skill_max = dict["skill_max"].cast<bool>();
         if (dict.contains("canvas"))         config.canvas = dict["canvas"].cast<bool>();
+        if (dict.contains("level"))          config.level = dict["level"].cast<int>();
+        if (dict.contains("skill_level"))    config.skill_level = dict["skill_level"].cast<int>();
+        if (dict.contains("master_rank"))    config.master_rank = dict["master_rank"].cast<int>();
+        if (dict.contains("episode_read_count")) config.episode_read_count = dict["episode_read_count"].cast<int>();
         return config;
     }
 };
@@ -160,6 +172,10 @@ struct PySingleCardConfig {
     std::optional<bool> master_max;
     std::optional<bool> skill_max;
     std::optional<bool> canvas;
+    std::optional<int> level;
+    std::optional<int> skill_level;
+    std::optional<int> master_rank;
+    std::optional<int> episode_read_count;
 
     py::dict to_dict() const {
         py::dict result;
@@ -170,6 +186,10 @@ struct PySingleCardConfig {
         if (master_max.has_value())     result["master_max"] = master_max.value();
         if (skill_max.has_value())      result["skill_max"] = skill_max.value();
         if (canvas.has_value())         result["canvas"] = canvas.value();
+        if (level.has_value())          result["level"] = level.value();
+        if (skill_level.has_value())    result["skill_level"] = skill_level.value();
+        if (master_rank.has_value())    result["master_rank"] = master_rank.value();
+        if (episode_read_count.has_value()) result["episode_read_count"] = episode_read_count.value();
         return result;
     }
     static PySingleCardConfig from_dict(const py::dict& dict) {
@@ -181,9 +201,59 @@ struct PySingleCardConfig {
         if (dict.contains("master_max"))     config.master_max = dict["master_max"].cast<bool>();
         if (dict.contains("skill_max"))      config.skill_max = dict["skill_max"].cast<bool>();
         if (dict.contains("canvas"))         config.canvas = dict["canvas"].cast<bool>();
+        if (dict.contains("level"))          config.level = dict["level"].cast<int>();
+        if (dict.contains("skill_level"))    config.skill_level = dict["skill_level"].cast<int>();
+        if (dict.contains("master_rank"))    config.master_rank = dict["master_rank"].cast<int>();
+        if (dict.contains("episode_read_count")) config.episode_read_count = dict["episode_read_count"].cast<int>();
         return config;
     }
 };
+
+static void apply_py_card_config(CardConfig& dst, const PyCardConfig& src) {
+    if (src.disable.has_value())
+        dst.disable = src.disable.value();
+    if (src.level_max.has_value())
+        dst.rankMax = src.level_max.value();
+    if (src.episode_read.has_value())
+        dst.episodeRead = src.episode_read.value();
+    if (src.master_max.has_value())
+        dst.masterMax = src.master_max.value();
+    if (src.skill_max.has_value())
+        dst.skillMax = src.skill_max.value();
+    if (src.canvas.has_value())
+        dst.canvas = src.canvas.value();
+    if (src.level.has_value())
+        dst.level = src.level.value();
+    if (src.skill_level.has_value())
+        dst.skillLevel = src.skill_level.value();
+    if (src.master_rank.has_value())
+        dst.masterRank = src.master_rank.value();
+    if (src.episode_read_count.has_value())
+        dst.episodeReadCount = src.episode_read_count.value();
+}
+
+static void apply_py_card_config(CardConfig& dst, const PySingleCardConfig& src) {
+    if (src.disable.has_value())
+        dst.disable = src.disable.value();
+    if (src.level_max.has_value())
+        dst.rankMax = src.level_max.value();
+    if (src.episode_read.has_value())
+        dst.episodeRead = src.episode_read.value();
+    if (src.master_max.has_value())
+        dst.masterMax = src.master_max.value();
+    if (src.skill_max.has_value())
+        dst.skillMax = src.skill_max.value();
+    if (src.canvas.has_value())
+        dst.canvas = src.canvas.value();
+    if (src.level.has_value())
+        dst.level = src.level.value();
+    if (src.skill_level.has_value())
+        dst.skillLevel = src.skill_level.value();
+    if (src.master_rank.has_value())
+        dst.masterRank = src.master_rank.value();
+    if (src.episode_read_count.has_value())
+        dst.episodeReadCount = src.episode_read_count.value();
+}
 
 // python传入的模拟退火兼容参数
 struct PySaOptions {
@@ -1056,18 +1126,7 @@ class SekaiDeckRecommend {
             for (const auto& [key, value] : card_config_map) {
                 auto card_config = CardConfig();
                 if (value.has_value()) {
-                    if (value->disable.has_value())
-                        card_config.disable = value->disable.value();
-                    if (value->level_max.has_value())
-                        card_config.rankMax = value->level_max.value();
-                    if (value->episode_read.has_value())
-                        card_config.episodeRead = value->episode_read.value();
-                    if (value->master_max.has_value())
-                        card_config.masterMax = value->master_max.value();
-                    if (value->skill_max.has_value())
-                        card_config.skillMax = value->skill_max.value();
-                    if (value->canvas.has_value())
-                        card_config.canvas = value->canvas.value();
+                    apply_py_card_config(card_config, value.value());
                 }
                 config.cardConfig[mapEnum(EnumMap::cardRarityType, key)] = card_config;
             }
@@ -1076,18 +1135,7 @@ class SekaiDeckRecommend {
             if (pyoptions.single_card_configs.has_value()) {
                 for (const auto& card_config : pyoptions.single_card_configs.value()) {
                     auto cfg = CardConfig();
-                    if (card_config.disable.has_value())
-                        cfg.disable = card_config.disable.value();
-                    if (card_config.level_max.has_value())
-                        cfg.rankMax = card_config.level_max.value();
-                    if (card_config.episode_read.has_value())
-                        cfg.episodeRead = card_config.episode_read.value();
-                    if (card_config.master_max.has_value())
-                        cfg.masterMax = card_config.master_max.value();
-                    if (card_config.skill_max.has_value())
-                        cfg.skillMax = card_config.skill_max.value();
-                    if (card_config.canvas.has_value())
-                        cfg.canvas = card_config.canvas.value();
+                    apply_py_card_config(cfg, card_config);
                     config.singleCardConfig[card_config.card_id] = cfg;
                 }
             }
@@ -1414,7 +1462,11 @@ PYBIND11_MODULE(sekai_deck_recommend, m) {
         .def_readwrite("episode_read", &PyCardConfig::episode_read)
         .def_readwrite("master_max", &PyCardConfig::master_max)
         .def_readwrite("skill_max", &PyCardConfig::skill_max)
-        .def_readwrite("canvas", &PyCardConfig::canvas);
+        .def_readwrite("canvas", &PyCardConfig::canvas)
+        .def_readwrite("level", &PyCardConfig::level)
+        .def_readwrite("skill_level", &PyCardConfig::skill_level)
+        .def_readwrite("master_rank", &PyCardConfig::master_rank)
+        .def_readwrite("episode_read_count", &PyCardConfig::episode_read_count);
 
     py::class_<PySingleCardConfig>(m, "DeckRecommendSingleCardConfig")
         .def(py::init<>())
@@ -1427,7 +1479,11 @@ PYBIND11_MODULE(sekai_deck_recommend, m) {
         .def_readwrite("episode_read", &PySingleCardConfig::episode_read)
         .def_readwrite("master_max", &PySingleCardConfig::master_max)
         .def_readwrite("skill_max", &PySingleCardConfig::skill_max)
-        .def_readwrite("canvas", &PySingleCardConfig::canvas);
+        .def_readwrite("canvas", &PySingleCardConfig::canvas)
+        .def_readwrite("level", &PySingleCardConfig::level)
+        .def_readwrite("skill_level", &PySingleCardConfig::skill_level)
+        .def_readwrite("master_rank", &PySingleCardConfig::master_rank)
+        .def_readwrite("episode_read_count", &PySingleCardConfig::episode_read_count);
 
     py::class_<PySaOptions>(m, "DeckRecommendSaOptions")
         .def(py::init<>())

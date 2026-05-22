@@ -83,6 +83,16 @@ options.live_type = "multi"
 options.music_id = 74
 options.music_diff = "expert"
 options.event_id = 160
+options.single_card_configs = [
+    {
+        "card_id": 12345,
+        "level": 60,
+        "skill_level": 4,
+        "master_rank": 5,
+        "episode_read_count": 2,
+        "canvas": True,
+    }
+]
 
 result = sekai_deck_recommend.recommend(options)
 ```

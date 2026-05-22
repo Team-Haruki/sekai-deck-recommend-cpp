@@ -473,6 +473,10 @@ PreparedOptions buildOptions(
         if (src.contains("master_max") && !src["master_max"].is_null()) dst.masterMax = src["master_max"].get<bool>();
         if (src.contains("skill_max") && !src["skill_max"].is_null()) dst.skillMax = src["skill_max"].get<bool>();
         if (src.contains("canvas") && !src["canvas"].is_null()) dst.canvas = src["canvas"].get<bool>();
+        if (src.contains("level") && !src["level"].is_null()) dst.level = src["level"].get<int>();
+        if (src.contains("skill_level") && !src["skill_level"].is_null()) dst.skillLevel = src["skill_level"].get<int>();
+        if (src.contains("master_rank") && !src["master_rank"].is_null()) dst.masterRank = src["master_rank"].get<int>();
+        if (src.contains("episode_read_count") && !src["episode_read_count"].is_null()) dst.episodeReadCount = src["episode_read_count"].get<int>();
     };
 
     const std::vector<std::pair<std::string, std::string>> rarityKeys = {

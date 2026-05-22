@@ -29,6 +29,10 @@ class DeckRecommendCardConfig:
         master_max (bool): Always use max master rank, default is False
         skill_max (bool): Always use max skill level, default is False
         canvas (bool): Always use canvas bonus, default is False
+        level (int): Exact card level override, clamped by card rarity max level
+        skill_level (int): Exact skill level override, clamped by card rarity max skill level
+        master_rank (int): Exact master rank override in 0-5
+        episode_read_count (int): Exact read episode count in 0-2
     """
     
     disable: Optional[bool]
@@ -37,6 +41,10 @@ class DeckRecommendCardConfig:
     master_max: Optional[bool]
     skill_max: Optional[bool]
     canvas: Optional[bool]
+    level: Optional[int]
+    skill_level: Optional[int]
+    master_rank: Optional[int]
+    episode_read_count: Optional[int]
 
     def to_dict(self) -> Dict[str, Any]:
         ...
@@ -56,6 +64,10 @@ class DeckRecommendSingleCardConfig:
         master_max (bool): Always use max master rank, default is False
         skill_max (bool): Always use max skill level, default is False
         canvas (bool): Always use canvas bonus, default is False
+        level (int): Exact card level override, clamped by card rarity max level
+        skill_level (int): Exact skill level override, clamped by card rarity max skill level
+        master_rank (int): Exact master rank override in 0-5
+        episode_read_count (int): Exact read episode count in 0-2
     """
     
     card_id: int
@@ -65,6 +77,10 @@ class DeckRecommendSingleCardConfig:
     master_max: Optional[bool]
     skill_max: Optional[bool]
     canvas: Optional[bool]
+    level: Optional[int]
+    skill_level: Optional[int]
+    master_rank: Optional[int]
+    episode_read_count: Optional[int]
 
     def to_dict(self) -> Dict[str, Any]:
         ...

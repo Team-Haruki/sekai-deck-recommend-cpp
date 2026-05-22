@@ -42,6 +42,14 @@ const result = engine.recommend({
   music_id: 1,
   music_diff: "easy",
   user_data: suiteData,
+  single_card_configs: [{
+    card_id: 12345,
+    level: 60,
+    skill_level: 4,
+    master_rank: 5,
+    episode_read_count: 2,
+    canvas: true,
+  }],
   limit: 10,
   timeout_ms: 15000,
 })

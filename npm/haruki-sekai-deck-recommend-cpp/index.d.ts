@@ -46,6 +46,10 @@ export interface CardConfig {
   master_max?: boolean
   skill_max?: boolean
   canvas?: boolean
+  level?: number
+  skill_level?: number
+  master_rank?: number
+  episode_read_count?: number
 }
 
 export interface SingleCardConfig extends CardConfig {

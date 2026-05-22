@@ -1,5 +1,37 @@
 #include "card-information/card-service.h"
 
+#include <algorithm>
+#include <tuple>
+
+namespace {
+
+void applyEpisodeReadCount(UserCard& userCard, const std::vector<CardEpisode>& cardEpisodes, int cardId, int readCount)
+{
+    std::vector<CardEpisode> episodes{};
+    for (const auto& episode : cardEpisodes) {
+        if (episode.cardId == cardId) {
+            episodes.push_back(episode);
+        }
+    }
+    std::sort(episodes.begin(), episodes.end(), [](const CardEpisode& a, const CardEpisode& b) {
+        return std::tuple(a.seq, a.id) < std::tuple(b.seq, b.id);
+    });
+
+    std::vector<UserCardEpisodes> userEpisodes{};
+    userEpisodes.reserve(episodes.size());
+    for (int i = 0; i < (int)episodes.size(); i++) {
+        UserCardEpisodes episode{};
+        episode.cardEpisodeId = episodes[i].id;
+        episode.scenarioStatus = i < readCount
+            ? Enums::ScenarioStatus::already_read
+            : 0;
+        userEpisodes.push_back(episode);
+    }
+    userCard.episodes = std::move(userEpisodes);
+}
+
+} // namespace
+
 std::vector<int> CardService::getCardUnits(const Card &card)
 {
     auto& gameCharacters = dataProvider.masterData->gameCharacters;
@@ -21,9 +53,13 @@ UserCard CardService::applyCardConfig(const UserCard &userCard, const Card &card
     bool episodeRead = cardConfig.episodeRead;
     bool masterMax = cardConfig.masterMax;
     bool skillMax = cardConfig.skillMax;
+    bool hasPreciseConfig = cardConfig.level.has_value()
+        || cardConfig.episodeReadCount.has_value()
+        || cardConfig.masterRank.has_value()
+        || cardConfig.skillLevel.has_value();
 
     // 都按原样，那就什么都无需调整
-    if (!rankMax && !episodeRead && !masterMax && !skillMax) 
+    if (!rankMax && !episodeRead && !masterMax && !skillMax && !hasPreciseConfig)
         return userCard;
 
     auto cardRarities = dataProvider.masterData->cardRarities;
@@ -39,16 +75,39 @@ UserCard CardService::applyCardConfig(const UserCard &userCard, const Card &card
         if (cardRarity.trainingMaxLevel != 0) {
             ret.level = cardRarity.trainingMaxLevel;
             ret.specialTrainingStatus = Enums::SpecialTrainingStatus::done;
+            ret.defaultImage = Enums::DefaultImage::special_training;
         } else {
             ret.level = cardRarity.maxLevel;
+            ret.defaultImage = Enums::DefaultImage::original;
+        }
+    }
+
+    if (cardConfig.level.has_value()) {
+        if (cardConfig.level.value() <= 0) {
+            throw std::invalid_argument("Invalid card config level: " + std::to_string(cardConfig.level.value()));
+        }
+        int maxLevel = cardRarity.trainingMaxLevel != 0 ? cardRarity.trainingMaxLevel : cardRarity.maxLevel;
+        ret.level = std::clamp(cardConfig.level.value(), 1, maxLevel);
+        if (cardRarity.trainingMaxLevel != 0 && ret.level > cardRarity.maxLevel) {
+            ret.specialTrainingStatus = Enums::SpecialTrainingStatus::done;
+            ret.defaultImage = Enums::DefaultImage::special_training;
+        } else {
+            ret.specialTrainingStatus = Enums::SpecialTrainingStatus::not_doing;
+            ret.defaultImage = Enums::DefaultImage::original;
         }
     }
 
     // 处理前后篇解锁
     if (episodeRead) {
-        for (auto& it : ret.episodes) {
-            it.scenarioStatus = Enums::ScenarioStatus::already_read;
+        applyEpisodeReadCount(ret, dataProvider.masterData->cardEpisodes, card.id, 2);
+    }
+
+    if (cardConfig.episodeReadCount.has_value()) {
+        if (cardConfig.episodeReadCount.value() < 0 || cardConfig.episodeReadCount.value() > 2) {
+            throw std::invalid_argument("Invalid card config episode_read_count: " + std::to_string(cardConfig.episodeReadCount.value()));
         }
+        int readCount = std::clamp(cardConfig.episodeReadCount.value(), 0, 2);
+        applyEpisodeReadCount(ret, dataProvider.masterData->cardEpisodes, card.id, readCount);
     }
 
     // 突破
@@ -56,9 +115,23 @@ UserCard CardService::applyCardConfig(const UserCard &userCard, const Card &card
         ret.masterRank = 5;
     }
 
+    if (cardConfig.masterRank.has_value()) {
+        if (cardConfig.masterRank.value() < 0 || cardConfig.masterRank.value() > 5) {
+            throw std::invalid_argument("Invalid card config master_rank: " + std::to_string(cardConfig.masterRank.value()));
+        }
+        ret.masterRank = std::clamp(cardConfig.masterRank.value(), 0, 5);
+    }
+
     // 技能
     if (skillMax) {
         ret.skillLevel = cardRarity.maxSkillLevel;
+    }
+
+    if (cardConfig.skillLevel.has_value()) {
+        if (cardConfig.skillLevel.value() <= 0) {
+            throw std::invalid_argument("Invalid card config skill_level: " + std::to_string(cardConfig.skillLevel.value()));
+        }
+        ret.skillLevel = std::clamp(cardConfig.skillLevel.value(), 1, cardRarity.maxSkillLevel);
     }
 
     return ret;
