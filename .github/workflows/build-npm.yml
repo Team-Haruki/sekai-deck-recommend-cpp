@@ -2,6 +2,11 @@ name: Build npm package
 
 on:
   workflow_call:
+    inputs:
+      source_ref:
+        description: "Git ref to build"
+        required: false
+        type: string
 
 jobs:
   npm:
@@ -12,6 +17,7 @@ jobs:
       - name: Checkout source
         uses: actions/checkout@v6.0.2
         with:
+          ref: ${{ inputs.source_ref || github.ref }}
           submodules: recursive
 
       - name: Set up Node.js
