@@ -143,4 +143,4 @@ jobs:
             fi
           fi
 
-          npm publish "${packages[0]}" --provenance
+          npm publish "$(realpath "${packages[0]}")" --provenance
