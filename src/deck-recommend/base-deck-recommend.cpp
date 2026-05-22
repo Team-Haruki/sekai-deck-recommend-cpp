@@ -997,6 +997,12 @@ std::vector<RecommendDeck> BaseDeckRecommend::recommendHighScoreDeck(
                 key += std::to_string(normalized[i]);
             }
         };
+        auto appendScalarKey = [](std::string& key, const char* name, const std::string& value) {
+            key += ":";
+            key += name;
+            key += "=";
+            key += value;
+        };
         auto deckMatchesFixedConstraints = [&](const std::vector<const CardDetail*>& deck) {
             if (int(deck.size()) != config.member) {
                 return false;
@@ -1244,8 +1250,24 @@ std::vector<RecommendDeck> BaseDeckRecommend::recommendHighScoreDeck(
         if (leaderCharacterId.has_value()) {
             policyKey += ":leader=" + std::to_string(leaderCharacterId.value());
         }
-        auto seedKey = policyKey + ":" + std::to_string(cardFingerprint);
-        auto& bucket = rlPolicyBuckets[policyKey];
+        auto rlStateKey = policyKey;
+        appendScalarKey(rlStateKey, "event_id", std::to_string(eventConfig.eventId));
+        appendScalarKey(rlStateKey, "event_chara", std::to_string(eventConfig.specialCharacterId));
+        appendScalarKey(rlStateKey, "music_id", std::to_string(config.musicId));
+        appendScalarKey(rlStateKey, "music_diff", std::to_string(config.musicDiff));
+        appendScalarKey(rlStateKey, "skill_ref", std::to_string(int(config.skillReferenceChooseStrategy)));
+        appendScalarKey(rlStateKey, "skill_order", std::to_string(int(config.liveSkillOrder)));
+        if (config.specificSkillOrder.has_value()) {
+            appendConstraintKey(rlStateKey, "specific_skill_order", config.specificSkillOrder.value(), false);
+        }
+        appendScalarKey(rlStateKey, "keep_after_training", config.keepAfterTrainingState ? "1" : "0");
+        appendScalarKey(rlStateKey, "best_skill_leader", config.bestSkillAsLeader ? "1" : "0");
+        appendScalarKey(rlStateKey, "teammate_score", std::to_string(config.multiTeammateScoreUp.value_or(-1)));
+        appendScalarKey(rlStateKey, "teammate_power", std::to_string(config.multiTeammatePower.value_or(-1)));
+        appendScalarKey(rlStateKey, "score_up_lb", std::to_string(std::llround(config.multiScoreUpLowerBound * 1000.0)));
+        appendScalarKey(rlStateKey, "fingerprint", std::to_string(cardFingerprint));
+
+        auto& bucket = rlPolicyBuckets[rlStateKey];
         if (config.target == RecommendTarget::Mysekai && bucket.episodes == 0) {
             bucket.weights = {
                 0.10, 1.20, 1.45, 0.15, 0.10,
@@ -1253,7 +1275,8 @@ std::vector<RecommendDeck> BaseDeckRecommend::recommendHighScoreDeck(
                 1.55, 0.25, 1.50
             };
         }
-        auto& seedBucket = rlSeedBuckets[seedKey];
+        auto& seedBucket = rlSeedBuckets[rlStateKey];
+        bool coldStartRequest = (bucket.episodes == 0 && seedBucket.bestSeeds.empty());
 
         auto rlCards = buildRlCandidateCards(fullSorted);
         bool hasRememberedSeeds = !seedBucket.bestSeeds.empty();
@@ -1705,6 +1728,64 @@ std::vector<RecommendDeck> BaseDeckRecommend::recommendHighScoreDeck(
             runGaSearch(gaConfig, refineCards, refineInfo, &mergedSeedDecks);
             mergeCalcInfo(totalInfo, refineInfo);
             rememberStoredSeeds(totalInfo, std::max(config.limit * 3, 8));
+        }
+
+        if (coldStartRequest && config.target == RecommendTarget::Score && bucket.episodes >= 48) {
+            for (int warmRound = 0; warmRound < 2; ++warmRound) {
+                auto warmedSeedDecks = loadStoredSeedDecks(fullSorted);
+                if (warmedSeedDecks.empty()) {
+                    break;
+                }
+                std::unordered_set<uint64_t> warmedSeedHashes{};
+                std::vector<std::vector<const CardDetail*>> warmedMergedSeedDecks{};
+                auto tryAddWarmedSeedDeck = [&](const std::vector<const CardDetail*>& seedDeck) {
+                    if (!deckMatchesFixedConstraints(seedDeck)) {
+                        return;
+                    }
+                    auto normalizedSeedDeck = normalizeDeckForLeader(seedDeck);
+                    if (normalizedSeedDeck.empty()) {
+                        return;
+                    }
+                    auto hash = this->calcDeckHash(normalizedSeedDeck);
+                    if (warmedSeedHashes.insert(hash).second) {
+                        warmedMergedSeedDecks.push_back(std::move(normalizedSeedDeck));
+                    }
+                };
+                for (const auto& seedDeck : collectSeedDecks(totalInfo, fullSorted, std::max(config.limit * 4, 12))) {
+                    tryAddWarmedSeedDeck(seedDeck);
+                }
+                for (const auto& seedDeck : monoAttrSeedDecks) {
+                    tryAddWarmedSeedDeck(seedDeck);
+                }
+                for (const auto& seedDeck : warmedSeedDecks) {
+                    tryAddWarmedSeedDeck(seedDeck);
+                }
+
+                int warmReplayBudgetMs = std::min(config.timeout_ms, resolveBudgetMs(config.timeout_ms, 0.06, 35, 140));
+                auto warmInfo = makeCalcInfo(warmReplayBudgetMs);
+                int replayLimit = std::min(int(warmedSeedDecks.size()), std::max(config.limit * 4, 12));
+                for (int i = 0; i < replayLimit && !warmInfo.isTimeout(); ++i) {
+                    evaluateDeckByCards(config, warmedSeedDecks[i], warmInfo);
+                }
+
+                if (!warmedMergedSeedDecks.empty()) {
+                    auto warmRefineCards = buildSeededRefineCards(fullSorted, totalInfo, &warmedMergedSeedDecks);
+                    auto warmGaConfig = tuneGaConfig(config, warmRefineCards.size(), false, true);
+                    warmGaConfig.gaPopSize = std::min(warmGaConfig.gaPopSize, std::max(1400, std::min(3200, int(warmRefineCards.size()) * 10)));
+                    warmGaConfig.gaParentSize = std::min(warmGaConfig.gaParentSize, std::max(96, warmGaConfig.gaPopSize / 7));
+                    warmGaConfig.gaEliteSize = std::min(warmGaConfig.gaEliteSize, std::max(0, warmGaConfig.gaPopSize / 20));
+                    warmGaConfig.gaMaxIter = std::min(warmGaConfig.gaMaxIter, 128);
+                    warmGaConfig.gaMaxIterNoImprove = std::min(warmGaConfig.gaMaxIterNoImprove, 6);
+
+                    int warmRefineBudgetMs = std::min(config.timeout_ms, resolveBudgetMs(config.timeout_ms, 0.16, 80, 260));
+                    warmInfo.timeout = timeoutToNs(warmRefineBudgetMs);
+                    warmInfo.start_ts = nowNs();
+                    runGaSearch(warmGaConfig, warmRefineCards, warmInfo, &warmedMergedSeedDecks);
+                }
+
+                mergeCalcInfo(totalInfo, warmInfo);
+                rememberStoredSeeds(totalInfo, std::max(config.limit * 3, 8));
+            }
         }
 
         auto result = collectResults(totalInfo);
