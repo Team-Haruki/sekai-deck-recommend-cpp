@@ -271,8 +271,6 @@ PreparedOptions buildOptions(
         if (config.target != RecommendTarget::Bonus)
             throw std::invalid_argument("target_bonus_list is only valid for bonus target.");
         config.bonusList = targetBonusList;
-    } else if (config.target == RecommendTarget::Bonus) {
-        throw std::invalid_argument("target_bonus_list is required for bonus target.");
     }
 
     // custom mixed bonus

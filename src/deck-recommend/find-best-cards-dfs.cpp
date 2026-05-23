@@ -335,13 +335,29 @@ void BaseDeckRecommend::findBestCardsDFS(
         
         // C位相关优化，如果使用固定卡牌，则认为C位是第一个不固定的位置，后面的同理（即固定卡牌不参加剪枝）
         auto cIndex = fixedCards.size() + remainingFixedCharacters.size();
-        if (cfg.target != RecommendTarget::Skill) {
+        if (cfg.target != RecommendTarget::Skill && cfg.target != RecommendTarget::Bonus) {
             // C位一定是技能最好的卡牌，跳过技能比C位还好的
             if (deckCards.size() >= cIndex + 1 && deckCards[cIndex]->skill.isCertainlyLessThan(card.skill)) continue;
             // 为了优化性能，必须和C位同色或同组
             if (deckCards.size() >= cIndex + 1 && card.attr != deckCards[cIndex]->attr && !containsAny(deckCards[cIndex]->units, card.units)) {
                 continue;
             }
+        }
+        else if (cfg.target == RecommendTarget::Bonus && deckCards.size() >= cIndex + 1) {
+            auto& last = *deckCards.back();
+            auto candidateKey = std::make_tuple(
+                card.maxEventBonus.value_or(0.0),
+                card.power.max,
+                card.skill.max,
+                card.cardId
+            );
+            auto lastKey = std::make_tuple(
+                last.maxEventBonus.value_or(0.0),
+                last.power.max,
+                last.skill.max,
+                last.cardId
+            );
+            if (candidateKey > lastKey) continue;
         }
         else if (deckCards.size() >= cIndex + 1) {
             auto& last = *deckCards.back();
@@ -351,7 +367,7 @@ void BaseDeckRecommend::findBestCardsDFS(
             if (candidateKey > lastKey) continue;
         }
 
-        if (cfg.target != RecommendTarget::Skill && deckCards.size() >= cIndex + 2) {
+        if (cfg.target != RecommendTarget::Skill && cfg.target != RecommendTarget::Bonus && deckCards.size() >= cIndex + 2) {
             auto& last = *deckCards.back();
             bool lessThan = false;
             bool greaterThan = false;
@@ -383,6 +399,8 @@ void BaseDeckRecommend::findBestCardsDFS(
             } else if (cfg.target == RecommendTarget::Skill) {
                 lessThan = card.skill.isCertainlyLessThan(pre.skill);
             } else if (cfg.target == RecommendTarget::Mysekai) {
+                lessThan = this->cardCalculator.isCertainlyLessThan(card, pre, true, false, true);
+            } else if (cfg.target == RecommendTarget::Bonus) {
                 lessThan = this->cardCalculator.isCertainlyLessThan(card, pre, true, false, true);
             }
 

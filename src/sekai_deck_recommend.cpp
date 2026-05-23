@@ -890,8 +890,6 @@ class SekaiDeckRecommend {
                     throw std::invalid_argument("target_bonus_list is only valid for bonus target.");
                 config.bonusList = pyoptions.target_bonus_list.value();
             } else {
-                if (config.target == RecommendTarget::Bonus)
-                    throw std::invalid_argument("target_bonus_list is required for bonus target.");
                 config.bonusList = {};
             }
             

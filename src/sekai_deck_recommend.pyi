@@ -186,7 +186,7 @@ class DeckRecommendOptions:
         fixed_cards (List[int]): List of card IDs that always included in the deck, default is None
         fixed_characters (List[int]): List of character IDs that always included in the deck (first is always leader unless forcedLeaderCharacterId is set for final chapter), cannot be used in challenge live, default is None
         forcedLeaderCharacterId (int): Optional final chapter only leader character ID. Ignored for non-final-chapter events.
-        target_bonus_list (List[int]): List of target event bonus, required when target is "bonus"
+        target_bonus_list (List[int]): Optional list of exact target event bonuses when target is "bonus". If omitted, target "bonus" maximizes event bonus.
         custom_bonus_character_ids (List[int]): Optional custom mixed bonus character IDs.
         custom_bonus_attr (str): Optional custom mixed bonus attr in ["mysterious", "cute", "cool", "pure", "happy"].
         custom_bonus_character_support_units (Dict[int, str]): Optional support unit constraint for virtual singer IDs in custom mixed bonus simulation.

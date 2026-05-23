@@ -50,13 +50,16 @@ static double calcSearchWeightValue(const CardDetail& card, RecommendTarget targ
     if (target == RecommendTarget::Skill) {
         return std::max(1e-6, skillNorm);
     }
-    if (target == RecommendTarget::Score) {
+    if (target == RecommendTarget::Score || target == RecommendTarget::Bonus) {
         auto eventBonus = std::max(
             card.maxEventBonus.value_or(0.0),
             card.limitedEventBonus.value_or(0.0)
         );
         auto eventNorm = std::max(0.0, eventBonus / 70.0);
         auto supportNorm = std::max(0.0, card.supportDeckBonus.value_or(0.0) / 50.0);
+        if (target == RecommendTarget::Bonus) {
+            return std::max(1e-6, 1.30 * eventNorm + 0.35 * supportNorm + 0.10 * powerNorm + 0.05 * skillNorm);
+        }
         return std::max(1e-6, 0.70 * powerNorm + 0.95 * skillNorm + 0.20 * eventNorm + 0.10 * supportNorm);
     }
     if (target == RecommendTarget::Mysekai) {

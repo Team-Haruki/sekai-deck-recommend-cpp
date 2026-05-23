@@ -49,13 +49,16 @@ void BaseDeckRecommend::findBestCardsSA(
         if (cfg.target == RecommendTarget::Skill) {
             return skillNorm;
         }
-        if (cfg.target == RecommendTarget::Score) {
+        if (cfg.target == RecommendTarget::Score || cfg.target == RecommendTarget::Bonus) {
             auto eventBonus = std::max(
                 card.maxEventBonus.value_or(0.0),
                 card.limitedEventBonus.value_or(0.0)
             );
             auto eventNorm = std::max(0.0, eventBonus / 70.0);
             auto supportNorm = std::max(0.0, card.supportDeckBonus.value_or(0.0) / 50.0);
+            if (cfg.target == RecommendTarget::Bonus) {
+                return 1.30 * eventNorm + 0.35 * supportNorm + 0.10 * powerNorm + 0.05 * skillNorm;
+            }
             return 0.70 * powerNorm + 0.95 * skillNorm + 0.20 * eventNorm + 0.10 * supportNorm;
         }
         if (cfg.target == RecommendTarget::Mysekai) {

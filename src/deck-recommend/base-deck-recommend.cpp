@@ -359,6 +359,12 @@ std::vector<RecommendDeck> BaseDeckRecommend::recommendHighScoreDeck(
                 + 1.35 * eventNorm
                 + 0.25 * supportNorm;
         }
+        if (config.target == RecommendTarget::Bonus) {
+            return 1.30 * eventNorm
+                + 0.35 * supportNorm
+                + 0.10 * powerNorm
+                + 0.05 * skillNorm;
+        }
         return 0.55 * powerNorm
             + 0.75 * skillNorm
             + 0.30 * eventNorm
@@ -370,10 +376,14 @@ std::vector<RecommendDeck> BaseDeckRecommend::recommendHighScoreDeck(
                 return std::make_tuple(a.skill.max, a.skill.min, a.cardId)
                     > std::make_tuple(b.skill.max, b.skill.min, b.cardId);
             });
-        } else if (config.target == RecommendTarget::Score || config.target == RecommendTarget::Mysekai) {
+        } else if (
+            config.target == RecommendTarget::Score
+            || config.target == RecommendTarget::Mysekai
+            || config.target == RecommendTarget::Bonus
+        ) {
             std::sort(input.begin(), input.end(), [&](const CardDetail& a, const CardDetail& b) {
-                return std::make_tuple(scoreHeuristic(a), a.skill.max, cardEventBonus(a), a.power.max, a.cardId)
-                    > std::make_tuple(scoreHeuristic(b), b.skill.max, cardEventBonus(b), b.power.max, b.cardId);
+                return std::make_tuple(scoreHeuristic(a), cardEventBonus(a), a.skill.max, a.power.max, a.cardId)
+                    > std::make_tuple(scoreHeuristic(b), cardEventBonus(b), b.skill.max, b.power.max, b.cardId);
             });
         } else {
             std::sort(input.begin(), input.end(), [](const CardDetail& a, const CardDetail& b) {
@@ -612,19 +622,23 @@ std::vector<RecommendDeck> BaseDeckRecommend::recommendHighScoreDeck(
             tryAdd(sortedCards[i]);
         }
 
-        if (config.target == RecommendTarget::Mysekai) {
+        if (config.target == RecommendTarget::Mysekai || config.target == RecommendTarget::Bonus) {
             auto eventSorted = sortedCards;
             std::sort(eventSorted.begin(), eventSorted.end(), [&](const CardDetail& a, const CardDetail& b) {
-                return std::make_tuple(cardEventBonus(a), a.power.max, a.cardId)
-                    > std::make_tuple(cardEventBonus(b), b.power.max, b.cardId);
+                return std::make_tuple(cardEventBonus(a), a.power.max, a.skill.max, a.cardId)
+                    > std::make_tuple(cardEventBonus(b), b.power.max, b.skill.max, b.cardId);
             });
-            int eventKeep = std::min(int(eventSorted.size()), std::max(config.member * 18, 90));
+            int eventKeep = config.target == RecommendTarget::Bonus
+                ? std::min(int(eventSorted.size()), std::max(config.member * 24, 120))
+                : std::min(int(eventSorted.size()), std::max(config.member * 18, 90));
             for (int i = 0; i < eventKeep; ++i) {
                 tryAdd(eventSorted[i]);
             }
 
             std::array<int, 32> perCharacterEventCount{};
-            int perCharacterEventKeep = Enums::LiveType::isChallenge(liveType) ? std::max(config.member, 3) : 4;
+            int perCharacterEventKeep = config.target == RecommendTarget::Bonus
+                ? (Enums::LiveType::isChallenge(liveType) ? std::max(config.member, 3) : 5)
+                : (Enums::LiveType::isChallenge(liveType) ? std::max(config.member, 3) : 4);
             for (const auto& card : eventSorted) {
                 auto& count = perCharacterEventCount[card.characterId];
                 if (count < perCharacterEventKeep) {
@@ -757,19 +771,23 @@ std::vector<RecommendDeck> BaseDeckRecommend::recommendHighScoreDeck(
                 }
                 tryAdd(card);
             }
-        } else if (config.target == RecommendTarget::Mysekai) {
+        } else if (config.target == RecommendTarget::Mysekai || config.target == RecommendTarget::Bonus) {
             auto eventSorted = sortedCards;
             std::sort(eventSorted.begin(), eventSorted.end(), [&](const CardDetail& a, const CardDetail& b) {
-                return std::make_tuple(cardEventBonus(a), a.power.max, a.cardId)
-                    > std::make_tuple(cardEventBonus(b), b.power.max, b.cardId);
+                return std::make_tuple(cardEventBonus(a), a.power.max, a.skill.max, a.cardId)
+                    > std::make_tuple(cardEventBonus(b), b.power.max, b.skill.max, b.cardId);
             });
-            int eventKeep = std::min(int(eventSorted.size()), std::max(config.member * 24, 120));
+            int eventKeep = config.target == RecommendTarget::Bonus
+                ? std::min(int(eventSorted.size()), std::max(config.member * 30, 150))
+                : std::min(int(eventSorted.size()), std::max(config.member * 24, 120));
             for (int i = 0; i < eventKeep; ++i) {
                 tryAdd(eventSorted[i]);
             }
 
             std::array<int, 32> perCharacterEventCount{};
-            int perCharacterEventKeep = Enums::LiveType::isChallenge(liveType) ? std::max(config.member, 3) : 5;
+            int perCharacterEventKeep = config.target == RecommendTarget::Bonus
+                ? (Enums::LiveType::isChallenge(liveType) ? std::max(config.member, 3) : 6)
+                : (Enums::LiveType::isChallenge(liveType) ? std::max(config.member, 3) : 5);
             for (const auto& card : eventSorted) {
                 auto& count = perCharacterEventCount[card.characterId];
                 if (count < perCharacterEventKeep) {
@@ -788,7 +806,9 @@ std::vector<RecommendDeck> BaseDeckRecommend::recommendHighScoreDeck(
                 tryAdd(heuristicSorted[i]);
             }
 
-            auto minKeep = std::min(sortedCards.size(), std::size_t(std::max(config.member * 24, 120)));
+            auto minKeep = config.target == RecommendTarget::Bonus
+                ? std::min(sortedCards.size(), std::size_t(std::max(config.member * 30, 150)))
+                : std::min(sortedCards.size(), std::size_t(std::max(config.member * 24, 120)));
             for (const auto& card : sortedCards) {
                 if (pruned.size() >= minKeep) {
                     break;
@@ -864,7 +884,7 @@ std::vector<RecommendDeck> BaseDeckRecommend::recommendHighScoreDeck(
     };
 
     // 指定活动加成组卡
-    if (config.target == RecommendTarget::Bonus) {
+    if (config.target == RecommendTarget::Bonus && !config.bonusList.empty()) {
         auto calcInfo = makeCalcInfo(config.timeout_ms);
         std::vector<RecommendDeck> ans{};
         if (eventConfig.eventType == 0) 

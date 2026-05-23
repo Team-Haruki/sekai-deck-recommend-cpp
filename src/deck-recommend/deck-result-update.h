@@ -55,6 +55,10 @@ struct RecommendDeck : DeckDetail {
                     targetValue = power + double(score) / SCORE_MAX;
                 } else if (target == RecommendTarget::Skill) {
                     targetValue = multiLiveScoreUp + double(score) / SCORE_MAX;
+                } else if (target == RecommendTarget::Bonus) {
+                    targetValue = deckDetail.eventBonus.value_or(0.0)
+                        + deckDetail.supportDeckBonus.value_or(0.0)
+                        + double(score) / SCORE_MAX;
                 } else {
                     targetValue = score + double(liveScore) / SCORE_MAX;
                 }
