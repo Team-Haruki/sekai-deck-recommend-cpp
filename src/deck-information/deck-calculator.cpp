@@ -180,6 +180,7 @@ std::vector<DeckDetail> DeckCalculator::getDeckDetailByCards(
         power.gateBonus += p.gateBonus;
         power.total += p.total;
     }
+    power.honorBonus = honorBonus;
     power.total += honorBonus;
     if (eventType == Enums::EventType::world_bloom
      && eventId.has_value()
