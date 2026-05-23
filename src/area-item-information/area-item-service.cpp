@@ -1,5 +1,7 @@
 #include "area-item-information/area-item-service.h"
 
+#include <algorithm>
+
 std::vector<AreaItemLevel> AreaItemService::getAreaItemLevels()
 {
     auto& userAreas = this->dataProvider.userData->userAreas;
@@ -15,15 +17,32 @@ std::vector<AreaItemLevel> AreaItemService::getAreaItemLevels()
 AreaItemLevel AreaItemService::getAreaItemLevel(int areaItemId, int level)
 {
     auto& areaItemLevels = this->dataProvider.masterData->areaItemLevels;
+    int clampedLevel = std::min(level, this->getMaxAreaItemLevel(areaItemId));
     return findOrThrow(areaItemLevels, [&](const AreaItemLevel& it) {
-        return it.areaItemId == areaItemId && it.level == level;
+        return it.areaItemId == areaItemId && it.level == clampedLevel;
     }, [&]() { return "Area item level not found for areaItemId=" + std::to_string(areaItemId) + " level=" + std::to_string(level); });
+}
+
+int AreaItemService::getMaxAreaItemLevel(int areaItemId)
+{
+    auto& areaItemLevels = this->dataProvider.masterData->areaItemLevels;
+    int maxLevel = 0;
+    for (const auto& areaItemLevel : areaItemLevels) {
+        if (areaItemLevel.areaItemId == areaItemId) {
+            maxLevel = std::max(maxLevel, areaItemLevel.level);
+        }
+    }
+    if (maxLevel == 0) {
+        throw ElementNoFoundError("Area item levels not found for areaItemId=" + std::to_string(areaItemId));
+    }
+    return maxLevel;
 }
 
 AreaItemLevel AreaItemService::getAreaItemNextLevel(const AreaItem &areaItem, std::optional<AreaItemLevel> areaItemLevel)
 {
-    // 如果没有给定当前等级，就按未购买算、如果已经15级了下个等级还是15级
-    int level = areaItemLevel.has_value() ? (areaItemLevel->level == 15 ? 15 : areaItemLevel->level + 1) : 1;
+    // 如果没有给定当前等级，就按未购买算；如果已到当前master上限，下个等级仍为上限。
+    int maxLevel = this->getMaxAreaItemLevel(areaItem.id);
+    int level = areaItemLevel.has_value() ? std::min(areaItemLevel->level + 1, maxLevel) : 1;
     return this->getAreaItemLevel(areaItem.id, level);
 }
 
