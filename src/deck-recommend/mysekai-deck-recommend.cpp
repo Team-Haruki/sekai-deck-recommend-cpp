@@ -15,7 +15,7 @@ std::vector<RecommendDeck> MysekaiDeckRecommend::recommendMysekaiDeck(
     cfg.target = RecommendTarget::Mysekai;
     cfg.keepAfterTrainingState = true;
 
-    auto userCards = dataProvider.userData->userCards;
+    const auto& userCards = dataProvider.userData->userCards;
     return baseRecommend.recommendHighScoreDeck(userCards,
         this->mysekaiEventCalculator.getMysekaiEventPointFunction(), 
         cfg, 

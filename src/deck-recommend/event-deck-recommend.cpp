@@ -12,7 +12,7 @@ std::vector<RecommendDeck> EventDeckRecommend::recommendEventDeck(int eventId, i
         liveType = Enums::LiveType::cheerful_live;
     }
 
-    auto userCards = dataProvider.userData->userCards;
+    const auto& userCards = dataProvider.userData->userCards;
     return baseRecommend.recommendHighScoreDeck(userCards,
         this->eventCalculator.getEventPointFunction(
             liveType, 
