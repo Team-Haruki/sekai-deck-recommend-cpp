@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.15)
 
-project(sekai-deck-recommend-cpp VERSION 0.2.28 LANGUAGES C CXX)
+project(sekai-deck-recommend-cpp VERSION 0.2.29 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)

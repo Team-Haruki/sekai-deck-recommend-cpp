@@ -662,6 +662,24 @@ yyjson_mut_val* deckToJson(yyjson_mut_doc* doc, const RecommendDeck& deck) {
     jsonAdd(doc, j, "support_deck_bonus_rate", deck.supportDeckBonus.value_or(0.0));
     jsonAdd(doc, j, "multi_live_score_up", deck.multiLiveScoreUp);
 
+    yyjson_mut_val* supportDeckCards = yyjson_mut_arr(doc);
+    if (!supportDeckCards) throw std::runtime_error("Failed to allocate support deck cards JSON array.");
+    if (deck.supportDeckCards.has_value()) {
+        for (const auto& c : deck.supportDeckCards.value()) {
+            yyjson_mut_val* cj = yyjson_mut_obj(doc);
+            if (!cj) throw std::runtime_error("Failed to allocate support deck card JSON object.");
+            jsonAdd(doc, cj, "card_id", c.cardId);
+            jsonAdd(doc, cj, "bonus", c.supportDeckBonus.value_or(0.0));
+            jsonAdd(doc, cj, "skill_level", c.skillLevel);
+            jsonAdd(doc, cj, "master_rank", c.masterRank);
+            jsonAdd(doc, cj, "level", c.level);
+            jsonAdd(doc, cj, "after_training", c.afterTraining);
+            jsonAdd(doc, cj, "default_image", mappedEnumToString(EnumMap::defaultImage, c.defaultImage));
+            jsonArrayAppend(supportDeckCards, cj);
+        }
+    }
+    jsonAddValue(doc, j, "support_deck_cards", supportDeckCards);
+
     yyjson_mut_val* cards = yyjson_mut_arr(doc);
     if (!cards) throw std::runtime_error("Failed to allocate cards JSON array.");
     for (const auto& c : deck.cards) {

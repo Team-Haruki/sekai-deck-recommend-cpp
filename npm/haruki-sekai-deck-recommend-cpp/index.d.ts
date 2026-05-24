@@ -181,6 +181,7 @@ export interface RecommendDeck {
   event_bonus_rate: number
   support_deck_bonus_rate: number
   multi_live_score_up: number
+  support_deck_cards?: WorldBloomSupportCard[]
   cards: RecommendCard[]
 }
 
@@ -191,6 +192,11 @@ export interface RecommendResult {
 export interface WorldBloomSupportCard {
   card_id: number
   bonus: number
+  skill_level?: number
+  master_rank?: number
+  level?: number
+  after_training?: boolean
+  default_image?: string
 }
 
 export interface RawSekaiDeckRecommendInstance {

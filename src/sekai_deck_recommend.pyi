@@ -314,6 +314,7 @@ class RecommendDeck:
         event_bonus_rate (float): Event bonus rate of the deck
         support_deck_bonus_rate (float): Support deck bonus rate of the deck
         multi_live_score_up (float): final score up of the deck in multi live
+        support_deck_cards (List[RecommendSupportDeckCard]): World bloom support deck cards for this deck
         cards (List[RecommendCard]): List of recommended cards in the deck
     """
     score: int
@@ -329,6 +330,7 @@ class RecommendDeck:
     event_bonus_rate: float
     support_deck_bonus_rate: float
     multi_live_score_up: float
+    support_deck_cards: List['RecommendSupportDeckCard']
     cards: List[RecommendCard]
 
     def to_dict(self) -> Dict[str, Any]:
@@ -344,9 +346,19 @@ class RecommendSupportDeckCard:
     Attributes:
         card_id (int): Card ID
         bonus (float): Support deck bonus rate
+        skill_level (int): Skill level used for support deck bonus
+        master_rank (int): Master rank used for support deck bonus
+        level (int): Card level
+        after_training (bool): Whether the card is trained
+        default_image (str): Card art image state
     """
     card_id: int
     bonus: float
+    skill_level: int
+    master_rank: int
+    level: int
+    after_training: bool
+    default_image: str
 
     def to_dict(self) -> Dict[str, Any]:
         ...

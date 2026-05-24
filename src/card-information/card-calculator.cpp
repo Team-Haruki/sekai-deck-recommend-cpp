@@ -176,5 +176,10 @@ SupportDeckCard CardCalculator::getSupportDeckCard(
     return SupportDeckCard{
         .cardId = card.cardId,
         .bonus = bonus.value_or(0.0),
+        .skillLevel = supportCard.skillLevel,
+        .masterRank = supportCard.masterRank,
+        .level = supportCard.level,
+        .afterTraining = supportCard.specialTrainingStatus == Enums::SpecialTrainingStatus::done,
+        .defaultImage = supportCard.defaultImage,
     };
 }

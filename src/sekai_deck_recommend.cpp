@@ -612,11 +612,21 @@ struct PyRecommendCard {
 struct PyRecommendSupportDeckCard {
     int card_id;
     double bonus;
+    int skill_level;
+    int master_rank;
+    int level;
+    bool after_training;
+    std::string default_image;
 
     py::dict to_dict() const {
         py::dict result;
         result["card_id"] = card_id;
         result["bonus"] = bonus;
+        result["skill_level"] = skill_level;
+        result["master_rank"] = master_rank;
+        result["level"] = level;
+        result["after_training"] = after_training;
+        result["default_image"] = default_image;
         return result;
     }
 
@@ -624,6 +634,11 @@ struct PyRecommendSupportDeckCard {
         PyRecommendSupportDeckCard card;
         card.card_id = dict["card_id"].cast<int>();
         card.bonus = dict["bonus"].cast<double>();
+        card.skill_level = dict.contains("skill_level") ? dict["skill_level"].cast<int>() : 1;
+        card.master_rank = dict.contains("master_rank") ? dict["master_rank"].cast<int>() : 0;
+        card.level = dict.contains("level") ? dict["level"].cast<int>() : 1;
+        card.after_training = dict.contains("after_training") ? dict["after_training"].cast<bool>() : false;
+        card.default_image = dict.contains("default_image") ? dict["default_image"].cast<std::string>() : "";
         return card;
     }
 };
@@ -643,6 +658,7 @@ struct PyRecommendDeck {
     double event_bonus_rate;
     double support_deck_bonus_rate;
     double multi_live_score_up;
+    std::vector<PyRecommendSupportDeckCard> support_deck_cards;
     std::vector<PyRecommendCard> cards;
 
     py::dict to_dict() const {
@@ -660,6 +676,12 @@ struct PyRecommendDeck {
         result["event_bonus_rate"] = event_bonus_rate;
         result["support_deck_bonus_rate"] = support_deck_bonus_rate;
         result["multi_live_score_up"] = multi_live_score_up;
+
+        py::list support_deck_card_list;
+        for (const auto& card : support_deck_cards) {
+            support_deck_card_list.append(card.to_dict());
+        }
+        result["support_deck_cards"] = support_deck_card_list;
 
         py::list card_list;
         for (const auto& card : cards) {
@@ -684,6 +706,13 @@ struct PyRecommendDeck {
         deck.event_bonus_rate = dict["event_bonus_rate"].cast<double>();
         deck.support_deck_bonus_rate = dict["support_deck_bonus_rate"].cast<double>();
         deck.multi_live_score_up = dict["multi_live_score_up"].cast<double>();
+
+        if (dict.contains("support_deck_cards")) {
+            auto support_deck_card_list = dict["support_deck_cards"].cast<py::list>();
+            for (const auto& item : support_deck_card_list) {
+                deck.support_deck_cards.push_back(PyRecommendSupportDeckCard::from_dict(item.cast<py::dict>()));
+            }
+        }
 
         auto card_list = dict["cards"].cast<py::list>();
         for (const auto& item : card_list) {
@@ -1254,6 +1283,19 @@ class SekaiDeckRecommend {
             py_deck.event_bonus_rate = deck.eventBonus.value_or(0);
             py_deck.support_deck_bonus_rate = deck.supportDeckBonus.value_or(0);
             py_deck.multi_live_score_up = deck.multiLiveScoreUp;
+            if (deck.supportDeckCards.has_value()) {
+                for (const auto& card : deck.supportDeckCards.value()) {
+                    py_deck.support_deck_cards.push_back(PyRecommendSupportDeckCard{
+                        .card_id = card.cardId,
+                        .bonus = card.supportDeckBonus.value_or(0.0),
+                        .skill_level = card.skillLevel,
+                        .master_rank = card.masterRank,
+                        .level = card.level,
+                        .after_training = card.afterTraining,
+                        .default_image = mappedEnumToString(EnumMap::defaultImage, card.defaultImage),
+                    });
+                }
+            }
 
             for (const auto& card : deck.cards) {
                 auto py_card = PyRecommendCard();
@@ -1395,6 +1437,11 @@ public:
             result.push_back(PyRecommendSupportDeckCard{
                 .card_id = supportCard.cardId,
                 .bonus = supportCard.bonus,
+                .skill_level = supportCard.skillLevel,
+                .master_rank = supportCard.masterRank,
+                .level = supportCard.level,
+                .after_training = supportCard.afterTraining,
+                .default_image = mappedEnumToString(EnumMap::defaultImage, supportCard.defaultImage),
             });
         }
         std::sort(result.begin(), result.end(), [](const auto& a, const auto& b) {
@@ -1590,7 +1637,12 @@ PYBIND11_MODULE(sekai_deck_recommend, m) {
         .def("to_dict", &PyRecommendSupportDeckCard::to_dict)
         .def_static("from_dict", &PyRecommendSupportDeckCard::from_dict)
         .def_readwrite("card_id", &PyRecommendSupportDeckCard::card_id)
-        .def_readwrite("bonus", &PyRecommendSupportDeckCard::bonus);
+        .def_readwrite("bonus", &PyRecommendSupportDeckCard::bonus)
+        .def_readwrite("skill_level", &PyRecommendSupportDeckCard::skill_level)
+        .def_readwrite("master_rank", &PyRecommendSupportDeckCard::master_rank)
+        .def_readwrite("level", &PyRecommendSupportDeckCard::level)
+        .def_readwrite("after_training", &PyRecommendSupportDeckCard::after_training)
+        .def_readwrite("default_image", &PyRecommendSupportDeckCard::default_image);
 
     py::class_<PyRecommendDeck>(m, "RecommendDeck")
         .def(py::init<>())
@@ -1610,6 +1662,7 @@ PYBIND11_MODULE(sekai_deck_recommend, m) {
         .def_readwrite("event_bonus_rate", &PyRecommendDeck::event_bonus_rate)
         .def_readwrite("support_deck_bonus_rate", &PyRecommendDeck::support_deck_bonus_rate)
         .def_readwrite("multi_live_score_up", &PyRecommendDeck::multi_live_score_up)
+        .def_readwrite("support_deck_cards", &PyRecommendDeck::support_deck_cards)
         .def_readwrite("cards", &PyRecommendDeck::cards);
     
     py::class_<PyDeckRecommendResult>(m, "DeckRecommendResult")

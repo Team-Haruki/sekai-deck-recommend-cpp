@@ -91,6 +91,11 @@ SupportDeckBonus DeckCalculator::getSupportDeckBonus(
             CardDetail supportCard{};
             supportCard.cardId = card.cardId;
             supportCard.supportDeckBonus = card.bonus;
+            supportCard.skillLevel = card.skillLevel;
+            supportCard.masterRank = card.masterRank;
+            supportCard.level = card.level;
+            supportCard.afterTraining = card.afterTraining;
+            supportCard.defaultImage = card.defaultImage;
             ret.cards.push_back(supportCard);
         }
         ret.bonus += card.bonus;

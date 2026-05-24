@@ -43,6 +43,11 @@ struct CardDetail {
 struct SupportDeckCard {
     int cardId;
     double bonus;
+    int skillLevel;
+    int masterRank;
+    int level;
+    bool afterTraining;
+    int defaultImage;
 };
 
 
