@@ -1,5 +1,6 @@
 #include "deck-recommend/base-deck-recommend.h"
 
+#include <cmath>
 
 static int getCharaBonusKey(int chara, int bonus) {
     return bonus * 100 + chara;

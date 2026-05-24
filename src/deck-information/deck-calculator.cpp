@@ -2,6 +2,9 @@
 #include "common/timer.h"
 #include "deck-calculator.h"
 
+#include <algorithm>
+#include <array>
+#include <cmath>
 #include <numeric>
 
 DeckBonusInfo DeckCalculator::getDeckBonus(

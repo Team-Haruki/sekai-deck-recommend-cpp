@@ -7,9 +7,12 @@
 #include "live-score/live-calculator.h"
 #include "area-item-information/area-item-service.h"
 #include <algorithm>
+#include <limits>
 #include <optional>
 #include <random>
+#include <unordered_map>
 #include <unordered_set>
+#include <vector>
 
 using Rng = std::mt19937_64;
 

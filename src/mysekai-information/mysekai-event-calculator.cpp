@@ -1,5 +1,7 @@
 #include "mysekai-information/mysekai-event-calculator.h"
 
+#include <cmath>
+
 Score MysekaiEventCalculator::getDeckMysekaiEventPoint(const DeckDetail &deckDetail)
 {
     // 公式来源：@SYLVIA0x0

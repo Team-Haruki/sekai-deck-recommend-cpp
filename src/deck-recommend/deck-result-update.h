@@ -3,9 +3,15 @@
 
 #include "deck-information/deck-calculator.h"
 #include "live-score/live-calculator.h"
-#include <set>
-#include <queue>
+
 #include <bitset>
+#include <functional>
+#include <limits>
+#include <queue>
+#include <set>
+#include <unordered_map>
+#include <unordered_set>
+#include <vector>
 
 enum class RecommendTarget {
     Score,
