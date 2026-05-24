@@ -1,5 +1,8 @@
 #include "card-information/card-power-calculator.h"
 
+#include <algorithm>
+#include <cmath>
+
 CardDetailMap<DeckCardPowerDetail> CardPowerCalculator::getCardPower(
     const UserCard &userCard, 
     const Card &card, 

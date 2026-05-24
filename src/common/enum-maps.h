@@ -1,8 +1,10 @@
 #ifndef ENUM_MAPS_H
 #define ENUM_MAPS_H
 
+#include <stdexcept>
 #include <string>
 #include <unordered_map>
+#include <vector>
 
 enum class EnumMap {
     unit,

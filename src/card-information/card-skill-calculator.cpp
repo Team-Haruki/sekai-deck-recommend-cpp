@@ -1,5 +1,8 @@
 #include "card-information/card-skill-calculator.h"
 
+#include <algorithm>
+#include <limits>
+
 
 CardDetailMap<DeckCardSkillDetail> CardSkillCalculator::getCardSkill(
     const UserCard &userCard, 

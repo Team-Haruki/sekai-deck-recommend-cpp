@@ -1,7 +1,10 @@
 #ifndef CARD_DETAIL_MAP_H
 #define CARD_DETAIL_MAP_H
 
+#include <algorithm>
+#include <array>
 #include <cassert>
+#include <limits>
 #include <optional>
 #include <string>
 #include <map>

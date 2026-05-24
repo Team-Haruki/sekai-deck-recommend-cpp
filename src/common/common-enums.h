@@ -1,6 +1,8 @@
 #ifndef COMMON_ENUMS_H
 #define COMMON_ENUMS_H
 
+#include <array>
+
 #include "common/enum-maps.h"
 
 namespace Enums {

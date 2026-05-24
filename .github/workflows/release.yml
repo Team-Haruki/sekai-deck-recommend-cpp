@@ -131,16 +131,21 @@ jobs:
             exit 1
           fi
 
-          if [ -n "${EXPECTED_NPM_VERSION:-}" ]; then
-            actual_version="$(
-              tar -xOf "${packages[0]}" package/package.json \
-                | node -p "JSON.parse(require('fs').readFileSync(0, 'utf8')).version"
-            )"
+          actual_version="$(
+            tar -xOf "${packages[0]}" package/package.json \
+              | node -p "JSON.parse(require('fs').readFileSync(0, 'utf8')).version"
+          )"
 
+          if [ -n "${EXPECTED_NPM_VERSION:-}" ]; then
             if [ "${actual_version}" != "${EXPECTED_NPM_VERSION}" ]; then
               echo "Expected npm package version ${EXPECTED_NPM_VERSION}, got ${actual_version}."
               exit 1
             fi
+          fi
+
+          if npm view "haruki-sekai-deck-recommend-cpp@${actual_version}" version >/dev/null 2>&1; then
+            echo "npm package version ${actual_version} already exists; skipping publish."
+            exit 0
           fi
 
           npm publish "$(realpath "${packages[0]}")" --provenance
