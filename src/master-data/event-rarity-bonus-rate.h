@@ -9,7 +9,7 @@ struct EventRarityBonusRate {
     int masterRank = 0;
     double bonusRate = 0.0;
 
-    static inline std::vector<EventRarityBonusRate> fromJsonList(const json& jsonData) {
+    static inline std::vector<EventRarityBonusRate> fromJsonList(const json_view& jsonData) {
         std::vector<EventRarityBonusRate> eventRarityBonusRates;
         for (const auto& item : jsonData) {
             EventRarityBonusRate eventRarityBonusRate;

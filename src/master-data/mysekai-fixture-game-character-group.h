@@ -8,7 +8,7 @@ struct MysekaiFixtureGameCharacterGroup {
     int groupId;
     int gameCharacterId;
 
-    static inline std::vector<MysekaiFixtureGameCharacterGroup> fromJsonList(const json& jsonData) {
+    static inline std::vector<MysekaiFixtureGameCharacterGroup> fromJsonList(const json_view& jsonData) {
         std::vector<MysekaiFixtureGameCharacterGroup> groups;
         for (const auto& item : jsonData) {
             MysekaiFixtureGameCharacterGroup group;

@@ -2,10 +2,11 @@
 
 #include <fstream>
 #include <iostream>
+#include <iterator>
 
 
 template<typename T>
-T loadUserDataJson(const json& j, const std::string& key, bool required = true) {
+T loadUserDataJson(const json_view& j, const std::string& key, bool required = true) {
     if (j.contains(key)) {
         return T::fromJson(j[key]);
     } 
@@ -17,7 +18,7 @@ T loadUserDataJson(const json& j, const std::string& key, bool required = true) 
 }
 
 template<typename T>
-std::vector<T> loadUserDataJsonList(const json& j, const std::string& key, bool required = true) {
+std::vector<T> loadUserDataJsonList(const json_view& j, const std::string& key, bool required = true) {
     if (j.contains(key)) {
         return T::fromJsonList(j[key]);
     } 
@@ -29,7 +30,7 @@ std::vector<T> loadUserDataJsonList(const json& j, const std::string& key, bool 
 }
 
 template<typename T>
-std::vector<T> loadOptionalUserDataJsonList(const json& j, const std::string& key) {
+std::vector<T> loadOptionalUserDataJsonList(const json_view& j, const std::string& key) {
     if (j.contains(key)) {
         return T::fromJsonList(j[key]);
     }
@@ -37,7 +38,7 @@ std::vector<T> loadOptionalUserDataJsonList(const json& j, const std::string& ke
 }
 
 
-void UserData::loadFromJson(const json& j) {
+void UserData::loadFromJson(const json_view& j) {
     this->userGamedata = loadUserDataJson<UserGameData>(j, "userGamedata");
     this->userAreas = loadUserDataJsonList<UserArea>(j, "userAreas");
     this->userCards = loadUserDataJsonList<UserCard>(j, "userCards");
@@ -52,28 +53,28 @@ void UserData::loadFromJson(const json& j) {
 }
 
 void UserData::loadFromFile(const std::string& path) {
-    json j;
+    std::string content;
     try {
         this->path = path;
         std::ifstream file(path);
         if (!file.is_open()) {
             throw std::runtime_error("Failed to open user data file: " + path);
         }
-        file >> j;
-        file.close();
+        content.assign(std::istreambuf_iterator<char>(file), std::istreambuf_iterator<char>());
     } catch (const std::exception& e) {
         throw std::runtime_error("Failed to load user data from file: " + path + ", error: " + e.what());
     }
-    this->loadFromJson(j);
+    auto doc = json_doc::parse(content, "user data file: " + path);
+    this->loadFromJson(doc.root());
 }
 
 void UserData::loadFromString(const std::string& s) {
-    json j;
+    json_doc doc;
     try {
         this->path.clear();
-        j = json::parse(s);
+        doc = json_doc::parse(s, "user data string");
     } catch (const std::exception& e) {
         throw std::runtime_error("Failed to load user data from bytes, error: " + std::string(e.what()));
     }
-    this->loadFromJson(j);
+    this->loadFromJson(doc.root());
 }

@@ -10,7 +10,7 @@ struct UserMysekaiGate {
     int visitCount;
     bool isSettingAtHomeSite;
 
-    static inline std::vector<UserMysekaiGate> fromJsonList(const json& jsonData) {
+    static inline std::vector<UserMysekaiGate> fromJsonList(const json_view& jsonData) {
         std::vector<UserMysekaiGate> userMysekaiGates;
         for (const auto& item : jsonData) {
             UserMysekaiGate userMysekaiGate;

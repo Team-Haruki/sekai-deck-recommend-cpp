@@ -11,7 +11,7 @@ struct CharacterRank {
     double power2BonusRate;
     double power3BonusRate;
 
-    static inline std::vector<CharacterRank> fromJsonList(const json& jsonData) {
+    static inline std::vector<CharacterRank> fromJsonList(const json_view& jsonData) {
         std::vector<CharacterRank> characterRanks;
         for (const auto& item : jsonData) {
             CharacterRank characterRank;

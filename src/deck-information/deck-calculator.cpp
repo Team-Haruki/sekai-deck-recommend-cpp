@@ -2,6 +2,7 @@
 #include "common/timer.h"
 #include "deck-calculator.h"
 
+#include <numeric>
 
 DeckBonusInfo DeckCalculator::getDeckBonus(
     const std::vector<const CardDetail *> &deckCards, 

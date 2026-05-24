@@ -9,12 +9,12 @@ on:
       package_version:
         description: "npm package version to publish"
         required: true
-        default: "0.2.22"
+        default: "0.2.28"
         type: string
       source_ref:
         description: "Git ref to build for npm publish"
         required: true
-        default: "v0.2.22"
+        default: "v0.2.28"
         type: string
 
 jobs:

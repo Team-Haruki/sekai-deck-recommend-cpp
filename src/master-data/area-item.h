@@ -7,7 +7,7 @@ struct AreaItem {
     int id = 0;
     int areaId = 0;
     
-    static inline std::vector<AreaItem> fromJsonList(const json& jsonData) {
+    static inline std::vector<AreaItem> fromJsonList(const json_view& jsonData) {
         std::vector<AreaItem> areaItems;
         for (const auto& item : jsonData) {
             AreaItem areaItem;

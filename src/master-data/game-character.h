@@ -20,7 +20,7 @@ struct GameCharacter {
     int unit = 0;
     int supportUnitType = 0;
 
-    inline static std::vector<GameCharacter> fromJsonList(const json& jsonData) {
+    inline static std::vector<GameCharacter> fromJsonList(const json_view& jsonData) {
         std::vector<GameCharacter> gameCharacters;
         for (const auto& item : jsonData) {
             GameCharacter gameCharacter;

@@ -9,7 +9,7 @@ struct WorldBloomSupportDeckCharacterBonus {
     int worldBloomSupportDeckCharacterType = 0;
     double bonusRate = 0.0;
 
-    static inline std::vector<WorldBloomSupportDeckCharacterBonus> fromJsonList(const json& jsonData) {
+    static inline std::vector<WorldBloomSupportDeckCharacterBonus> fromJsonList(const json_view& jsonData) {
         std::vector<WorldBloomSupportDeckCharacterBonus> bonuses;
         for (const auto& item : jsonData) {
             WorldBloomSupportDeckCharacterBonus bonus;
@@ -28,7 +28,7 @@ struct WorldBloomSupportDeckMasterRankBonus {
     int masterRank = 0;
     double bonusRate = 0.0;
 
-    static inline std::vector<WorldBloomSupportDeckMasterRankBonus> fromJsonList(const json& jsonData) {
+    static inline std::vector<WorldBloomSupportDeckMasterRankBonus> fromJsonList(const json_view& jsonData) {
         std::vector<WorldBloomSupportDeckMasterRankBonus> bonuses;
         for (const auto& item : jsonData) {
             WorldBloomSupportDeckMasterRankBonus bonus;
@@ -47,7 +47,7 @@ struct WorldBloomSupportDeckSkillLevelBonus {
     int skillLevel = 0;
     double bonusRate = 0.0;
 
-    static inline std::vector<WorldBloomSupportDeckSkillLevelBonus> fromJsonList(const json& jsonData) {
+    static inline std::vector<WorldBloomSupportDeckSkillLevelBonus> fromJsonList(const json_view& jsonData) {
         std::vector<WorldBloomSupportDeckSkillLevelBonus> bonuses;
         for (const auto& item : jsonData) {
             WorldBloomSupportDeckSkillLevelBonus bonus;
@@ -67,14 +67,14 @@ struct WorldBloomSupportDeckBonus {
     std::vector<WorldBloomSupportDeckMasterRankBonus> worldBloomSupportDeckMasterRankBonuses;
     std::vector<WorldBloomSupportDeckSkillLevelBonus> worldBloomSupportDeckSkillLevelBonuses;
 
-    static inline std::vector<WorldBloomSupportDeckBonus> fromJsonList(const json& jsonData) {
+    static inline std::vector<WorldBloomSupportDeckBonus> fromJsonList(const json_view& jsonData) {
         std::vector<WorldBloomSupportDeckBonus> bonuses;
         for (const auto& item : jsonData) {
             WorldBloomSupportDeckBonus bonus;
             bonus.cardRarityType = mapEnum(EnumMap::cardRarityType, item.value("cardRarityType", ""));
-            bonus.worldBloomSupportDeckCharacterBonuses = WorldBloomSupportDeckCharacterBonus::fromJsonList(item.value("worldBloomSupportDeckCharacterBonuses", json::array()));
-            bonus.worldBloomSupportDeckMasterRankBonuses = WorldBloomSupportDeckMasterRankBonus::fromJsonList(item.value("worldBloomSupportDeckMasterRankBonuses", json::array()));
-            bonus.worldBloomSupportDeckSkillLevelBonuses = WorldBloomSupportDeckSkillLevelBonus::fromJsonList(item.value("worldBloomSupportDeckSkillLevelBonuses", json::array()));
+            bonus.worldBloomSupportDeckCharacterBonuses = WorldBloomSupportDeckCharacterBonus::fromJsonList(item.value("worldBloomSupportDeckCharacterBonuses", json_view::array()));
+            bonus.worldBloomSupportDeckMasterRankBonuses = WorldBloomSupportDeckMasterRankBonus::fromJsonList(item.value("worldBloomSupportDeckMasterRankBonuses", json_view::array()));
+            bonus.worldBloomSupportDeckSkillLevelBonuses = WorldBloomSupportDeckSkillLevelBonus::fromJsonList(item.value("worldBloomSupportDeckSkillLevelBonuses", json_view::array()));
             bonuses.push_back(bonus);
         }
         return bonuses;

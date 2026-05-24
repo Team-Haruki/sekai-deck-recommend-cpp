@@ -13,7 +13,7 @@ struct UserGameData {
     int coin = 0;
     int virtualCoin = 0;
 
-    static inline UserGameData fromJson(const json& jsonData) {
+    static inline UserGameData fromJson(const json_view& jsonData) {
         UserGameData userGameData;
         userGameData.userId = jsonData.value("userId", 0);
         userGameData.deck = jsonData.value("deck", 0);

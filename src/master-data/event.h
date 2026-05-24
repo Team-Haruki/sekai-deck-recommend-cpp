@@ -13,7 +13,7 @@ struct Event {
     TS closedAt = 0;
     TS distributionEndAt = 0;
 
-    inline static std::vector<Event> fromJsonList(const json& jsonData) {
+    inline static std::vector<Event> fromJsonList(const json_view& jsonData) {
         std::vector<Event> events;
         for (const auto& item : jsonData) {
             Event event;

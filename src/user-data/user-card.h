@@ -7,7 +7,7 @@ struct UserCardEpisodes {
     int cardEpisodeId = 0;
     int scenarioStatus = 0;
 
-    static inline std::vector<UserCardEpisodes> fromJsonList(const json& jsonData) {
+    static inline std::vector<UserCardEpisodes> fromJsonList(const json_view& jsonData) {
         std::vector<UserCardEpisodes> episodes;
         for (const auto& item : jsonData) {
             UserCardEpisodes episode;
@@ -38,7 +38,7 @@ struct UserCard {
     int defaultImage = 0;
     std::vector<UserCardEpisodes> episodes;
 
-    static inline std::vector<UserCard> fromJsonList(const json& jsonData) {
+    static inline std::vector<UserCard> fromJsonList(const json_view& jsonData) {
         std::vector<UserCard> userCards;
         for (const auto& item : jsonData) {
             UserCard userCard;
@@ -54,7 +54,7 @@ struct UserCard {
                 userCard.masterRank = item.size() > 7 && item[7].is_number_integer() ? item[7].get<int>() : 0;
                 userCard.specialTrainingStatus = mapEnum(EnumMap::specialTrainingStatus, item.size() > 8 && item[8].is_string() ? item[8].get<std::string>() : "");
                 userCard.defaultImage = mapEnum(EnumMap::defaultImage, item.size() > 9 && item[9].is_string() ? item[9].get<std::string>() : "");
-                userCard.episodes = UserCardEpisodes::fromJsonList(item.size() > 12 && item[12].is_array() ? item[12] : json::array());
+                userCard.episodes = UserCardEpisodes::fromJsonList(item.size() > 12 && item[12].is_array() ? item[12] : json_view::array());
             } else {
                 userCard.userId = item.value("userId", 0);
                 userCard.cardId = item.value("cardId", 0);
@@ -66,7 +66,7 @@ struct UserCard {
                 userCard.totalSkillExp = item.value("totalSkillExp", 0);
                 userCard.masterRank = item.value("masterRank", 0);
                 userCard.specialTrainingStatus = mapEnum(EnumMap::specialTrainingStatus, item.value("specialTrainingStatus", ""));
-                userCard.episodes = UserCardEpisodes::fromJsonList(item.value("episodes", json::array()));
+                userCard.episodes = UserCardEpisodes::fromJsonList(item.value("episodes", json_view::array()));
                 userCard.defaultImage = mapEnum(EnumMap::defaultImage, item.value("defaultImage", ""));
             }
             userCards.push_back(userCard);

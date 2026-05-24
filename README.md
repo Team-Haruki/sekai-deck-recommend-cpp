@@ -3,6 +3,8 @@
 Team Haruki's maintained fork of the C++ Project Sekai deck recommendation
 engine. The previous C++ optimization project lives at
 [NeuraXmy/sekai-deck-recommend-cpp](https://github.com/NeuraXmy/sekai-deck-recommend-cpp).
+Some modifications are based on
+[moe-sekai/sekai-deck-recommend-cpp](https://github.com/moe-sekai/sekai-deck-recommend-cpp).
 
 This project provides Python bindings and a WebAssembly target for the Haruki
 ecosystem, including the original brute-force search algorithm and additional
@@ -119,5 +121,6 @@ npm pack
 ## Acknowledgments
 - Original implementation by [xfl03/sekai-calculator](https://github.com/xfl03/sekai-calculator)
 - Previous C++ optimization project by [NeuraXmy/sekai-deck-recommend-cpp](https://github.com/NeuraXmy/sekai-deck-recommend-cpp)
-- JSON parsing by [nlohmann/json](https://github.com/nlohmann/json)
+- Some modifications based on [moe-sekai/sekai-deck-recommend-cpp](https://github.com/moe-sekai/sekai-deck-recommend-cpp)
+- JSON parsing and WebAssembly JSON payloads by [yyjson](https://github.com/ibireme/yyjson)
 - Python bindings powered by [pybind11](https://github.com/pybind/pybind11)

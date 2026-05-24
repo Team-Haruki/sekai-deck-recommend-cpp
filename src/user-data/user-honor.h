@@ -7,7 +7,7 @@ struct UserHonor {
     int honorId = 0;
     int level = 0;
 
-    static inline std::vector<UserHonor> fromJsonList(const json& jsonData) {
+    static inline std::vector<UserHonor> fromJsonList(const json_view& jsonData) {
         std::vector<UserHonor> userHonors;
         for (const auto& item : jsonData) {
             UserHonor userHonor;

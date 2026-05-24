@@ -1,14 +1,15 @@
 cmake_minimum_required(VERSION 3.15)
 
-project(sekai-deck-recommend-cpp VERSION 0.2.27 LANGUAGES CXX)
+project(sekai-deck-recommend-cpp VERSION 0.2.28 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 include_directories(${PROJECT_SOURCE_DIR}/src)
-include_directories(${PROJECT_SOURCE_DIR}/3rdparty/json/single_include)
+include_directories(${PROJECT_SOURCE_DIR}/3rdparty/yyjson/src)
 
 file(GLOB_RECURSE SRC_FILES "${PROJECT_SOURCE_DIR}/src/*.cpp")
+set(YYJSON_SOURCE "${PROJECT_SOURCE_DIR}/3rdparty/yyjson/src/yyjson.c")
 
 # Each binding file owns its own toolchain-specific binding macro
 # (PYBIND11_MODULE vs EMSCRIPTEN_BINDINGS). Strip both from the engine glob
@@ -21,6 +22,7 @@ list(REMOVE_ITEM SRC_FILES
 if (EMSCRIPTEN)
     add_executable(sekai_deck_recommend
         ${SRC_FILES}
+        ${YYJSON_SOURCE}
         "${PROJECT_SOURCE_DIR}/src/sekai_deck_recommend_wasm.cpp"
     )
     target_compile_options(sekai_deck_recommend PRIVATE
@@ -52,6 +54,7 @@ else()
 
     pybind11_add_module(sekai_deck_recommend
         ${SRC_FILES}
+        ${YYJSON_SOURCE}
         "${PROJECT_SOURCE_DIR}/src/sekai_deck_recommend.cpp"
     )
 

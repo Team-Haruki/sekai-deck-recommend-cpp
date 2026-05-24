@@ -11,7 +11,7 @@ struct MysekaiGateLevel {
     int mysekaiGateCharacterVisitCountRateId = 0;
     double powerBonusRate = 0.0;
 
-    static inline std::vector<MysekaiGateLevel> fromJsonList(const json& jsonData) {
+    static inline std::vector<MysekaiGateLevel> fromJsonList(const json_view& jsonData) {
         std::vector<MysekaiGateLevel> mysekaiGateLevels;
         for (const auto& item : jsonData) {
             MysekaiGateLevel mysekaiGateLevel;

@@ -9,7 +9,7 @@ struct EventCard {
     int eventId = 0;
     double bonusRate = 0.0;
 
-    static inline std::vector<EventCard> fromJsonList(const json& jsonData) {
+    static inline std::vector<EventCard> fromJsonList(const json_view& jsonData) {
         std::vector<EventCard> eventCards;
         for (const auto& item : jsonData) {
             EventCard eventCard;

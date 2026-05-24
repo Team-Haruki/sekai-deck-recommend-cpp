@@ -10,6 +10,8 @@ guidance.
 `sekai-deck-recommend-cpp` is Team Haruki's maintained fork of the C++ Project
 Sekai deck recommendation and calculation engine. The previous C++ optimization
 project is [NeuraXmy/sekai-deck-recommend-cpp](https://github.com/NeuraXmy/sekai-deck-recommend-cpp).
+Some modifications are based on
+[moe-sekai/sekai-deck-recommend-cpp](https://github.com/moe-sekai/sekai-deck-recommend-cpp).
 This fork ships Python bindings and a WebAssembly/npm package target. It is
 used directly by Python callers, by browser/Worker callers through wasm, and by
 Team Haruki's `deck-service` through a C/Rust FFI bridge.
@@ -33,7 +35,8 @@ change live automation behavior downstream.
   object/dictionary shaped. Compact arrays can appear in Mongo-exported local
   fixtures, but they are not the runtime API contract.
 - `src/master-data/`: masterdata model structs.
-- `3rdparty/json/`: vendored nlohmann/json dependency.
+- `3rdparty/yyjson/`: vendored yyjson dependency for masterdata, music metas,
+  userdata parsing, and wasm JSON-in / JSON-out binding payloads.
 - `sekai_deck_recommend.cpp` and `.pyi`: Python binding surface.
 - `data/`: static data required by the engine.
 

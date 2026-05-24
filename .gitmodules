@@ -1,6 +1,6 @@
 [submodule "3rdparty/pybind11"]
 	path = 3rdparty/pybind11
 	url = https://github.com/pybind/pybind11
-[submodule "3rdparty/json"]
-	path = 3rdparty/json
-	url = https://github.com/nlohmann/json
+[submodule "3rdparty/yyjson"]
+	path = 3rdparty/yyjson
+	url = https://github.com/ibireme/yyjson.git

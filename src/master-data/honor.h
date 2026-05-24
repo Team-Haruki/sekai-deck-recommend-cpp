@@ -8,7 +8,7 @@ struct HonorLevel {
     int level;
     int bonus;
 
-    static inline std::vector<HonorLevel> fromJsonList(const json& jsonData) {
+    static inline std::vector<HonorLevel> fromJsonList(const json_view& jsonData) {
         std::vector<HonorLevel> honorLevels;
         for (const auto& item : jsonData) {
             HonorLevel honorLevel;
@@ -29,7 +29,7 @@ struct Honor {
     std::vector<HonorLevel> levels;
     std::string assetbundleName;
 
-    static inline std::vector<Honor> fromJsonList(const json& jsonData) {
+    static inline std::vector<Honor> fromJsonList(const json_view& jsonData) {
         std::vector<Honor> honors;
         for (const auto& item : jsonData) {
             Honor honor;
@@ -37,7 +37,7 @@ struct Honor {
             honor.seq = item.value("seq", 0);
             honor.groupId = item.value("groupId", 0);
             honor.honorRarity = mapEnum(EnumMap::honorRarity, item.value("honorRarity", ""));
-            honor.levels = HonorLevel::fromJsonList(item.value("levels", json::array()));
+            honor.levels = HonorLevel::fromJsonList(item.value("levels", json_view::array()));
             honor.assetbundleName = item.value("assetbundleName", "");
             honors.push_back(honor);
         }

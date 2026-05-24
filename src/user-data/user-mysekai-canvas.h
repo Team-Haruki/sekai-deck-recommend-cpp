@@ -9,7 +9,7 @@ struct UserMysekaiCanvas {
     bool isSpecialTraining = false;
     int quantity = 0;
 
-    static inline std::vector<UserMysekaiCanvas> fromJsonList(const json& jsonData) {
+    static inline std::vector<UserMysekaiCanvas> fromJsonList(const json_view& jsonData) {
         std::vector<UserMysekaiCanvas> userMysekaiCanvases;
         for (const auto& item : jsonData) {
             UserMysekaiCanvas userMysekaiCanvas;

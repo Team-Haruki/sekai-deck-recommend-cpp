@@ -10,7 +10,7 @@ struct CardMysekaiCanvasBonus {
     int power2BonusFixed = 0;
     int power3BonusFixed = 0;
 
-    static inline std::vector<CardMysekaiCanvasBonus> fromJsonList(const json& jsonData) {
+    static inline std::vector<CardMysekaiCanvasBonus> fromJsonList(const json_view& jsonData) {
         std::vector<CardMysekaiCanvasBonus> bonuses;
         for (const auto& item : jsonData) {
             CardMysekaiCanvasBonus bonus;

@@ -17,26 +17,25 @@
 #include "deck-recommend/challenge-live-deck-recommend.h"
 #include "deck-recommend/mysekai-deck-recommend.h"
 #include "data-provider/static-data.h"
+#include "common/collection-utils.h"
 #include "common/common-enums.h"
 #include "common/enum-maps.h"
 
 #include <emscripten/bind.h>
 #include <emscripten/val.h>
 
-#include <nlohmann/json.hpp>
-
 #include <algorithm>
+#include <cstdlib>
 #include <map>
 #include <memory>
 #include <optional>
 #include <set>
 #include <stdexcept>
 #include <string>
+#include <type_traits>
 #include <tuple>
 #include <unordered_map>
 #include <vector>
-
-using json = nlohmann::json;
 
 namespace {
 
@@ -88,19 +87,98 @@ const std::set<std::string> VALID_SKILL_ORDER_CHOOSE_STRATEGIES = {
     "average", "max", "min", "specific",
 };
 
-// nlohmann json helpers ----------------------------------------------------
+// yyjson helpers -----------------------------------------------------------
+
+std::string jsonWriteErrorMessage(const yyjson_write_err& err) {
+    return err.msg ? std::string(err.msg) : std::string("unknown error");
+}
+
+std::string dumpJson(const json_view& v) {
+    size_t len = 0;
+    yyjson_write_err err{};
+    char* out = yyjson_val_write_opts(v.raw(), YYJSON_WRITE_NOFLAG, nullptr, &len, &err);
+    if (!out) {
+        throw std::runtime_error("Failed to serialize JSON value: " + jsonWriteErrorMessage(err));
+    }
+    std::string result(out, len);
+    std::free(out);
+    return result;
+}
 
 template <typename T>
-std::optional<T> jsonOpt(const json& j, const char* key) {
-    if (!j.contains(key) || j.at(key).is_null()) return std::nullopt;
-    return j.at(key).get<T>();
+std::optional<T> jsonOpt(const json_view& j, const char* key) {
+    if (!j.contains(key) || j[key].is_null()) return std::nullopt;
+    return j[key].get<T>();
+}
+
+std::string jsonTypeName(const json_view& v) {
+    const char* type = yyjson_get_type_desc(const_cast<yyjson_val*>(v.raw()));
+    return type ? std::string(type) : std::string("null");
 }
 
 // `user_data_str` may arrive as a JSON string OR already-parsed JSON object.
 // Normalize to a serialized string for UserData::loadFromString.
-std::string extractUserDataStr(const json& v) {
+std::string extractUserDataStr(const json_view& v) {
     if (v.is_string()) return v.get<std::string>();
-    return v.dump();
+    return dumpJson(v);
+}
+
+class MutableJsonDoc {
+public:
+    MutableJsonDoc() : doc(yyjson_mut_doc_new(nullptr)) {
+        if (!doc) throw std::runtime_error("Failed to allocate mutable JSON document.");
+    }
+    MutableJsonDoc(const MutableJsonDoc&) = delete;
+    MutableJsonDoc& operator=(const MutableJsonDoc&) = delete;
+    ~MutableJsonDoc() { yyjson_mut_doc_free(doc); }
+
+    yyjson_mut_doc* get() const { return doc; }
+
+private:
+    yyjson_mut_doc* doc = nullptr;
+};
+
+template <typename T, std::enable_if_t<std::is_integral_v<T> && !std::is_same_v<T, bool>, int> = 0>
+void jsonAdd(yyjson_mut_doc* doc, yyjson_mut_val* obj, const char* key, T value) {
+    if (!yyjson_mut_obj_add_int(doc, obj, key, value))
+        throw std::runtime_error(std::string("Failed to add JSON integer field: ") + key);
+}
+
+void jsonAdd(yyjson_mut_doc* doc, yyjson_mut_val* obj, const char* key, double value) {
+    if (!yyjson_mut_obj_add_real(doc, obj, key, value))
+        throw std::runtime_error(std::string("Failed to add JSON real field: ") + key);
+}
+
+void jsonAdd(yyjson_mut_doc* doc, yyjson_mut_val* obj, const char* key, bool value) {
+    if (!yyjson_mut_obj_add_bool(doc, obj, key, value))
+        throw std::runtime_error(std::string("Failed to add JSON bool field: ") + key);
+}
+
+void jsonAdd(yyjson_mut_doc* doc, yyjson_mut_val* obj, const char* key, const std::string& value) {
+    if (!yyjson_mut_obj_add_strncpy(doc, obj, key, value.data(), value.size()))
+        throw std::runtime_error(std::string("Failed to add JSON string field: ") + key);
+}
+
+void jsonAddValue(yyjson_mut_doc* doc, yyjson_mut_val* obj, const char* key, yyjson_mut_val* value) {
+    if (!yyjson_mut_obj_add_val(doc, obj, key, value))
+        throw std::runtime_error(std::string("Failed to add JSON value field: ") + key);
+}
+
+void jsonArrayAppend(yyjson_mut_val* arr, yyjson_mut_val* value) {
+    if (!yyjson_mut_arr_append(arr, value))
+        throw std::runtime_error("Failed to append JSON array value.");
+}
+
+std::string dumpMutableJson(yyjson_mut_val* value) {
+    size_t len = 0;
+    yyjson_write_err err{};
+    char* out = yyjson_mut_val_write_opts(value, YYJSON_WRITE_NOFLAG, nullptr, &len, &err);
+    if (!out) {
+        throw std::runtime_error("Failed to serialize JSON output: " + jsonWriteErrorMessage(err));
+    }
+    std::string result(out, len);
+    std::free(out);
+    return result;
 }
 
 template <typename Vec, typename Pred>
@@ -123,7 +201,7 @@ struct PreparedOptions {
 };
 
 PreparedOptions buildOptions(
-    const json& opts,
+    const json_view& opts,
     std::map<Region, std::shared_ptr<MasterData>>& region_masterdata,
     std::map<Region, std::shared_ptr<MusicMetas>>& region_musicmetas
 ) {
@@ -295,9 +373,13 @@ PreparedOptions buildOptions(
     if (opts.contains("custom_bonus_character_support_units") &&
         !opts["custom_bonus_character_support_units"].is_null()) {
         std::unordered_map<int, int> supportUnits;
-        for (auto it = opts["custom_bonus_character_support_units"].begin();
-             it != opts["custom_bonus_character_support_units"].end(); ++it) {
-            const std::string cidKey = it.key();
+        json_view supportUnitsJson = opts["custom_bonus_character_support_units"];
+        yyjson_obj_iter iter = yyjson_obj_iter_with(supportUnitsJson.raw());
+        yyjson_val* key = nullptr;
+        while ((key = yyjson_obj_iter_next(&iter))) {
+            const char* rawCidKey = yyjson_get_str(key);
+            const std::string cidKey = rawCidKey ? std::string(rawCidKey) : std::string();
+            json_view value(yyjson_obj_iter_get_val(key));
             int cid = 0;
             try {
                 size_t parsed = 0;
@@ -308,9 +390,9 @@ PreparedOptions buildOptions(
             } catch (const std::exception &) {
                 throw std::invalid_argument(
                     "Invalid custom bonus support unit character ID key: " + cidKey +
-                    " (value: " + it.value().dump() + ")");
+                    " (value type: " + jsonTypeName(value) + ")");
             }
-            std::string unitName = it.value().get<std::string>();
+            std::string unitName = value.get<std::string>();
             if (cid < 1 || cid > 26)
                 throw std::invalid_argument("Invalid custom bonus support unit character ID: " + std::to_string(cid));
             if (cid < 21 || cid > 26)
@@ -464,7 +546,7 @@ PreparedOptions buildOptions(
     }
 
     // rarity card configs
-    auto applyCardConfig = [](CardConfig& dst, const json& src) {
+    auto applyCardConfig = [](CardConfig& dst, const json_view& src) {
         if (src.contains("disable") && !src["disable"].is_null()) dst.disable = src["disable"].get<bool>();
         if (src.contains("level_max") && !src["level_max"].is_null()) dst.rankMax = src["level_max"].get<bool>();
         if (src.contains("episode_read") && !src["episode_read"].is_null()) dst.episodeRead = src["episode_read"].get<bool>();
@@ -505,7 +587,7 @@ PreparedOptions buildOptions(
 
     // SA options
     if (algorithm == "sa" && opts.contains("sa_options") && !opts["sa_options"].is_null()) {
-        const auto& sa = opts["sa_options"];
+        json_view sa = opts["sa_options"];
         if (auto v = jsonOpt<int>(sa, "run_num")) config.saRunCount = *v;
         if (config.saRunCount < 1)
             throw std::invalid_argument("Invalid sa run count: " + std::to_string(config.saRunCount));
@@ -530,7 +612,7 @@ PreparedOptions buildOptions(
 
     // GA options
     if (opts.contains("ga_options") && !opts["ga_options"].is_null()) {
-        const auto& ga = opts["ga_options"];
+        json_view ga = opts["ga_options"];
         if (auto v = jsonOpt<int>(ga, "seed")) config.gaSeed = *v;
         if (auto v = jsonOpt<bool>(ga, "debug")) config.gaDebug = *v;
         if (auto v = jsonOpt<int>(ga, "max_iter")) config.gaMaxIter = *v;
@@ -563,42 +645,45 @@ PreparedOptions buildOptions(
 
 // Engine result → JSON ----------------------------------------------------
 
-json deckToJson(const RecommendDeck& deck) {
-    json j;
-    j["score"] = deck.score;
-    j["live_score"] = deck.liveScore;
-    j["mysekai_event_point"] = deck.mysekaiEventPoint;
-    j["total_power"] = deck.power.total;
-    j["base_power"] = deck.power.base;
-    j["area_item_bonus_power"] = deck.power.areaItemBonus;
-    j["character_bonus_power"] = deck.power.characterBonus;
-    j["honor_bonus_power"] = deck.power.honorBonus;
-    j["fixture_bonus_power"] = deck.power.fixtureBonus;
-    j["gate_bonus_power"] = deck.power.gateBonus;
-    j["event_bonus_rate"] = deck.eventBonus.value_or(0.0);
-    j["support_deck_bonus_rate"] = deck.supportDeckBonus.value_or(0.0);
-    j["multi_live_score_up"] = deck.multiLiveScoreUp;
+yyjson_mut_val* deckToJson(yyjson_mut_doc* doc, const RecommendDeck& deck) {
+    yyjson_mut_val* j = yyjson_mut_obj(doc);
+    if (!j) throw std::runtime_error("Failed to allocate deck JSON object.");
+    jsonAdd(doc, j, "score", deck.score);
+    jsonAdd(doc, j, "live_score", deck.liveScore);
+    jsonAdd(doc, j, "mysekai_event_point", deck.mysekaiEventPoint);
+    jsonAdd(doc, j, "total_power", deck.power.total);
+    jsonAdd(doc, j, "base_power", deck.power.base);
+    jsonAdd(doc, j, "area_item_bonus_power", deck.power.areaItemBonus);
+    jsonAdd(doc, j, "character_bonus_power", deck.power.characterBonus);
+    jsonAdd(doc, j, "honor_bonus_power", deck.power.honorBonus);
+    jsonAdd(doc, j, "fixture_bonus_power", deck.power.fixtureBonus);
+    jsonAdd(doc, j, "gate_bonus_power", deck.power.gateBonus);
+    jsonAdd(doc, j, "event_bonus_rate", deck.eventBonus.value_or(0.0));
+    jsonAdd(doc, j, "support_deck_bonus_rate", deck.supportDeckBonus.value_or(0.0));
+    jsonAdd(doc, j, "multi_live_score_up", deck.multiLiveScoreUp);
 
-    json cards = json::array();
+    yyjson_mut_val* cards = yyjson_mut_arr(doc);
+    if (!cards) throw std::runtime_error("Failed to allocate cards JSON array.");
     for (const auto& c : deck.cards) {
-        json cj;
-        cj["card_id"] = c.cardId;
-        cj["total_power"] = c.power.total;
-        cj["base_power"] = c.power.base;
-        cj["event_bonus_rate"] = c.eventBonus.value_or(0.0);
-        cj["master_rank"] = c.masterRank;
-        cj["level"] = c.level;
-        cj["skill_level"] = c.skillLevel;
-        cj["skill_score_up"] = c.skill.scoreUp;
-        cj["skill_life_recovery"] = c.skill.lifeRecovery;
-        cj["episode1_read"] = c.episode1Read;
-        cj["episode2_read"] = c.episode2Read;
-        cj["after_training"] = c.afterTraining;
-        cj["default_image"] = mappedEnumToString(EnumMap::defaultImage, c.defaultImage);
-        cj["has_canvas_bonus"] = c.hasCanvasBonus;
-        cards.push_back(cj);
+        yyjson_mut_val* cj = yyjson_mut_obj(doc);
+        if (!cj) throw std::runtime_error("Failed to allocate card JSON object.");
+        jsonAdd(doc, cj, "card_id", c.cardId);
+        jsonAdd(doc, cj, "total_power", c.power.total);
+        jsonAdd(doc, cj, "base_power", c.power.base);
+        jsonAdd(doc, cj, "event_bonus_rate", c.eventBonus.value_or(0.0));
+        jsonAdd(doc, cj, "master_rank", c.masterRank);
+        jsonAdd(doc, cj, "level", c.level);
+        jsonAdd(doc, cj, "skill_level", c.skillLevel);
+        jsonAdd(doc, cj, "skill_score_up", c.skill.scoreUp);
+        jsonAdd(doc, cj, "skill_life_recovery", c.skill.lifeRecovery);
+        jsonAdd(doc, cj, "episode1_read", c.episode1Read);
+        jsonAdd(doc, cj, "episode2_read", c.episode2Read);
+        jsonAdd(doc, cj, "after_training", c.afterTraining);
+        jsonAdd(doc, cj, "default_image", mappedEnumToString(EnumMap::defaultImage, c.defaultImage));
+        jsonAdd(doc, cj, "has_canvas_bonus", c.hasCanvasBonus);
+        jsonArrayAppend(cards, cj);
     }
-    j["cards"] = cards;
+    jsonAddValue(doc, j, "cards", cards);
     return j;
 }
 
@@ -644,7 +729,8 @@ public:
     }
 
     std::string recommend(const std::string& optionsJson) {
-        json opts = json::parse(optionsJson);
+        auto optsDoc = json_doc::parse(optionsJson, "wasm recommend options");
+        json_view opts = optsDoc.root();
         auto prepared = buildOptions(opts, region_masterdata, region_musicmetas);
 
         std::vector<RecommendDeck> result;
@@ -659,15 +745,19 @@ public:
             result = r.recommendEventDeck(prepared.eventId, prepared.liveType, prepared.config, prepared.worldBloomCharacterId);
         }
 
-        json out;
-        json decks = json::array();
-        for (const auto& d : result) decks.push_back(deckToJson(d));
-        out["decks"] = decks;
-        return out.dump();
+        MutableJsonDoc outDoc;
+        yyjson_mut_val* out = yyjson_mut_obj(outDoc.get());
+        if (!out) throw std::runtime_error("Failed to allocate recommend output JSON object.");
+        yyjson_mut_val* decks = yyjson_mut_arr(outDoc.get());
+        if (!decks) throw std::runtime_error("Failed to allocate recommend decks JSON array.");
+        for (const auto& d : result) jsonArrayAppend(decks, deckToJson(outDoc.get(), d));
+        jsonAddValue(outDoc.get(), out, "decks", decks);
+        return dumpMutableJson(out);
     }
 
     std::string getWorldBloomSupportCards(const std::string& optionsJson) {
-        json opts = json::parse(optionsJson);
+        auto optsDoc = json_doc::parse(optionsJson, "wasm world bloom support options");
+        json_view opts = optsDoc.root();
 
         auto regionStr = jsonOpt<std::string>(opts, "region");
         if (!regionStr) throw std::invalid_argument("region is required.");
@@ -748,11 +838,17 @@ public:
             return std::tuple(a.second, -a.first) > std::tuple(b.second, -b.first);
         });
 
-        json out = json::array();
+        MutableJsonDoc outDoc;
+        yyjson_mut_val* out = yyjson_mut_arr(outDoc.get());
+        if (!out) throw std::runtime_error("Failed to allocate support cards JSON array.");
         for (const auto& [card_id, bonus] : result) {
-            out.push_back({{"card_id", card_id}, {"bonus", bonus}});
+            yyjson_mut_val* card = yyjson_mut_obj(outDoc.get());
+            if (!card) throw std::runtime_error("Failed to allocate support card JSON object.");
+            jsonAdd(outDoc.get(), card, "card_id", card_id);
+            jsonAdd(outDoc.get(), card, "bonus", bonus);
+            jsonArrayAppend(out, card);
         }
-        return out.dump();
+        return dumpMutableJson(out);
     }
 };
 

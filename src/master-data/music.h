@@ -9,7 +9,7 @@ struct Music {
     int publishedAt = 0;
     std::string assetbundleName = "";
 
-    static inline std::vector<Music> fromJsonList(const json& jsonData) {
+    static inline std::vector<Music> fromJsonList(const json_view& jsonData) {
         std::vector<Music> musics;
         for (const auto& item : jsonData) {
             Music music;

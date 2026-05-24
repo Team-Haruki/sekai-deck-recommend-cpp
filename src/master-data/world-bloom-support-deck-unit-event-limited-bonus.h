@@ -10,7 +10,7 @@ struct WorldBloomSupportDeckUnitEventLimitedBonus {
     int cardId = 0;
     double bonusRate = 0.0;
 
-    static inline std::vector<WorldBloomSupportDeckUnitEventLimitedBonus> fromJsonList(const json& jsonData) {
+    static inline std::vector<WorldBloomSupportDeckUnitEventLimitedBonus> fromJsonList(const json_view& jsonData) {
         std::vector<WorldBloomSupportDeckUnitEventLimitedBonus> worldBloomSupportDeckUnitEventLimitedBonuses;
         for (const auto& item : jsonData) {
             WorldBloomSupportDeckUnitEventLimitedBonus worldBloomSupportDeckUnitEventLimitedBonus;

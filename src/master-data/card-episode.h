@@ -12,7 +12,7 @@ struct CardEpisode {
     int power3BonusFixed = 0;
     int cardEpisodePartType = 0;
 
-    static inline std::vector<CardEpisode> fromJsonList(const json& jsonData) {
+    static inline std::vector<CardEpisode> fromJsonList(const json_view& jsonData) {
         std::vector<CardEpisode> cardEpisodes;
         for (const auto& item : jsonData) {
             CardEpisode cardEpisode;

@@ -18,7 +18,7 @@ struct UserWorldBloomSupportDeck {
     int member11 = 0;
     int member12 = 0;
 
-    static inline std::vector<UserWorldBloomSupportDeck> fromJsonList(const json& jsonData) {
+    static inline std::vector<UserWorldBloomSupportDeck> fromJsonList(const json_view& jsonData) {
         std::vector<UserWorldBloomSupportDeck> userWorldBloomSupportDecks;
         for (const auto& item : jsonData) {
             UserWorldBloomSupportDeck userWorldBloomSupportDeck;

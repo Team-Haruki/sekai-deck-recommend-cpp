@@ -8,7 +8,7 @@ struct CardParameter {
     int cardParameterType = 0;
     int power = 0;
 
-    static inline std::vector<CardParameter> fromJsonList(const json& jsonData) {
+    static inline std::vector<CardParameter> fromJsonList(const json_view& jsonData) {
         std::vector<CardParameter> cardParameters;
         for (const auto& item : jsonData) {
             CardParameter cardParameter;
@@ -35,7 +35,7 @@ struct Card {
     int specialTrainingSkillId = 0;
     std::vector<CardParameter> cardParameters;
 
-    static inline std::vector<Card> fromJsonList(const json& jsonData) {
+    static inline std::vector<Card> fromJsonList(const json_view& jsonData) {
         std::vector<Card> cards;
         for (const auto& item : jsonData) {
             Card card;

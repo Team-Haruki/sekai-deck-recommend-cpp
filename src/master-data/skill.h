@@ -11,7 +11,7 @@ struct SkillEffectDetail {
     double activateEffectValue = 0;
     double activateEffectValue2 = 0;
 
-    static inline std::vector<SkillEffectDetail> fromJsonList(const json& jsonData) {
+    static inline std::vector<SkillEffectDetail> fromJsonList(const json_view& jsonData) {
         std::vector<SkillEffectDetail> skillEffectDetails;
         for (const auto& item : jsonData) {
             SkillEffectDetail skillEffectDetail;
@@ -32,7 +32,7 @@ struct SkillEnhanceCondition {
     int seq = 0;
     int unit = 0;
 
-    static inline SkillEnhanceCondition fromJson(const json& jsonData) {
+    static inline SkillEnhanceCondition fromJson(const json_view& jsonData) {
         SkillEnhanceCondition skillEnhanceCondition;
         skillEnhanceCondition.id = jsonData.value("id", 0);
         skillEnhanceCondition.seq = jsonData.value("seq", 0);
@@ -48,13 +48,13 @@ struct SkillEnhance {
     double activateEffectValue = 0;
     SkillEnhanceCondition skillEnhanceCondition;
 
-    static inline SkillEnhance fromJson(const json& jsonData) {
+    static inline SkillEnhance fromJson(const json_view& jsonData) {
         SkillEnhance skillEnhance;
         skillEnhance.id = jsonData.value("id", 0);
         skillEnhance.skillEnhanceType = mapEnum(EnumMap::skillEnhanceType, jsonData.value("skillEnhanceType", ""));
         skillEnhance.activateEffectValueType = mapEnum(EnumMap::activateEffectValueType, jsonData.value("activateEffectValueType", ""));
         skillEnhance.activateEffectValue = jsonData.value("activateEffectValue", 0.0);
-        skillEnhance.skillEnhanceCondition = SkillEnhanceCondition::fromJson(jsonData.value("skillEnhanceCondition", json()));
+        skillEnhance.skillEnhanceCondition = SkillEnhanceCondition::fromJson(jsonData.value("skillEnhanceCondition", json_view()));
         return skillEnhance;
     }
 };
@@ -69,7 +69,7 @@ struct SkillEffect {
     std::vector<SkillEffectDetail> skillEffectDetails;
     std::optional<SkillEnhance> skillEnhance = std::nullopt;
 
-    static inline std::vector<SkillEffect> fromJsonList(const json& jsonData) {
+    static inline std::vector<SkillEffect> fromJsonList(const json_view& jsonData) {
         std::vector<SkillEffect> skillEffects;
         for (const auto& item : jsonData) {
             SkillEffect skillEffect;
@@ -79,7 +79,7 @@ struct SkillEffect {
             skillEffect.activateCharacterRank = item.value("activateCharacterRank", 0);
             skillEffect.activateUnitCount = item.value("activateUnitCount", 0);
             skillEffect.conditionType = mapEnum(EnumMap::conditionType, item.value("conditionType", ""));
-            skillEffect.skillEffectDetails = SkillEffectDetail::fromJsonList(item.value("skillEffectDetails", json::array()));
+            skillEffect.skillEffectDetails = SkillEffectDetail::fromJsonList(item.value("skillEffectDetails", json_view::array()));
             if (item.contains("skillEnhance")) {
                 skillEffect.skillEnhance = SkillEnhance::fromJson(item.at("skillEnhance"));
             }
@@ -94,13 +94,13 @@ struct Skill {
     int skillFilterId = 0;
     std::vector<SkillEffect> skillEffects;
 
-    static inline std::vector<Skill> fromJsonList(const json& jsonData) {
+    static inline std::vector<Skill> fromJsonList(const json_view& jsonData) {
         std::vector<Skill> skills;
         for (const auto& item : jsonData) {
             Skill skill;
             skill.id = item.value("id", 0);
             skill.skillFilterId = item.value("skillFilterId", 0);
-            skill.skillEffects = SkillEffect::fromJsonList(item.value("skillEffects", json::array()));
+            skill.skillEffects = SkillEffect::fromJsonList(item.value("skillEffects", json_view::array()));
             skills.push_back(skill);
         }
         return skills;

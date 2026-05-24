@@ -1,38 +1,39 @@
 #include "data-provider/music-metas.h"
 #include <fstream>
+#include <iterator>
 
-void MusicMetas::loadFromJson(const json &j)
+void MusicMetas::loadFromJson(const json_view& j)
 {
     this->metas = MusicMeta::fromJsonList(j);
 }
 
 void MusicMetas::loadFromFile(const std::string &path)
 {
-    json j;
+    std::string content;
     try {
         this->path = path;
         std::ifstream file(path);
         if (!file.is_open()) {
             throw std::runtime_error("Failed to open file: " + path);
         }
-        file >> j;
-        file.close();
+        content.assign(std::istreambuf_iterator<char>(file), std::istreambuf_iterator<char>());
     }
     catch (const std::exception &e) {
         throw std::runtime_error("Failed to load music metas from file: " + path + ", error: " + e.what());
     }
-    this->loadFromJson(j);
+    auto doc = json_doc::parse(content, "music metas file: " + path);
+    this->loadFromJson(doc.root());
 }
 
 void MusicMetas::loadFromString(const std::string& s)
 {
-    json j;
+    json_doc doc;
     try {
         this->path.clear();
-        j = json::parse(s);
+        doc = json_doc::parse(s, "music metas string");
     } 
     catch (const std::exception &e) {
         throw std::runtime_error("Failed to load music metas from string, error: " + std::string(e.what()));
     }
-    this->loadFromJson(j);
+    this->loadFromJson(doc.root());
 }

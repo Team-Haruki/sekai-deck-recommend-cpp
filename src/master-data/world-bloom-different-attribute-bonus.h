@@ -7,7 +7,7 @@ struct WorldBloomDifferentAttributeBonus {
     int attributeCount = 0;
     double bonusRate = 0.0;
 
-    static inline std::vector<WorldBloomDifferentAttributeBonus> fromJsonList(const json& jsonData) {
+    static inline std::vector<WorldBloomDifferentAttributeBonus> fromJsonList(const json_view& jsonData) {
         std::vector<WorldBloomDifferentAttributeBonus> worldBloomDifferentAttributeBonuses;
         for (const auto& item : jsonData) {
             WorldBloomDifferentAttributeBonus worldBloomDifferentAttributeBonus;

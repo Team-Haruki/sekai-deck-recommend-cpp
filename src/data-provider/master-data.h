@@ -51,7 +51,7 @@ public:
     std::vector<WorldBloomSupportDeckBonus> worldBloomSupportDeckBonusesWL2;
     std::vector<WorldBloomSupportDeckBonus> worldBloomSupportDeckBonusesWL3;
 
-    void loadFromJsons(std::map<std::string, json>& jsons);
+    void loadFromJsons(std::map<std::string, json_doc>& jsons);
 
     void loadFromFiles(const std::string& baseDir);
 

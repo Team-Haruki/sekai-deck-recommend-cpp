@@ -8,7 +8,7 @@ struct EventExchange {
     int resourceBoxId = 0;
     int exchangeLimit = 0;
 
-    inline static std::vector<EventExchange> fromJsonList(const json& jsonData) {
+    inline static std::vector<EventExchange> fromJsonList(const json_view& jsonData) {
         std::vector<EventExchange> eventExchanges;
         for (const auto& item : jsonData) {
             EventExchange eventExchange;
@@ -28,7 +28,7 @@ struct EventExchangeSummary {
     TS endAt = 0;
     std::vector<EventExchange> eventExchanges;
     
-    inline static std::vector<EventExchangeSummary> fromJsonList(const json& jsonData) {
+    inline static std::vector<EventExchangeSummary> fromJsonList(const json_view& jsonData) {
         std::vector<EventExchangeSummary> eventExchangeSummaries;
         for (const auto& item : jsonData) {
             EventExchangeSummary eventExchangeSummary;

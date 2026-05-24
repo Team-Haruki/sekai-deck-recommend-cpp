@@ -23,7 +23,7 @@ public:
     // 预处理终章用户哪些角色有称号活动加成，在dataProvider中计算
     std::map<int, double> userCharacterFinalChapterHonorEventBonusMap;     
 
-    void loadFromJson(const json& j);
+    void loadFromJson(const json_view& j);
 
     void loadFromFile(const std::string& path);
 

@@ -16,7 +16,7 @@ struct AreaItemLevel {
     double power3BonusRate = 0.0;
     double power3AllMatchBonusRate = 0.0;
 
-    static inline std::vector<AreaItemLevel> fromJsonList(const json& jsonData) {
+    static inline std::vector<AreaItemLevel> fromJsonList(const json_view& jsonData) {
         std::vector<AreaItemLevel> areaItemLevels;
         for (const auto& item : jsonData) {
             AreaItemLevel areaItemLevel;

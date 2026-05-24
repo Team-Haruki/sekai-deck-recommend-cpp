@@ -10,6 +10,8 @@ guidance.
 A C++20 Project Sekai deck recommendation and live-score engine maintained as
 Team Haruki's fork of the previous C++ optimization project
 [NeuraXmy/sekai-deck-recommend-cpp](https://github.com/NeuraXmy/sekai-deck-recommend-cpp).
+Some modifications are based on
+[moe-sekai/sekai-deck-recommend-cpp](https://github.com/moe-sekai/sekai-deck-recommend-cpp).
 It ships Python bindings (pybind11) and a WebAssembly/npm target. Production
 callers consume it in three ways:
 
@@ -39,7 +41,8 @@ live automation behavior downstream.
   object/dictionary shaped. Compact arrays can appear in Mongo-exported local
   fixtures, but they are not the runtime API contract.
 - `src/master-data/`: masterdata model structs.
-- `3rdparty/json/`: vendored nlohmann/json (submodule).
+- `3rdparty/yyjson/`: vendored yyjson dependency for masterdata, music metas,
+  userdata parsing, and wasm JSON-in / JSON-out binding payloads.
 - `sekai_deck_recommend.cpp` / `.pyi`: Python binding surface.
 - `data/`: static data required by the engine. Do not change unless the task
   is explicitly about static data.
@@ -111,8 +114,8 @@ repository.
 ## Code Conventions
 
 - C++20, headers and implementations live next to each other in `src/<area>/`.
-- JSON parsing goes through nlohmann/json from `3rdparty/json` — do not pull
-  in another JSON library.
+- Masterdata, music metas, userdata parsing, and the wasm binding's JSON-in /
+  JSON-out payloads go through yyjson in `src/common/collection-utils.h`.
 - Prefer small, behavior-focused changes over broad refactors.
 - Preserve existing enum mapping and validation behavior unless a
   caller-visible migration is intentional.

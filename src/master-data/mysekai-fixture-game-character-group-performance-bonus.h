@@ -8,7 +8,7 @@ struct MysekaiFixtureGameCharacterGroupPerformanceBonus {
     int mysekaiFixtureGameCharacterGroupId;
     double bonusRate; 
 
-    static inline std::vector<MysekaiFixtureGameCharacterGroupPerformanceBonus> fromJsonList(const json& jsonData) {
+    static inline std::vector<MysekaiFixtureGameCharacterGroupPerformanceBonus> fromJsonList(const json_view& jsonData) {
         std::vector<MysekaiFixtureGameCharacterGroupPerformanceBonus> bonuses;
         for (const auto& item : jsonData) {
             MysekaiFixtureGameCharacterGroupPerformanceBonus bonus;

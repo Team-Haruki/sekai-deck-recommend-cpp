@@ -14,7 +14,7 @@ struct UserDeck {
     int member4 = 0;
     int member5 = 0;
 
-    static inline std::vector<UserDeck> fromJsonList(const json& jsonData) {
+    static inline std::vector<UserDeck> fromJsonList(const json_view& jsonData) {
         std::vector<UserDeck> userDecks;
         for (const auto& item : jsonData) {
             UserDeck userDeck;

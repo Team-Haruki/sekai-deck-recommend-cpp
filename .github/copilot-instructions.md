@@ -9,7 +9,12 @@ recommendation and live calculation. The same engineering rules also live in
 - Core language: C++20.
 - Bindings: Python extension via pybind11 and WebAssembly via Embind.
 - Package names: PyPI and npm both use `haruki-sekai-deck-recommend-cpp`.
-- JSON: nlohmann/json from `3rdparty/json`.
+- JSON: yyjson handles masterdata, music metas, userdata parsing, and wasm
+  JSON-in / JSON-out binding payloads.
+- Upstream credits include the previous C++ optimization project
+  [NeuraXmy/sekai-deck-recommend-cpp](https://github.com/NeuraXmy/sekai-deck-recommend-cpp)
+  and modifications based on
+  [moe-sekai/sekai-deck-recommend-cpp](https://github.com/moe-sekai/sekai-deck-recommend-cpp).
 - Downstream runtime: Team Haruki `deck-service` builds this repository and
   calls it through a C/Rust FFI bridge.
 

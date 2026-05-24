@@ -8,7 +8,7 @@ struct EventItem {
     int eventId = 0;
     int gameCharacterId = 0;
 
-    static inline std::vector<EventItem> fromJsonList(const json& jsonData) {
+    static inline std::vector<EventItem> fromJsonList(const json_view& jsonData) {
         std::vector<EventItem> eventItems;
         for (const auto& item : jsonData) {
             EventItem eventItem;

@@ -11,7 +11,7 @@ struct UserChallengeLiveSoloDeck {
     int support3 = 0;
     int support4 = 0;
 
-    static inline std::vector<UserChallengeLiveSoloDeck> fromJsonList(const json& jsonData) {
+    static inline std::vector<UserChallengeLiveSoloDeck> fromJsonList(const json_view& jsonData) {
         std::vector<UserChallengeLiveSoloDeck> userChallengeLiveSoloDecks;
         for (const auto& item : jsonData) {
             UserChallengeLiveSoloDeck userChallengeLiveSoloDeck;

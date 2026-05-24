@@ -17,7 +17,7 @@ struct MusicMeta {
     double fever_end_time;
     int tap_count;
 
-    static inline std::vector<MusicMeta> fromJsonList(const json& jsonData) {
+    static inline std::vector<MusicMeta> fromJsonList(const json_view& jsonData) {
         std::vector<MusicMeta> musicMetas;
         for (const auto& item : jsonData) {
             MusicMeta musicMeta;

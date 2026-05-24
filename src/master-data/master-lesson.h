@@ -11,7 +11,7 @@ struct MasterLesson {
     int power2BonusFixed = 0;
     int power3BonusFixed = 0;
 
-    static inline std::vector<MasterLesson> fromJsonList(const json& jsonData) {
+    static inline std::vector<MasterLesson> fromJsonList(const json_view& jsonData) {
         std::vector<MasterLesson> masterLessons;
         for (const auto& item : jsonData) {
             MasterLesson masterLesson;

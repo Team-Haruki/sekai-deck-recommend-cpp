@@ -11,7 +11,7 @@ struct MusicDifficulty {
     int releaseConditionId;
     int totalNoteCount;
 
-    static inline std::vector<MusicDifficulty> fromJsonList(const json& jsonData) {
+    static inline std::vector<MusicDifficulty> fromJsonList(const json_view& jsonData) {
         std::vector<MusicDifficulty> musicDifficulties;
         for (const auto& item : jsonData) {
             MusicDifficulty musicDifficulty;

@@ -1,6 +1,7 @@
 #ifndef CARD_DETAIL_MAP_H
 #define CARD_DETAIL_MAP_H
 
+#include <cassert>
 #include <optional>
 #include <string>
 #include <map>
@@ -109,4 +110,3 @@ public:
 };
 
 #endif // CARD_DETAIL_MAP_H
-

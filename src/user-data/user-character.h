@@ -7,7 +7,7 @@ struct UserCharacter {
     int characterId = 0;
     int characterRank = 0;
 
-    static inline std::vector<UserCharacter> fromJsonList(const json& jsonData) {
+    static inline std::vector<UserCharacter> fromJsonList(const json_view& jsonData) {
         std::vector<UserCharacter> userCharacters;
         for (const auto& item : jsonData) {
             UserCharacter userCharacter;

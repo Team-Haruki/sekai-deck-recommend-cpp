@@ -10,7 +10,7 @@ struct ShopItem {
     int releaseConditionId = 0;
     int resourceBoxId = 0;
 
-    static inline std::vector<ShopItem> fromJsonList(const json& jsonData) {
+    static inline std::vector<ShopItem> fromJsonList(const json_view& jsonData) {
         std::vector<ShopItem> shopItems;
         for (const auto& item : jsonData) {
             ShopItem shopItem;

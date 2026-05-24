@@ -10,7 +10,7 @@ struct CardRarity {
     int trainingMaxLevel = 0;
     int maxSkillLevel = 0;
 
-    static inline std::vector<CardRarity> fromJsonList(const json& jsonData) {
+    static inline std::vector<CardRarity> fromJsonList(const json_view& jsonData) {
         std::vector<CardRarity> cardRarities;
         for (const auto& item : jsonData) {
             CardRarity cardRarity;

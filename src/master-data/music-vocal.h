@@ -11,7 +11,7 @@ struct MusicVocalCharacter {
     int characterId = 0;
     int seq = 0;
 
-    static inline std::vector<MusicVocalCharacter> fromJsonList(const json& jsonData) {
+    static inline std::vector<MusicVocalCharacter> fromJsonList(const json_view& jsonData) {
         std::vector<MusicVocalCharacter> characters;
         for (const auto& item : jsonData) {
             MusicVocalCharacter character;
@@ -35,7 +35,7 @@ struct MusicVocal {
     int releaseConditionId = 0;
     std::vector<MusicVocalCharacter> characters;
 
-    static inline std::vector<MusicVocal> fromJsonList(const json& jsonData) {
+    static inline std::vector<MusicVocal> fromJsonList(const json_view& jsonData) {
         std::vector<MusicVocal> musicVocals;
         for (const auto& item : jsonData) {
             MusicVocal musicVocal;
@@ -44,7 +44,7 @@ struct MusicVocal {
             musicVocal.musicVocalType = mapEnum(EnumMap::musicVocalType, item.value("musicVocalType", ""));
             musicVocal.seq = item.value("seq", 0);
             musicVocal.releaseConditionId = item.value("releaseConditionId", 0);
-            musicVocal.characters = MusicVocalCharacter::fromJsonList(item.value("characters", json::array()));
+            musicVocal.characters = MusicVocalCharacter::fromJsonList(item.value("characters", json_view::array()));
             musicVocals.push_back(musicVocal);
         }
         return musicVocals;

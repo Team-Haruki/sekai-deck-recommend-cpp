@@ -8,7 +8,7 @@ struct MysekaiGate {
     int unit;
     std::string assetbundleName;
 
-    static inline std::vector<MysekaiGate> fromJsonList(const json& jsonData) {
+    static inline std::vector<MysekaiGate> fromJsonList(const json_view& jsonData) {
         std::vector<MysekaiGate> mysekaiGates;
         for (const auto& item : jsonData) {
         MysekaiGate mysekaiGate;

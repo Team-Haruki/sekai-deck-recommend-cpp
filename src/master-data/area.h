@@ -8,7 +8,7 @@ struct Area {
     int areaType = 0;
     int viewType = 0;
 
-    static inline std::vector<Area> fromJsonList(const json& jsonData) {
+    static inline std::vector<Area> fromJsonList(const json_view& jsonData) {
         std::vector<Area> areas;
         for (const auto& item : jsonData) {
             Area area;

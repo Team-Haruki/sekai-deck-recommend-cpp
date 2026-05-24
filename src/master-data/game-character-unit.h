@@ -8,7 +8,7 @@ struct GameCharacterUnit {
     int gameCharacterId = 0;
     int unit = 0;
 
-    static inline std::vector<GameCharacterUnit> fromJsonList(const json& jsonData) {
+    static inline std::vector<GameCharacterUnit> fromJsonList(const json_view& jsonData) {
         std::vector<GameCharacterUnit> gameCharacterUnits;
         for (const auto& item : jsonData) {
             GameCharacterUnit gameCharacterUnit;

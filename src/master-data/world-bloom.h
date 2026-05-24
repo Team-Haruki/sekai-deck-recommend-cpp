@@ -14,7 +14,7 @@ struct WorldBloom {
     int costume2dId = 0;
     bool isSupplemental = false;
 
-    static inline std::vector<WorldBloom> fromJsonList(const json& jsonData) {
+    static inline std::vector<WorldBloom> fromJsonList(const json_view& jsonData) {
         std::vector<WorldBloom> worldBlooms;
         for (const auto& item : jsonData) {
             WorldBloom worldBloom;

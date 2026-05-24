@@ -3,6 +3,7 @@
 
 #include <fstream>
 #include <iostream>
+#include <iterator>
 #include <unordered_map>
 #include <vector>
 #include "master-data.h"
@@ -53,7 +54,7 @@ static const std::vector<std::vector<int>> worldBloom3PartCharacterIds = {
 };
 
 
-void loadMasterDataJsonFromFile(std::map<std::string, json>& jsons, const std::string& baseDir, const std::string& key) {
+void loadMasterDataJsonFromFile(std::map<std::string, json_doc>& jsons, const std::string& baseDir, const std::string& key) {
     try {
         std::string filePath = baseDir + "/" + key + ".json";
         std::ifstream file(filePath);
@@ -61,24 +62,21 @@ void loadMasterDataJsonFromFile(std::map<std::string, json>& jsons, const std::s
             jsons.erase(key);
             return;
         }
-        json j;
-        file >> j;
-        file.close();
-        jsons[key] = j;
+        std::string content{std::istreambuf_iterator<char>(file), std::istreambuf_iterator<char>()};
+        jsons[key] = json_doc::parse(content, "master data file: " + key);
     }
     catch (const std::exception& e) {
         throw std::runtime_error("Failed to load master data from file: " + key + ", error: " + e.what());
     }
 }
 
-void loadMasterDataJsonFromStrings(std::map<std::string, json>& jsons, std::map<std::string, std::string>& data, const std::string& key) {
+void loadMasterDataJsonFromStrings(std::map<std::string, json_doc>& jsons, std::map<std::string, std::string>& data, const std::string& key) {
     try {
         if (!data.count(key)) {
             jsons.erase(key);
             return;
         }
-        json j = json::parse(data.at(key));
-        jsons[key] = j;
+        jsons[key] = json_doc::parse(data.at(key), "master data string: " + key);
     }
     catch (const std::exception& e) {
         throw std::runtime_error("Failed to load master data from string: " + key + ", error: " + e.what());
@@ -214,7 +212,7 @@ static std::vector<WorldBloomSupportDeckUnitEventLimitedBonus> buildFakeWorldBlo
 
 
 template <typename T>
-std::vector<T> loadMasterData(std::map<std::string, json>& jsons, const std::string& key, bool required = true) {
+std::vector<T> loadMasterData(std::map<std::string, json_doc>& jsons, const std::string& key, bool required = true) {
     if (!jsons.count(key)) {
         if (required) {
             throw std::runtime_error("master data key not found: " + key);
@@ -223,10 +221,10 @@ std::vector<T> loadMasterData(std::map<std::string, json>& jsons, const std::str
             return {};
         }
     }
-    return T::fromJsonList(jsons.at(key));
+    return T::fromJsonList(jsons.at(key).root());
 }
 
-void MasterData::loadFromJsons(std::map<std::string, json>& jsons) {
+void MasterData::loadFromJsons(std::map<std::string, json_doc>& jsons) {
     this->areaItemLevels = loadMasterData<AreaItemLevel>(jsons, "areaItemLevels");
     this->areaItems = loadMasterData<AreaItem>(jsons, "areaItems");
     this->areas = loadMasterData<Area>(jsons, "areas");
@@ -259,7 +257,7 @@ void MasterData::loadFromJsons(std::map<std::string, json>& jsons) {
     this->mysekaiGates = loadMasterData<MysekaiGate>(jsons, "mysekaiGates", false);
     this->mysekaiGateLevels = loadMasterData<MysekaiGateLevel>(jsons, "mysekaiGateLevels", false);
 
-    std::map<std::string, json> tmp{};
+    std::map<std::string, json_doc> tmp{};
     loadMasterDataJsonFromFile(tmp, getStaticDataDir(), "worldBloomSupportDeckBonusesWL1");
     loadMasterDataJsonFromFile(tmp, getStaticDataDir(), "worldBloomSupportDeckBonusesWL2");
     loadMasterDataJsonFromFile(tmp, getStaticDataDir(), "worldBloomSupportDeckBonusesWL3");
@@ -275,7 +273,7 @@ void MasterData::loadFromJsons(std::map<std::string, json>& jsons) {
 
 void MasterData::loadFromFiles(const std::string& baseDir) {
     this->baseDir = baseDir;
-    std::map<std::string, json> jsons;
+    std::map<std::string, json_doc> jsons;
     for (const auto& key : requiredMasterDataKeys) 
         loadMasterDataJsonFromFile(jsons, baseDir, key);
     for (const auto& key : notRequiredMasterDataKeys) 
@@ -285,7 +283,7 @@ void MasterData::loadFromFiles(const std::string& baseDir) {
 
 void MasterData::loadFromStrings(std::map<std::string, std::string>& data) {
     this->baseDir.clear();
-    std::map<std::string, json> jsons;
+    std::map<std::string, json_doc> jsons;
     for (const auto& key : requiredMasterDataKeys) 
         loadMasterDataJsonFromStrings(jsons, data, key);
     for (const auto& key : notRequiredMasterDataKeys)
@@ -448,6 +446,3 @@ int MasterData::getWorldBloomEventTurn(int eventId) const
     else
         return 3;
 }
-
-
-
