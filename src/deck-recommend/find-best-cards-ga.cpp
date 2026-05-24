@@ -1,6 +1,19 @@
 #include "deck-recommend/base-deck-recommend.h"
-#include <any>
+
 #include <algorithm>
+#include <any>
+#include <array>
+#include <cstdint>
+#include <functional>
+#include <iterator>
+#include <map>
+#include <numeric>
+#include <optional>
+#include <random>
+#include <stdexcept>
+#include <string>
+#include <unordered_set>
+#include <vector>
 
 
 struct Individual {
