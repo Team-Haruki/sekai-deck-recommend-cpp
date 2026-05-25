@@ -14,7 +14,7 @@ CardDetailMap<DeckCardSkillDetail> CardSkillCalculator::getCardSkill(
 
     CardDetailMap<DeckCardSkillDetail> skillMap{};
     std::vector<SkillDetail> details = { getSkillDetail(userCard, card, false) };
-    if (card.specialTrainingSkillId != 0) 
+    if (card.specialTrainingSkillId != 0 && userCard.specialTrainingStatus == Enums::SpecialTrainingStatus::done)
         details.push_back(getSkillDetail(userCard, card, true));
 
     for (auto& detail : details) {
