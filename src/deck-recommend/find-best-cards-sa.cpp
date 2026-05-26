@@ -29,7 +29,13 @@ void BaseDeckRecommend::findBestCardsSA(
     }
 
     member -= int(fixedCards.size());
-    auto remainingFixedCharacters = resolveRemainingFixedCharacters(cfg, fixedCards, eventId);
+    bool isWorldBloomFinale = eventId.has_value() && this->dataProvider.masterData->isWorldBloomFinale(eventId.value());
+    auto remainingFixedCharacters = resolveRemainingFixedCharacters(
+        cfg,
+        fixedCards,
+        eventId,
+        isWorldBloomFinale
+    );
     std::set<int> remainingFixedCharacterSet(
         remainingFixedCharacters.begin(),
         remainingFixedCharacters.end()

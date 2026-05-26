@@ -16,7 +16,10 @@
 #include "deck-recommend/event-deck-recommend.h"
 #include "deck-recommend/challenge-live-deck-recommend.h"
 #include "deck-recommend/mysekai-deck-recommend.h"
+#include "area-item-recommend/area-item-recommend.h"
 #include "data-provider/static-data.h"
+#include "live-score/live-exact-calculator.h"
+#include "music-recommend/music-recommend.h"
 #include "common/collection-utils.h"
 #include "common/common-enums.h"
 #include "common/enum-maps.h"
@@ -705,6 +708,140 @@ yyjson_mut_val* deckToJson(yyjson_mut_doc* doc, const RecommendDeck& deck) {
     return j;
 }
 
+yyjson_mut_val* areaItemToJson(yyjson_mut_doc* doc, const RecommendAreaItem& item) {
+    yyjson_mut_val* j = yyjson_mut_obj(doc);
+    if (!j) throw std::runtime_error("Failed to allocate area item JSON object.");
+    jsonAdd(doc, j, "area_id", item.areaId);
+    jsonAdd(doc, j, "area_type", mappedEnumToString(EnumMap::areaType, item.areaType));
+    jsonAdd(doc, j, "area_view_type", mappedEnumToString(EnumMap::viewType, item.areaViewType));
+    jsonAdd(doc, j, "area_item_id", item.areaItemId);
+    jsonAdd(doc, j, "next_level", item.nextLevel);
+    jsonAdd(doc, j, "shop_item_id", item.shopItemId);
+    yyjson_mut_val* cost = yyjson_mut_obj(doc);
+    if (!cost) throw std::runtime_error("Failed to allocate area item cost JSON object.");
+    jsonAdd(doc, cost, "coin", item.cost.coin);
+    jsonAdd(doc, cost, "seed", item.cost.seed);
+    jsonAdd(doc, cost, "szk", item.cost.szk);
+    jsonAddValue(doc, j, "cost", cost);
+    jsonAdd(doc, j, "power", item.power);
+    jsonAdd(doc, j, "power_per_coin", item.powerPerCoin);
+    return j;
+}
+
+yyjson_mut_val* recommendMusicToJson(yyjson_mut_doc* doc, const RecommendMusic& music) {
+    yyjson_mut_val* j = yyjson_mut_obj(doc);
+    if (!j) throw std::runtime_error("Failed to allocate music JSON object.");
+    jsonAdd(doc, j, "music_id", music.musicId);
+    jsonAdd(doc, j, "difficulty", mappedEnumToString(EnumMap::musicDifficulty, music.difficulty));
+    jsonAdd(doc, j, "live_score", music.liveScore);
+    if (music.eventPoint.has_value()) {
+        jsonAdd(doc, j, "event_point", music.eventPoint.value());
+    } else if (!yyjson_mut_obj_add_null(doc, j, "event_point")) {
+        throw std::runtime_error("Failed to add JSON null field: event_point");
+    }
+    return j;
+}
+
+yyjson_mut_val* liveExactDetailToJson(yyjson_mut_doc* doc, const LiveExactDetail& detail) {
+    yyjson_mut_val* j = yyjson_mut_obj(doc);
+    if (!j) throw std::runtime_error("Failed to allocate exact live JSON object.");
+    jsonAdd(doc, j, "total", detail.total);
+    jsonAdd(doc, j, "active_bonus", detail.activeBonus);
+    yyjson_mut_val* notes = yyjson_mut_arr(doc);
+    if (!notes) throw std::runtime_error("Failed to allocate exact live notes JSON array.");
+    for (const auto& note : detail.notes) {
+        yyjson_mut_val* nj = yyjson_mut_obj(doc);
+        if (!nj) throw std::runtime_error("Failed to allocate exact live note JSON object.");
+        jsonAdd(doc, nj, "note_coefficient", note.noteCoefficient);
+        jsonAdd(doc, nj, "combo_coefficient", note.comboCoefficient);
+        jsonAdd(doc, nj, "judge_coefficient", note.judgeCoefficient);
+        yyjson_mut_val* effects = yyjson_mut_arr(doc);
+        if (!effects) throw std::runtime_error("Failed to allocate effect bonuses JSON array.");
+        for (double effect : note.effectBonuses) {
+            jsonArrayAppend(effects, yyjson_mut_real(doc, effect));
+        }
+        jsonAddValue(doc, nj, "effect_bonuses", effects);
+        jsonAdd(doc, nj, "score", note.score);
+        jsonArrayAppend(notes, nj);
+    }
+    jsonAddValue(doc, j, "notes", notes);
+    return j;
+}
+
+DeckDetail deckFromJson(const json_view& j) {
+    DeckDetail deck{};
+    deck.power = DeckPowerDetail{
+        .base = j.value("base_power", 0),
+        .areaItemBonus = j.value("area_item_bonus_power", 0),
+        .characterBonus = j.value("character_bonus_power", 0),
+        .honorBonus = j.value("honor_bonus_power", 0),
+        .fixtureBonus = j.value("fixture_bonus_power", 0),
+        .gateBonus = j.value("gate_bonus_power", 0),
+        .total = j.value("total_power", 0),
+    };
+    deck.eventBonus = j.value("event_bonus_rate", 0.0);
+    deck.supportDeckBonus = j.value("support_deck_bonus_rate", 0.0);
+    deck.multiLiveScoreUp = j.value("multi_live_score_up", 0.0);
+    for (const auto& c : j.value("cards", json_view::array())) {
+        std::string defaultImage = c.value("default_image", "");
+        deck.cards.push_back(DeckCardDetail{
+            .cardId = c.value("card_id", 0),
+            .level = c.value("level", 0),
+            .skillLevel = c.value("skill_level", 0),
+            .masterRank = c.value("master_rank", 0),
+            .power = DeckCardPowerDetail{
+                .base = c.value("base_power", 0),
+                .areaItemBonus = 0,
+                .characterBonus = 0,
+                .fixtureBonus = 0,
+                .gateBonus = 0,
+                .total = c.value("total_power", 0),
+            },
+            .eventBonus = c.value("event_bonus_rate", 0.0),
+            .skill = DeckCardSkillDetail{
+                .scoreUp = c.value("skill_score_up", 0.0),
+                .lifeRecovery = c.value("skill_life_recovery", 0.0),
+            },
+            .episode1Read = c.value("episode1_read", false),
+            .episode2Read = c.value("episode2_read", false),
+            .afterTraining = c.value("after_training", false),
+            .defaultImage = defaultImage.empty() ? 0 : mapEnum(EnumMap::defaultImage, defaultImage),
+            .hasCanvasBonus = c.value("has_canvas_bonus", false),
+        });
+    }
+    return deck;
+}
+
+int getLiveTypeFromOptions(const json_view& opts) {
+    auto liveTypeStr = jsonOpt<std::string>(opts, "live_type");
+    if (!liveTypeStr) throw std::invalid_argument("live_type is required.");
+    if (!VALID_LIVE_TYPES.count(*liveTypeStr) || *liveTypeStr == "mysekai")
+        throw std::invalid_argument("Invalid live type: " + *liveTypeStr);
+    return mapEnum(EnumMap::liveType, *liveTypeStr);
+}
+
+LiveSkillOrder getLiveSkillOrderFromOptions(const json_view& opts) {
+    std::string strategy = jsonOpt<std::string>(opts, "skill_order_choose_strategy")
+        .value_or(DEFAULT_SKILL_ORDER_CHOOSE_STRATEGY);
+    if (!VALID_SKILL_ORDER_CHOOSE_STRATEGIES.count(strategy))
+        throw std::invalid_argument("Invalid skill order choose strategy: " + strategy);
+    if (strategy == "average") return LiveSkillOrder::average;
+    if (strategy == "max") return LiveSkillOrder::best;
+    if (strategy == "min") return LiveSkillOrder::worst;
+    return LiveSkillOrder::specific;
+}
+
+int getEventTypeFromOptions(const json_view& opts, const DataProvider& dataProvider) {
+    if (auto eventId = jsonOpt<int>(opts, "event_id")) {
+        EventService eventService(dataProvider);
+        return eventService.getEventType(*eventId);
+    }
+    std::string eventType = jsonOpt<std::string>(opts, "event_type").value_or("marathon");
+    if (!VALID_EVENT_TYPES.count(eventType))
+        throw std::invalid_argument("Invalid event type: " + eventType);
+    return mapEnum(EnumMap::eventType, eventType);
+}
+
 // Public engine wrapper ---------------------------------------------------
 
 class WasmSekaiDeckRecommend {
@@ -771,6 +908,163 @@ public:
         for (const auto& d : result) jsonArrayAppend(decks, deckToJson(outDoc.get(), d));
         jsonAddValue(outDoc.get(), out, "decks", decks);
         return dumpMutableJson(out);
+    }
+
+    std::string recommendAreaItems(const std::string& optionsJson) {
+        auto optsDoc = json_doc::parse(optionsJson, "wasm area item recommend options");
+        json_view opts = optsDoc.root();
+
+        auto regionStr = jsonOpt<std::string>(opts, "region");
+        if (!regionStr) throw std::invalid_argument("region is required.");
+        auto regionIt = REGION_ENUM_MAP.find(*regionStr);
+        if (regionIt == REGION_ENUM_MAP.end())
+            throw std::invalid_argument("Invalid region: " + *regionStr);
+        Region region = regionIt->second;
+        if (!region_masterdata.count(region))
+            throw std::invalid_argument("Master data not found for region: " + *regionStr);
+
+        auto userdata = std::make_shared<UserData>();
+        if (opts.contains("user_data_file_path") && !opts["user_data_file_path"].is_null()) {
+            userdata->loadFromFile(opts["user_data_file_path"].get<std::string>());
+        } else if (opts.contains("user_data_str") && !opts["user_data_str"].is_null()) {
+            userdata->loadFromString(extractUserDataStr(opts["user_data_str"]));
+        } else if (opts.contains("user_data") && !opts["user_data"].is_null()) {
+            userdata->loadFromString(extractUserDataStr(opts["user_data"]));
+        } else {
+            throw std::invalid_argument("Either user_data / user_data_file_path / user_data_str is required.");
+        }
+        auto cardIds = jsonOpt<std::vector<int>>(opts, "card_ids");
+        if (!cardIds || cardIds->empty())
+            throw std::invalid_argument("card_ids is required.");
+
+        DataProvider dataProvider{
+            region,
+            region_masterdata[region],
+            userdata,
+            region_musicmetas.count(region) ? region_musicmetas.at(region) : std::shared_ptr<MusicMetas>{},
+        };
+        dataProvider.init();
+
+        AreaItemRecommend r(dataProvider);
+        auto result = r.recommendAreaItem(*cardIds);
+        MutableJsonDoc outDoc;
+        yyjson_mut_val* out = yyjson_mut_arr(outDoc.get());
+        if (!out) throw std::runtime_error("Failed to allocate area items JSON array.");
+        for (const auto& item : result) {
+            jsonArrayAppend(out, areaItemToJson(outDoc.get(), item));
+        }
+        return dumpMutableJson(out);
+    }
+
+    std::string recommendMusic(const std::string& optionsJson) {
+        auto optsDoc = json_doc::parse(optionsJson, "wasm music recommend options");
+        json_view opts = optsDoc.root();
+
+        auto regionStr = jsonOpt<std::string>(opts, "region");
+        if (!regionStr) throw std::invalid_argument("region is required.");
+        auto regionIt = REGION_ENUM_MAP.find(*regionStr);
+        if (regionIt == REGION_ENUM_MAP.end())
+            throw std::invalid_argument("Invalid region: " + *regionStr);
+        Region region = regionIt->second;
+        if (!region_masterdata.count(region))
+            throw std::invalid_argument("Master data not found for region: " + *regionStr);
+        if (!region_musicmetas.count(region))
+            throw std::invalid_argument("Music metas not found for region: " + *regionStr);
+        if (!opts.contains("deck") || opts["deck"].is_null())
+            throw std::invalid_argument("deck is required.");
+
+        auto userdata = std::make_shared<UserData>();
+        DataProvider dataProvider{
+            region,
+            region_masterdata[region],
+            userdata,
+            region_musicmetas[region],
+        };
+        int liveType = getLiveTypeFromOptions(opts);
+        int eventType = getEventTypeFromOptions(opts, dataProvider);
+        if (eventType == Enums::EventType::cheerful && liveType == Enums::LiveType::multi_live) {
+            liveType = Enums::LiveType::cheerful_live;
+        }
+        auto liveSkillOrder = getLiveSkillOrderFromOptions(opts);
+        auto specificSkillOrder = jsonOpt<std::vector<int>>(opts, "specific_skill_order");
+        if (liveSkillOrder == LiveSkillOrder::specific && !specificSkillOrder) {
+            throw std::invalid_argument("specific_skill_order is required when skill_order_choose_strategy is specific.");
+        }
+        auto multiTeammateScoreUp = jsonOpt<int>(opts, "multi_live_teammate_score_up");
+        auto multiTeammatePower = jsonOpt<int>(opts, "multi_live_teammate_power");
+        if ((multiTeammateScoreUp || multiTeammatePower) && !Enums::LiveType::isMulti(liveType)) {
+            throw std::invalid_argument("multi live teammate options are only valid for multi live.");
+        }
+
+        MusicRecommend r(dataProvider);
+        auto result = r.recommendMusic(
+            deckFromJson(opts["deck"]),
+            liveType,
+            eventType,
+            liveSkillOrder,
+            specificSkillOrder,
+            multiTeammateScoreUp,
+            multiTeammatePower
+        );
+
+        MutableJsonDoc outDoc;
+        yyjson_mut_val* out = yyjson_mut_arr(outDoc.get());
+        if (!out) throw std::runtime_error("Failed to allocate music recommend JSON array.");
+        for (const auto& music : result) {
+            jsonArrayAppend(out, recommendMusicToJson(outDoc.get(), music));
+        }
+        return dumpMutableJson(out);
+    }
+
+    std::string calculateExactLive(const std::string& optionsJson) {
+        auto optsDoc = json_doc::parse(optionsJson, "wasm exact live options");
+        json_view opts = optsDoc.root();
+
+        auto regionStr = jsonOpt<std::string>(opts, "region");
+        if (!regionStr) throw std::invalid_argument("region is required.");
+        auto regionIt = REGION_ENUM_MAP.find(*regionStr);
+        if (regionIt == REGION_ENUM_MAP.end())
+            throw std::invalid_argument("Invalid region: " + *regionStr);
+        Region region = regionIt->second;
+        if (!region_masterdata.count(region))
+            throw std::invalid_argument("Master data not found for region: " + *regionStr);
+        if (!opts.contains("music_score") || opts["music_score"].is_null())
+            throw std::invalid_argument("music_score is required.");
+
+        int liveType = getLiveTypeFromOptions(opts);
+        int power = jsonOpt<int>(opts, "power").value_or(0);
+        if (power <= 0) throw std::invalid_argument("power must be positive.");
+        auto skills = jsonOpt<std::vector<double>>(opts, "skills").value_or(std::vector<double>{});
+        std::string musicScoreJson = opts["music_score"].is_string()
+            ? opts["music_score"].get<std::string>()
+            : dumpJson(opts["music_score"]);
+        auto musicScore = MusicScore::fromJsonString(musicScoreJson);
+
+        std::optional<MusicScore> feverMusicScore = std::nullopt;
+        if (opts.contains("fever_music_score") && !opts["fever_music_score"].is_null()) {
+            std::string feverJson = opts["fever_music_score"].is_string()
+                ? opts["fever_music_score"].get<std::string>()
+                : dumpJson(opts["fever_music_score"]);
+            feverMusicScore = MusicScore::fromJsonString(feverJson);
+        }
+
+        DataProvider dataProvider{
+            region,
+            region_masterdata[region],
+            std::make_shared<UserData>(),
+            region_musicmetas.count(region) ? region_musicmetas[region] : std::shared_ptr<MusicMetas>{},
+        };
+        LiveExactCalculator calculator(dataProvider);
+        auto detail = calculator.calculate(
+            power,
+            skills,
+            liveType,
+            musicScore,
+            jsonOpt<int>(opts, "multi_sum_power").value_or(0),
+            feverMusicScore
+        );
+        MutableJsonDoc outDoc;
+        return dumpMutableJson(liveExactDetailToJson(outDoc.get(), detail));
     }
 
     std::string getWorldBloomSupportCards(const std::string& optionsJson) {
@@ -882,6 +1176,9 @@ EMSCRIPTEN_BINDINGS(sekai_deck_recommend) {
         .function("updateMasterdataFromObject", &WasmSekaiDeckRecommend::updateMasterdataFromObject)
         .function("updateMusicmetasFromString", &WasmSekaiDeckRecommend::updateMusicmetasFromString)
         .function("recommend", &WasmSekaiDeckRecommend::recommend)
+        .function("recommendAreaItems", &WasmSekaiDeckRecommend::recommendAreaItems)
+        .function("recommendMusic", &WasmSekaiDeckRecommend::recommendMusic)
+        .function("calculateExactLive", &WasmSekaiDeckRecommend::calculateExactLive)
         .function("getWorldBloomSupportCards", &WasmSekaiDeckRecommend::getWorldBloomSupportCards);
 
     emscripten::function("initDataPath", &wasmInitDataPath);

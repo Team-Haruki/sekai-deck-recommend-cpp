@@ -25,14 +25,20 @@ public:
     std::vector<CardRarity> cardRarities;
     std::vector<CharacterRank> characterRanks;
     std::vector<EventCard> eventCards;
+    std::vector<EventCardBonusLimit> eventCardBonusLimits;
     std::vector<EventDeckBonus> eventDeckBonuses;
     std::vector<EventExchangeSummary> eventExchangeSummaries;
+    std::vector<EventHonorBonus> eventHonorBonuses;
     std::vector<Event> events;
     std::vector<EventItem> eventItems;
+    std::vector<EventMysekaiFixtureGameCharacterPerformanceBonusLimit> eventMysekaiFixtureGameCharacterPerformanceBonusLimits;
     std::vector<EventRarityBonusRate> eventRarityBonusRates;
+    std::vector<EventSkillScoreUpLimit> eventSkillScoreUpLimits;
     std::vector<GameCharacter> gameCharacters;
     std::vector<GameCharacterUnit> gameCharacterUnits;
     std::vector<Honor> honors;
+    std::vector<IngameCombo> ingameCombos;
+    std::vector<IngameNote> ingameNotes;
     std::vector<MasterLesson> masterLessons;
     std::vector<MusicDifficulty> musicDifficulties;
     std::vector<Music> musics;
@@ -66,6 +72,14 @@ public:
     int getWorldBloom3PartByCharacterId(int characterId) const;
 
     int getWorldBloomEventTurn(int eventId) const;
+
+    bool isWorldBloomFinale(int eventId) const;
+
+    int getEventCardBonusCountLimit(int eventId) const;
+
+    std::optional<double> getEventSkillScoreUpLimit(int eventId) const;
+
+    std::optional<int> getMysekaiFixtureBonusLimit(int eventId) const;
 
 };
 

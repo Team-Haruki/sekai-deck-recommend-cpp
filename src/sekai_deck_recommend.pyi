@@ -472,3 +472,37 @@ class SekaiDeckRecommend:
             List[RecommendSupportDeckCard]: Support deck cards sorted by bonus descending
         """
         ...
+
+    def recommend_area_items(self, options: DeckRecommendOptions, card_ids: List[int]) -> List[Dict[str, Any]]:
+        """
+        Recommend next area item upgrades for a fixed deck, sorted by power gain per coin.
+        Args:
+            options (DeckRecommendOptions): Options with region and user data.
+            card_ids (List[int]): Card IDs in the fixed deck.
+        """
+        ...
+
+    def recommend_music(self, options: DeckRecommendOptions, deck: RecommendDeck) -> List[Dict[str, Any]]:
+        """
+        Calculate live score and event point for every loaded music meta using an already calculated deck.
+        Args:
+            options (DeckRecommendOptions): Options with region, live_type, and optional event_id/event_type plus skill order settings.
+            deck (RecommendDeck): Deck returned by recommend().
+        """
+        ...
+
+    def calculate_exact_live(
+        self,
+        region: str,
+        power: int,
+        skills: List[float],
+        live_type: str,
+        music_score_json: str,
+        multi_sum_power: int = 0,
+        fever_music_score_json: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """
+        Calculate note-level exact live score from a parsed music score JSON.
+        Master data for ingameNotes and ingameCombos must be loaded for the region.
+        """
+        ...

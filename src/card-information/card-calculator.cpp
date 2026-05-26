@@ -41,15 +41,12 @@ std::optional<CardDetail> CardCalculator::getCardDetail(
     // 判断强制使用画布
     hasCanvasBonus |= cfg.canvas;
 
-    // 是否是wl终章
-    bool isFinalChapter = eventConfig.has_value() ? eventConfig->eventId == finalChapterEventId : false;
-
     auto userCard0 = this->cardService.applyCardConfig(userCard, card, cfg);
     auto units = this->cardService.getCardUnits(card);
     auto skill = this->skillCalculator.getCardSkill(userCard0, card, scoreUpLimit);
     auto power = this->powerCalculator.getCardPower(
         userCard0, card, units, userAreaItemLevels, hasCanvasBonus, userGateBonuses,
-        isFinalChapter ? std::optional<int>(20) : std::nullopt  // 终章限制玩偶加成2%
+        eventConfig.has_value() ? eventConfig->mysekaiFixtureLimit : std::nullopt
     );
 
     CardEventBonusInfo eventBonus{};

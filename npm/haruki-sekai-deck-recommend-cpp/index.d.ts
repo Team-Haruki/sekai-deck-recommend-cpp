@@ -150,6 +150,92 @@ export interface WorldBloomSupportOptions {
   [key: string]: unknown
 }
 
+export interface AreaItemRecommendOptions {
+  region: SekaiRegion
+  card_ids: number[]
+  user_data?: unknown
+  userData?: unknown
+  user_data_str?: string
+  userDataStr?: string
+  user_data_file_path?: string
+  userDataFilePath?: string
+  [key: string]: unknown
+}
+
+export interface RecommendAreaItem {
+  area_id: number
+  area_type: string
+  area_view_type: string
+  area_item_id: number
+  next_level: number
+  shop_item_id: number
+  cost: {
+    coin: number
+    seed: number
+    szk: number
+  }
+  power: number
+  power_per_coin: number
+}
+
+export interface MusicRecommendOptions {
+  region: SekaiRegion
+  live_type: Exclude<LiveType, "mysekai">
+  event_id?: number
+  event_type?: EventType
+  skill_order_choose_strategy?: SkillOrderChooseStrategy
+  specific_skill_order?: number[]
+  multi_live_teammate_score_up?: number
+  multi_live_teammate_power?: number
+  [key: string]: unknown
+}
+
+export interface RecommendMusic {
+  music_id: number
+  difficulty: MusicDifficulty
+  live_score: number
+  event_point: number | null
+}
+
+export interface MusicScoreNoteBase {
+  time: number
+}
+
+export interface MusicScoreNote extends MusicScoreNoteBase {
+  type: number
+  longId?: number
+}
+
+export interface MusicScore {
+  notes: MusicScoreNote[]
+  skills: MusicScoreNoteBase[]
+  fevers?: MusicScoreNoteBase[]
+}
+
+export interface ExactLiveOptions {
+  region: SekaiRegion
+  live_type: Exclude<LiveType, "mysekai">
+  power: number
+  skills: number[]
+  music_score: MusicScore | string
+  multi_sum_power?: number
+  fever_music_score?: MusicScore | string
+}
+
+export interface ExactLiveNoteDetail {
+  note_coefficient: number
+  combo_coefficient: number
+  judge_coefficient: number
+  effect_bonuses: number[]
+  score: number
+}
+
+export interface ExactLiveResult {
+  total: number
+  active_bonus: number
+  notes: ExactLiveNoteDetail[]
+}
+
 export interface RecommendCard {
   card_id: number
   total_power: number
@@ -203,6 +289,9 @@ export interface RawSekaiDeckRecommendInstance {
   updateMasterdataFromObject(data: Record<string, unknown>, region: SekaiRegion): void
   updateMusicmetasFromString(data: string, region: SekaiRegion): void
   recommend(optionsJson: string): string
+  recommendAreaItems(optionsJson: string): string
+  recommendMusic(optionsJson: string): string
+  calculateExactLive(optionsJson: string): string
   getWorldBloomSupportCards(optionsJson: string): string
   delete(): void
 }
@@ -224,6 +313,9 @@ export class SekaiDeckRecommendWasm {
   loadMusicMetas(region: SekaiRegion, data: string | object): void
   recommend(options: RecommendOptions): RecommendResult
   getWorldBloomSupportCards(options: WorldBloomSupportOptions): WorldBloomSupportCard[]
+  recommendAreaItems(options: AreaItemRecommendOptions): RecommendAreaItem[]
+  recommendMusic(options: MusicRecommendOptions, deck: RecommendDeck): RecommendMusic[]
+  calculateExactLive(options: ExactLiveOptions): ExactLiveResult
   dispose(): void
 }
 

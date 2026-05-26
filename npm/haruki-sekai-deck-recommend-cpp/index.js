@@ -77,6 +77,24 @@ export class SekaiDeckRecommendWasm {
     return JSON.parse(json)
   }
 
+  recommendAreaItems(options) {
+    this.#assertActive()
+    const json = this.#engine.recommendAreaItems(JSON.stringify(normalizeUserDataAliases(options)))
+    return JSON.parse(json)
+  }
+
+  recommendMusic(options, deck) {
+    this.#assertActive()
+    const json = this.#engine.recommendMusic(JSON.stringify({ ...options, deck }))
+    return JSON.parse(json)
+  }
+
+  calculateExactLive(options) {
+    this.#assertActive()
+    const json = this.#engine.calculateExactLive(JSON.stringify(options))
+    return JSON.parse(json)
+  }
+
   dispose() {
     if (this.#disposed) return
     this.#engine.delete()

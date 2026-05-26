@@ -66,6 +66,11 @@ BestPermutationResult BaseDeckRecommend::getBestPermutation(
     const DeckRecommendConfig& config
 ) const {
     auto orderedDeckCards = deckCards;
+    bool isWorldBloomFinale = eventId.has_value() && this->dataProvider.masterData->isWorldBloomFinale(eventId.value());
+    int specialCharacterId = 0;
+    if (isWorldBloomFinale && !deckCards.empty()) {
+        specialCharacterId = deckCards.front()->characterId;
+    }
     {
         std::unordered_set<int> cardIds{};
         std::unordered_set<int> characterIds{};
@@ -90,7 +95,7 @@ BestPermutationResult BaseDeckRecommend::getBestPermutation(
                 return {};
             }
         }
-        for (const auto& characterId : resolveRequiredCharacters(config, eventId)) {
+        for (const auto& characterId : resolveRequiredCharacters(config, eventId, isWorldBloomFinale, specialCharacterId)) {
             if (!characterIds.count(characterId)) {
                 return {};
             }
@@ -101,7 +106,7 @@ BestPermutationResult BaseDeckRecommend::getBestPermutation(
         return {};
     }
 
-    auto leaderCharacterId = resolveLeaderCharacterId(config, eventId);
+    auto leaderCharacterId = resolveLeaderCharacterId(config, eventId, isWorldBloomFinale, specialCharacterId);
     if (leaderCharacterId.has_value()) {
         auto leaderIt = std::find_if(
             orderedDeckCards.begin(),
@@ -121,8 +126,8 @@ BestPermutationResult BaseDeckRecommend::getBestPermutation(
     bool bestSkillAsLeader = config.bestSkillAsLeader;
     // 存在固定队长角色则不允许把技能最强的换到队长
     if (config.fixedCharacters.size()) bestSkillAsLeader = false;
-    // 终章活动不允许把技能最强的换到队长
-    if (eventId.has_value() && eventId.value() == finalChapterEventId) bestSkillAsLeader = false;
+    // Finale events have leader-only bonus rules.
+    if (isWorldBloomFinale) bestSkillAsLeader = false;
     // 获取当前卡组的详情
     auto deckDetails = deckCalculator.getDeckDetailByCards(
         orderedDeckCards, supportCards, honorBonus, eventType, eventId,
@@ -173,7 +178,12 @@ std::vector<RecommendDeck> BaseDeckRecommend::recommendHighScoreDeck(
         && (config.forcedLeaderCharacterId.value() < 1 || config.forcedLeaderCharacterId.value() > 26))
         throw std::runtime_error("Invalid forced leader character ID: " + std::to_string(config.forcedLeaderCharacterId.value()));
 
-    auto requiredCharacters = resolveRequiredCharacters(config, eventConfig.eventId);
+    auto requiredCharacters = resolveRequiredCharacters(
+        config,
+        eventConfig.eventId,
+        eventConfig.isWorldBloomFinale,
+        eventConfig.specialCharacterId
+    );
     std::set<int> requiredCharacterSet{};
     for (const auto& characterId : requiredCharacters) {
         requiredCharacterSet.insert(characterId);
@@ -188,9 +198,8 @@ std::vector<RecommendDeck> BaseDeckRecommend::recommendHighScoreDeck(
     auto& cardEpisodes = this->dataProvider.masterData->cardEpisodes;
 
     std::optional<double> scoreUpLimit = std::nullopt;
-    // 终章技能加分上限为140
-    if (eventConfig.eventId == finalChapterEventId && !Enums::LiveType::isChallenge(liveType))
-        scoreUpLimit = 140.0;
+    if (eventConfig.skillScoreUpLimit.has_value() && !Enums::LiveType::isChallenge(liveType))
+        scoreUpLimit = eventConfig.skillScoreUpLimit;
 
     auto cards = cardCalculator.batchGetCardDetail(
         userCards, config.cardConfig, config.singleCardConfig, 
@@ -200,8 +209,8 @@ std::vector<RecommendDeck> BaseDeckRecommend::recommendHighScoreDeck(
 
     // 归类支援卡组
     std::map<int, std::vector<SupportDeckCard>> supportCards{};
-    if (eventConfig.eventId == finalChapterEventId) {
-        // 终章对每个角色都算一个支援卡组排序
+    if (eventConfig.isWorldBloomFinale) {
+        // Finale scores a support deck for every possible leader character.
         for (int i = 1; i <= 26; i++) {
             std::vector<SupportDeckCard> sc{};
             for (const auto& card : userCards) 
@@ -230,12 +239,13 @@ std::vector<RecommendDeck> BaseDeckRecommend::recommendHighScoreDeck(
         supportCards[0] = sc;
     }
 
-    // 过滤箱活的卡，不上其它组合的
-    if (eventConfig.eventUnit && config.filterOtherUnit) {
+    int filterUnit = eventConfig.worldBloomSupportUnit ? eventConfig.worldBloomSupportUnit : eventConfig.eventUnit;
+    // 过滤箱活/World Bloom应援组合的卡，不上其它组合的
+    if (filterUnit && config.filterOtherUnit) {
         std::vector<CardDetail> newCards{};
         for (const auto& card : cards) {
             if ((card.units.size() == 1 && card.units[0] == Enums::Unit::piapro) || 
-                std::find(card.units.begin(), card.units.end(), eventConfig.eventUnit) != card.units.end()) {
+                std::find(card.units.begin(), card.units.end(), filterUnit) != card.units.end()) {
                 newCards.push_back(card);
             }
         }
@@ -855,7 +865,7 @@ std::vector<RecommendDeck> BaseDeckRecommend::recommendHighScoreDeck(
             }
 
             const std::vector<SupportDeckCard>* pSupportCards = nullptr;
-            if (eventConfig.eventId == finalChapterEventId) {
+            if (eventConfig.isWorldBloomFinale) {
                 auto it = supportCards.find(deckCardDetails[0]->characterId);
                 if (it == supportCards.end()) {
                     continue;
@@ -996,8 +1006,19 @@ std::vector<RecommendDeck> BaseDeckRecommend::recommendHighScoreDeck(
         static std::unordered_map<std::string, RlSeedBucket> rlSeedBuckets{};
 
         auto fullSorted = sortCardsByStrength(cards);
-        auto remainingRequiredCharacters = resolveRemainingFixedCharacters(config, fixedCards, eventConfig.eventId);
-        auto leaderCharacterId = resolveLeaderCharacterId(config, eventConfig.eventId);
+        auto remainingRequiredCharacters = resolveRemainingFixedCharacters(
+            config,
+            fixedCards,
+            eventConfig.eventId,
+            eventConfig.isWorldBloomFinale,
+            eventConfig.specialCharacterId
+        );
+        auto leaderCharacterId = resolveLeaderCharacterId(
+            config,
+            eventConfig.eventId,
+            eventConfig.isWorldBloomFinale,
+            eventConfig.specialCharacterId
+        );
         auto appendConstraintKey = [](std::string& key, const char* name, const std::vector<int>& values, bool sortValues) {
             key += ":";
             key += name;

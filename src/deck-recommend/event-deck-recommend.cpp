@@ -12,17 +12,22 @@ std::vector<RecommendDeck> EventDeckRecommend::recommendEventDeck(int eventId, i
         liveType = Enums::LiveType::cheerful_live;
     }
 
+    auto cfg = config;
+    if (eventConfig.isWorldBloomFinale && specialCharacterId > 0 && !cfg.forcedLeaderCharacterId.has_value()) {
+        cfg.forcedLeaderCharacterId = specialCharacterId;
+    }
+
     const auto& userCards = dataProvider.userData->userCards;
     return baseRecommend.recommendHighScoreDeck(userCards,
         this->eventCalculator.getEventPointFunction(
             liveType, 
             eventConfig.eventType,
-            config.liveSkillOrder,
-            config.specificSkillOrder,
-            config.multiTeammateScoreUp,
-            config.multiTeammatePower
+            cfg.liveSkillOrder,
+            cfg.specificSkillOrder,
+            cfg.multiTeammateScoreUp,
+            cfg.multiTeammatePower
         ), 
-        config, 
+        cfg,
         liveType, 
         eventConfig
     );

@@ -39,6 +39,12 @@ const std::vector<std::string> requiredMasterDataKeys = {
 const std::vector<std::string> notRequiredMasterDataKeys = {
     "worldBloomSupportDeckUnitEventLimitedBonuses",
     "cardMysekaiCanvasBonuses",
+    "eventCardBonusLimits",
+    "eventHonorBonuses",
+    "eventMysekaiFixtureGameCharacterPerformanceBonusLimits",
+    "eventSkillScoreUpLimits",
+    "ingameCombos",
+    "ingameNotes",
     "mysekaiFixtureGameCharacterGroups",
     "mysekaiFixtureGameCharacterGroupPerformanceBonuses",
     "mysekaiGates",
@@ -252,6 +258,12 @@ void MasterData::loadFromJsons(std::map<std::string, json_doc>& jsons) {
 
     this->worldBloomSupportDeckUnitEventLimitedBonuses = loadMasterData<WorldBloomSupportDeckUnitEventLimitedBonus>(jsons, "worldBloomSupportDeckUnitEventLimitedBonuses", false);
     this->cardMysekaiCanvasBonuses = loadMasterData<CardMysekaiCanvasBonus>(jsons, "cardMysekaiCanvasBonuses", false);
+    this->eventCardBonusLimits = loadMasterData<EventCardBonusLimit>(jsons, "eventCardBonusLimits", false);
+    this->eventHonorBonuses = loadMasterData<EventHonorBonus>(jsons, "eventHonorBonuses", false);
+    this->eventMysekaiFixtureGameCharacterPerformanceBonusLimits = loadMasterData<EventMysekaiFixtureGameCharacterPerformanceBonusLimit>(jsons, "eventMysekaiFixtureGameCharacterPerformanceBonusLimits", false);
+    this->eventSkillScoreUpLimits = loadMasterData<EventSkillScoreUpLimit>(jsons, "eventSkillScoreUpLimits", false);
+    this->ingameCombos = loadMasterData<IngameCombo>(jsons, "ingameCombos", false);
+    this->ingameNotes = loadMasterData<IngameNote>(jsons, "ingameNotes", false);
     this->mysekaiFixtureGameCharacterGroups = loadMasterData<MysekaiFixtureGameCharacterGroup>(jsons, "mysekaiFixtureGameCharacterGroups", false);
     this->mysekaiFixtureGameCharacterGroupPerformanceBonuses = loadMasterData<MysekaiFixtureGameCharacterGroupPerformanceBonus>(jsons, "mysekaiFixtureGameCharacterGroupPerformanceBonuses", false);
     this->mysekaiGates = loadMasterData<MysekaiGate>(jsons, "mysekaiGates", false);
@@ -445,4 +457,53 @@ int MasterData::getWorldBloomEventTurn(int eventId) const
         return 2;
     else
         return 3;
+}
+
+bool MasterData::isWorldBloomFinale(int eventId) const
+{
+    if (eventId == finalChapterEventId) {
+        return true;
+    }
+    for (const auto& worldBloom : worldBlooms) {
+        if (worldBloom.eventId == eventId && worldBloom.worldBloomChapterType == "finale") {
+            return true;
+        }
+    }
+    return false;
+}
+
+int MasterData::getEventCardBonusCountLimit(int eventId) const
+{
+    for (const auto& limit : eventCardBonusLimits) {
+        if (limit.eventId == eventId) {
+            return limit.memberCountLimit;
+        }
+    }
+    return isWorldBloomFinale(eventId) ? 4 : 5;
+}
+
+std::optional<double> MasterData::getEventSkillScoreUpLimit(int eventId) const
+{
+    for (const auto& limit : eventSkillScoreUpLimits) {
+        if (limit.eventId == eventId) {
+            return limit.scoreUpRateLimit;
+        }
+    }
+    if (isWorldBloomFinale(eventId)) {
+        return 140.0;
+    }
+    return std::nullopt;
+}
+
+std::optional<int> MasterData::getMysekaiFixtureBonusLimit(int eventId) const
+{
+    for (const auto& limit : eventMysekaiFixtureGameCharacterPerformanceBonusLimits) {
+        if (limit.eventId == eventId) {
+            return limit.bonusRateLimit;
+        }
+    }
+    if (isWorldBloomFinale(eventId)) {
+        return 20;
+    }
+    return std::nullopt;
 }

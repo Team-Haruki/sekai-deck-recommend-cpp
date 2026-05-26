@@ -292,7 +292,13 @@ void BaseDeckRecommend::findBestCardsDFS(
 
     auto& deckCards = dfsInfo.deckCards;
     auto& deckCharacters = dfsInfo.deckCharacters;
-    auto remainingFixedCharacters = resolveRemainingFixedCharacters(cfg, fixedCards, eventId);
+    bool isWorldBloomFinale = eventId.has_value() && this->dataProvider.masterData->isWorldBloomFinale(eventId.value());
+    auto remainingFixedCharacters = resolveRemainingFixedCharacters(
+        cfg,
+        fixedCards,
+        eventId,
+        isWorldBloomFinale
+    );
 
     // 防止挑战Live卡的数量小于允许上场的数量导致无法组队
     if (isChallengeLive) {

@@ -28,22 +28,24 @@ DeckBonusInfo DeckCalculator::getDeckBonus(
         ret.cardBonus.push_back(card->maxEventBonus.value());
     }
 
-    // 终章机制
-    if (eventId.has_value() && eventId.value() == finalChapterEventId) {
-        // 不是队长的角色扣掉1k牌加成和队长当期加成
+    if (eventId.has_value() && this->dataProvider.masterData->isWorldBloomFinale(eventId.value())) {
+        // Leader-only finale bonuses only apply to the first card.
         for (int i = 1; i < (int)deckCards.size(); i++) {
             ret.cardBonus[i] -= deckCards[i]->leaderHonorEventBonus.value_or(0.0);
             ret.cardBonus[i] -= deckCards[i]->leaderLimitEventBonus.value_or(0.0);
         }
-        // 最多生效4个当期
+    }
+
+    if (eventId.has_value()) {
+        int limitedBonusCountLimit = this->dataProvider.masterData->getEventCardBonusCountLimit(eventId.value());
         int limitedEventBonusNum = 0;
         for (int i = 0; i < (int)deckCards.size(); i++) {
-            if (deckCards[i]->limitedEventBonus.value_or(0.) > 0) {
-                if(++limitedEventBonusNum == 5) {
-                    // 去掉最后一个当期加成
-                    ret.cardBonus[i] -= deckCards[i]->limitedEventBonus.value();
-                    break;
-                }
+            if (deckCards[i]->limitedEventBonus.value_or(0.) <= 0) {
+                continue;
+            }
+            limitedEventBonusNum++;
+            if (limitedEventBonusNum > limitedBonusCountLimit) {
+                ret.cardBonus[i] -= deckCards[i]->limitedEventBonus.value();
             }
         }
     }
@@ -142,7 +144,7 @@ std::vector<DeckDetail> DeckCalculator::getDeckDetailByCards(
     SupportDeckBonus supportDeckBonus{};
     if (supportCards.size()) {
         std::vector<SupportDeckCard>* pSupportCards = nullptr;
-        if (eventId.value_or(0) == finalChapterEventId) 
+        if (eventId.has_value() && this->dataProvider.masterData->isWorldBloomFinale(eventId.value()))
             pSupportCards = &supportCards[cardDetails[0]->characterId]; // 终章支援角色为队长角色
         else
             pSupportCards = &(supportCards.begin()->second);    // 普通wl只会处理出一组支援卡牌列表

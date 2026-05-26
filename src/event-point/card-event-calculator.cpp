@@ -1,6 +1,7 @@
 #include "event-point/card-event-calculator.h"
 
 #include <algorithm>
+#include <unordered_set>
 
 double CardEventCalculator::getEventDeckBonus(int eventId, const Card& card)
 {
@@ -120,21 +121,38 @@ CardEventBonusInfo CardEventCalculator::getCardEventBonus(
     basicBonus += masterRankBonus.bonusRate;
 
     double limitedBonus = 0.0;
+    double leaderLimitBonus = 0.0;
+    bool matchedEventCard = false;
     for (const auto& it : eventCards) {
         if (it.eventId == eventId && it.cardId == card.id) {
             limitedBonus = it.bonusRate;
+            leaderLimitBonus = it.leaderBonusRate;
+            matchedEventCard = true;
             break;
         }
     }
 
-    if (eventId == finalChapterEventId) {
-        double leaderHonorBonus = this->dataProvider.userData->userCharacterFinalChapterHonorEventBonusMap[card.characterId];
-        double leaderLimitBonus = 0.0;
-        for (const auto& it : eventCards) {
-            if (it.eventId == eventId && it.cardId == card.id) {
-                leaderLimitBonus = 20.0;
-                break;
+    if (this->dataProvider.masterData->isWorldBloomFinale(eventId)) {
+        double leaderHonorBonus = 0.0;
+        bool hasEventHonorBonusMaster = false;
+        std::unordered_set<int> userHonorIds{};
+        for (const auto& userHonor : this->dataProvider.userData->userHonors) {
+            userHonorIds.insert(userHonor.honorId);
+        }
+        for (const auto& it : this->dataProvider.masterData->eventHonorBonuses) {
+            if (it.eventId != eventId || it.leaderGameCharacterId != card.characterId) {
+                continue;
             }
+            hasEventHonorBonusMaster = true;
+            if (userHonorIds.count(it.honorId)) {
+                leaderHonorBonus += it.bonusRate;
+            }
+        }
+        if (!hasEventHonorBonusMaster && eventId == finalChapterEventId) {
+            leaderHonorBonus = this->dataProvider.userData->userCharacterFinalChapterHonorEventBonusMap[card.characterId];
+        }
+        if (leaderLimitBonus == 0.0 && matchedEventCard && eventId == finalChapterEventId) {
+            leaderLimitBonus = 20.0;
         }
         return CardEventBonusInfo{
             .maxBonus = basicBonus + limitedBonus + leaderHonorBonus + leaderLimitBonus,

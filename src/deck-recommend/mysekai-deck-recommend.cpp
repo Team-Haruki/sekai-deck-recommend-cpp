@@ -14,6 +14,9 @@ std::vector<RecommendDeck> MysekaiDeckRecommend::recommendMysekaiDeck(
     auto cfg = config;
     cfg.target = RecommendTarget::Mysekai;
     cfg.keepAfterTrainingState = true;
+    if (eventConfig.isWorldBloomFinale && specialCharacterId > 0 && !cfg.forcedLeaderCharacterId.has_value()) {
+        cfg.forcedLeaderCharacterId = specialCharacterId;
+    }
 
     const auto& userCards = dataProvider.userData->userCards;
     return baseRecommend.recommendHighScoreDeck(userCards,

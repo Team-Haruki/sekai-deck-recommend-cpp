@@ -7,6 +7,7 @@ struct WorldBloom {
     int id = 0;
     int eventId = 0;
     int gameCharacterId = 0;
+    std::string worldBloomChapterType;
     int chapterNo = 0;
     int chapterStartAt = 0;
     int aggregateAt = 0;
@@ -21,6 +22,7 @@ struct WorldBloom {
             worldBloom.id = item.value("id", 0);
             worldBloom.eventId = item.value("eventId", 0);
             worldBloom.gameCharacterId = item.value("gameCharacterId", 0);
+            worldBloom.worldBloomChapterType = item.value("worldBloomChapterType", "");
             worldBloom.chapterNo = item.value("chapterNo", 0);
             worldBloom.chapterStartAt = item.value("chapterStartAt", 0);
             worldBloom.aggregateAt = item.value("aggregateAt", 0);

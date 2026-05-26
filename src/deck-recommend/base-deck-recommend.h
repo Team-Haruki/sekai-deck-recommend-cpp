@@ -128,16 +128,24 @@ struct DfsScoreUpperBoundContext {
 
 inline std::vector<int> resolveRequiredCharacters(
     const DeckRecommendConfig& config,
-    std::optional<int> eventId
+    std::optional<int> eventId,
+    bool isWorldBloomFinale = false,
+    int specialCharacterId = 0
 ) {
     std::vector<int> requiredCharacters = config.fixedCharacters;
-    if (eventId.value_or(0) == finalChapterEventId && config.forcedLeaderCharacterId.has_value()) {
-        int leaderCharacterId = config.forcedLeaderCharacterId.value();
+    std::optional<int> leaderCharacterId = std::nullopt;
+    if ((eventId.value_or(0) == finalChapterEventId || isWorldBloomFinale)
+        && config.forcedLeaderCharacterId.has_value()) {
+        leaderCharacterId = config.forcedLeaderCharacterId.value();
+    } else if (isWorldBloomFinale && specialCharacterId > 0) {
+        leaderCharacterId = specialCharacterId;
+    }
+    if (leaderCharacterId.has_value()) {
         requiredCharacters.erase(
-            std::remove(requiredCharacters.begin(), requiredCharacters.end(), leaderCharacterId),
+            std::remove(requiredCharacters.begin(), requiredCharacters.end(), leaderCharacterId.value()),
             requiredCharacters.end()
         );
-        requiredCharacters.insert(requiredCharacters.begin(), leaderCharacterId);
+        requiredCharacters.insert(requiredCharacters.begin(), leaderCharacterId.value());
     }
     return requiredCharacters;
 }
@@ -145,7 +153,9 @@ inline std::vector<int> resolveRequiredCharacters(
 inline std::vector<int> resolveRemainingFixedCharacters(
     const DeckRecommendConfig& config,
     const std::vector<CardDetail>& fixedCards,
-    std::optional<int> eventId
+    std::optional<int> eventId,
+    bool isWorldBloomFinale = false,
+    int specialCharacterId = 0
 ) {
     std::unordered_set<int> fixedCardCharacters{};
     for (const auto& card : fixedCards) {
@@ -153,7 +163,7 @@ inline std::vector<int> resolveRemainingFixedCharacters(
     }
 
     std::vector<int> remainingCharacters{};
-    for (const auto& characterId : resolveRequiredCharacters(config, eventId)) {
+    for (const auto& characterId : resolveRequiredCharacters(config, eventId, isWorldBloomFinale, specialCharacterId)) {
         if (!fixedCardCharacters.count(characterId)) {
             remainingCharacters.push_back(characterId);
         }
@@ -163,10 +173,16 @@ inline std::vector<int> resolveRemainingFixedCharacters(
 
 inline std::optional<int> resolveLeaderCharacterId(
     const DeckRecommendConfig& config,
-    std::optional<int> eventId
+    std::optional<int> eventId,
+    bool isWorldBloomFinale = false,
+    int specialCharacterId = 0
 ) {
-    if (eventId.value_or(0) == finalChapterEventId && config.forcedLeaderCharacterId.has_value()) {
+    if ((eventId.value_or(0) == finalChapterEventId || isWorldBloomFinale)
+        && config.forcedLeaderCharacterId.has_value()) {
         return config.forcedLeaderCharacterId;
+    }
+    if (isWorldBloomFinale && specialCharacterId > 0) {
+        return specialCharacterId;
     }
     if (!config.fixedCharacters.empty()) {
         return config.fixedCharacters.front();

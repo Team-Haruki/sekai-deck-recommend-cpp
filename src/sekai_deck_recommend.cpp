@@ -1,7 +1,10 @@
 ﻿#include "deck-recommend/event-deck-recommend.h"
 #include "deck-recommend/challenge-live-deck-recommend.h"
 #include "deck-recommend/mysekai-deck-recommend.h"
+#include "area-item-recommend/area-item-recommend.h"
 #include "data-provider/static-data.h"
+#include "live-score/live-exact-calculator.h"
+#include "music-recommend/music-recommend.h"
 
 #include <iostream>
 #include <algorithm>
@@ -746,6 +749,100 @@ struct PyDeckRecommendResult {
     }
 };
 
+static py::dict recommend_area_item_to_py(const RecommendAreaItem& item) {
+    py::dict result;
+    result["area_id"] = item.areaId;
+    result["area_type"] = mappedEnumToString(EnumMap::areaType, item.areaType);
+    result["area_view_type"] = mappedEnumToString(EnumMap::viewType, item.areaViewType);
+    result["area_item_id"] = item.areaItemId;
+    result["next_level"] = item.nextLevel;
+    result["shop_item_id"] = item.shopItemId;
+    py::dict cost;
+    cost["coin"] = item.cost.coin;
+    cost["seed"] = item.cost.seed;
+    cost["szk"] = item.cost.szk;
+    result["cost"] = cost;
+    result["power"] = item.power;
+    result["power_per_coin"] = item.powerPerCoin;
+    return result;
+}
+
+static py::dict recommend_music_to_py(const RecommendMusic& music) {
+    py::dict result;
+    result["music_id"] = music.musicId;
+    result["difficulty"] = mappedEnumToString(EnumMap::musicDifficulty, music.difficulty);
+    result["live_score"] = music.liveScore;
+    if (music.eventPoint.has_value()) {
+        result["event_point"] = music.eventPoint.value();
+    } else {
+        result["event_point"] = py::none();
+    }
+    return result;
+}
+
+static py::dict live_exact_detail_to_py(const LiveExactDetail& detail) {
+    py::dict result;
+    result["total"] = detail.total;
+    result["active_bonus"] = detail.activeBonus;
+    py::list notes;
+    for (const auto& note : detail.notes) {
+        py::dict noteResult;
+        noteResult["note_coefficient"] = note.noteCoefficient;
+        noteResult["combo_coefficient"] = note.comboCoefficient;
+        noteResult["judge_coefficient"] = note.judgeCoefficient;
+        noteResult["effect_bonuses"] = note.effectBonuses;
+        noteResult["score"] = note.score;
+        notes.append(noteResult);
+    }
+    result["notes"] = notes;
+    return result;
+}
+
+static DeckDetail deck_detail_from_py(const PyRecommendDeck& pyDeck) {
+    DeckDetail deck{};
+    deck.power = DeckPowerDetail{
+        .base = pyDeck.base_power,
+        .areaItemBonus = pyDeck.area_item_bonus_power,
+        .characterBonus = pyDeck.character_bonus_power,
+        .honorBonus = pyDeck.honor_bonus_power,
+        .fixtureBonus = pyDeck.fixture_bonus_power,
+        .gateBonus = pyDeck.gate_bonus_power,
+        .total = pyDeck.total_power,
+    };
+    deck.eventBonus = pyDeck.event_bonus_rate;
+    deck.supportDeckBonus = pyDeck.support_deck_bonus_rate;
+    deck.multiLiveScoreUp = pyDeck.multi_live_score_up;
+    for (const auto& pyCard : pyDeck.cards) {
+        deck.cards.push_back(DeckCardDetail{
+            .cardId = pyCard.card_id,
+            .level = pyCard.level,
+            .skillLevel = pyCard.skill_level,
+            .masterRank = pyCard.master_rank,
+            .power = DeckCardPowerDetail{
+                .base = pyCard.base_power,
+                .areaItemBonus = 0,
+                .characterBonus = 0,
+                .fixtureBonus = 0,
+                .gateBonus = 0,
+                .total = pyCard.total_power,
+            },
+            .eventBonus = pyCard.event_bonus_rate,
+            .skill = DeckCardSkillDetail{
+                .scoreUp = double(pyCard.skill_score_up),
+                .lifeRecovery = double(pyCard.skill_life_recovery),
+            },
+            .episode1Read = pyCard.episode1_read,
+            .episode2Read = pyCard.episode2_read,
+            .afterTraining = pyCard.after_training,
+            .defaultImage = pyCard.default_image.empty()
+                ? 0
+                : mapEnum(EnumMap::defaultImage, pyCard.default_image),
+            .hasCanvasBonus = pyCard.has_canvas_bonus,
+        });
+    }
+    return deck;
+}
+
 // 推荐主类
 class SekaiDeckRecommend {
 
@@ -760,6 +857,85 @@ class SekaiDeckRecommend {
         DeckRecommendConfig config = {};
         DataProvider dataProvider = {};
     };
+
+    Region get_region_from_py(const std::optional<std::string>& regionOption) const {
+        if (!regionOption.has_value())
+            throw std::invalid_argument("region is required.");
+        if (!REGION_ENUM_MAP.count(regionOption.value()))
+            throw std::invalid_argument("Invalid region: " + regionOption.value());
+        return REGION_ENUM_MAP.at(regionOption.value());
+    }
+
+    std::shared_ptr<UserData> load_user_data_from_py(
+        const PyDeckRecommendOptions& pyoptions,
+        bool required
+    ) const {
+        auto userdata = std::make_shared<UserData>();
+        if (pyoptions.user_data.has_value())
+            userdata = pyoptions.user_data.value().user_data;
+        else if (pyoptions.user_data_file_path.has_value())
+            userdata->loadFromFile(pyoptions.user_data_file_path.value());
+        else if (pyoptions.user_data_str.has_value())
+            userdata->loadFromString(pyoptions.user_data_str.value());
+        else if (required)
+            throw std::invalid_argument("Either user_data / user_data_file_path / user_data_str is required.");
+        return userdata;
+    }
+
+    DataProvider construct_data_provider_from_py(
+        const PyDeckRecommendOptions& pyoptions,
+        bool requireUserData,
+        bool requireMusicMetas
+    ) const {
+        Region region = get_region_from_py(pyoptions.region);
+        if (!region_masterdata.count(region))
+            throw std::invalid_argument("Master data not found for region: " + pyoptions.region.value());
+        if (requireMusicMetas && !region_musicmetas.count(region))
+            throw std::invalid_argument("Music metas not found for region: " + pyoptions.region.value());
+        return DataProvider{
+            region,
+            region_masterdata.at(region),
+            load_user_data_from_py(pyoptions, requireUserData),
+            region_musicmetas.count(region) ? region_musicmetas.at(region) : std::shared_ptr<MusicMetas>{}
+        };
+    }
+
+    int get_live_type_from_py(const PyDeckRecommendOptions& pyoptions) const {
+        if (!pyoptions.live_type.has_value())
+            throw std::invalid_argument("live_type is required.");
+        if (!VALID_LIVE_TYPES.count(pyoptions.live_type.value()))
+            throw std::invalid_argument("Invalid live type: " + pyoptions.live_type.value());
+        if (pyoptions.live_type.value() == "mysekai")
+            return Enums::LiveType::multi_live;
+        return mapEnum(EnumMap::liveType, pyoptions.live_type.value());
+    }
+
+    int get_event_type_from_py(
+        const PyDeckRecommendOptions& pyoptions,
+        const DataProvider& dataProvider
+    ) const {
+        if (pyoptions.event_id.has_value()) {
+            EventService eventService(dataProvider);
+            return eventService.getEventType(pyoptions.event_id.value());
+        }
+        std::string eventType = pyoptions.event_type.value_or("marathon");
+        if (!VALID_EVENT_TYPES.count(eventType))
+            throw std::invalid_argument("Invalid event type: " + eventType);
+        return mapEnum(EnumMap::eventType, eventType);
+    }
+
+    LiveSkillOrder get_live_skill_order_from_py(const PyDeckRecommendOptions& pyoptions) const {
+        std::string skill_order_choose_strategy = pyoptions.skill_order_choose_strategy.value_or(DEFAULT_SKILL_ORDER_CHOOSE_STRATEGY);
+        if (!VALID_SKILL_ORDER_CHOOSE_STRATEGIES.count(skill_order_choose_strategy))
+            throw std::invalid_argument("Invalid skill order choose strategy: " + skill_order_choose_strategy);
+        if (skill_order_choose_strategy == "average")
+            return LiveSkillOrder::average;
+        if (skill_order_choose_strategy == "max")
+            return LiveSkillOrder::best;
+        if (skill_order_choose_strategy == "min")
+            return LiveSkillOrder::worst;
+        return LiveSkillOrder::specific;
+    }
     
     DeckRecommendOptions construct_options_from_py(const PyDeckRecommendOptions& pyoptions) const {
         DeckRecommendOptions options = {};
@@ -1450,6 +1626,100 @@ public:
         return result;
     }
 
+    py::list recommend_area_items(
+        const PyDeckRecommendOptions& pyoptions,
+        const std::vector<int>& card_ids
+    ) const {
+        auto dataProvider = construct_data_provider_from_py(pyoptions, true, false);
+        dataProvider.init();
+        AreaItemRecommend recommend(dataProvider);
+        auto result = recommend.recommendAreaItem(card_ids);
+
+        py::list ret;
+        for (const auto& item : result) {
+            ret.append(recommend_area_item_to_py(item));
+        }
+        return ret;
+    }
+
+    py::list recommend_music(
+        const PyDeckRecommendOptions& pyoptions,
+        const PyRecommendDeck& deck
+    ) const {
+        auto dataProvider = construct_data_provider_from_py(pyoptions, false, true);
+        int liveType = get_live_type_from_py(pyoptions);
+        int eventType = get_event_type_from_py(pyoptions, dataProvider);
+        if (eventType == Enums::EventType::cheerful && liveType == Enums::LiveType::multi_live) {
+            liveType = Enums::LiveType::cheerful_live;
+        }
+        auto liveSkillOrder = get_live_skill_order_from_py(pyoptions);
+        auto specificSkillOrder = pyoptions.specific_skill_order;
+        if (liveSkillOrder == LiveSkillOrder::specific && !specificSkillOrder.has_value()) {
+            throw std::invalid_argument("specific_skill_order is required when skill_order_choose_strategy is specific.");
+        }
+        if (pyoptions.multi_live_teammate_score_up.has_value() && !Enums::LiveType::isMulti(liveType))
+            throw std::invalid_argument("multi_live_teammate_score_up is only valid for multi live.");
+        if (pyoptions.multi_live_teammate_power.has_value() && !Enums::LiveType::isMulti(liveType))
+            throw std::invalid_argument("multi_live_teammate_power is only valid for multi live.");
+
+        MusicRecommend recommend(dataProvider);
+        auto result = recommend.recommendMusic(
+            deck_detail_from_py(deck),
+            liveType,
+            eventType,
+            liveSkillOrder,
+            specificSkillOrder,
+            pyoptions.multi_live_teammate_score_up,
+            pyoptions.multi_live_teammate_power
+        );
+
+        py::list ret;
+        for (const auto& music : result) {
+            ret.append(recommend_music_to_py(music));
+        }
+        return ret;
+    }
+
+    py::dict calculate_exact_live(
+        const std::string& region,
+        int power,
+        const std::vector<double>& skills,
+        const std::string& live_type,
+        const std::string& music_score_json,
+        int multi_sum_power = 0,
+        const std::optional<std::string>& fever_music_score_json = std::nullopt
+    ) const {
+        if (!REGION_ENUM_MAP.count(region))
+            throw std::invalid_argument("Invalid region: " + region);
+        Region regionEnum = REGION_ENUM_MAP.at(region);
+        if (!region_masterdata.count(regionEnum))
+            throw std::invalid_argument("Master data not found for region: " + region);
+        if (!VALID_LIVE_TYPES.count(live_type) || live_type == "mysekai")
+            throw std::invalid_argument("Invalid live type: " + live_type);
+
+        DataProvider dataProvider{
+            regionEnum,
+            region_masterdata.at(regionEnum),
+            std::make_shared<UserData>(),
+            region_musicmetas.count(regionEnum) ? region_musicmetas.at(regionEnum) : std::shared_ptr<MusicMetas>{}
+        };
+        auto musicScore = MusicScore::fromJsonString(music_score_json);
+        std::optional<MusicScore> feverMusicScore = std::nullopt;
+        if (fever_music_score_json.has_value() && !fever_music_score_json->empty()) {
+            feverMusicScore = MusicScore::fromJsonString(fever_music_score_json.value());
+        }
+        LiveExactCalculator calculator(dataProvider);
+        auto detail = calculator.calculate(
+            power,
+            skills,
+            mapEnum(EnumMap::liveType, live_type),
+            musicScore,
+            multi_sum_power,
+            feverMusicScore
+        );
+        return live_exact_detail_to_py(detail);
+    }
+
     // 推荐卡组
     PyDeckRecommendResult recommend(const PyDeckRecommendOptions& pyoptions) {
         auto options = construct_options_from_py(pyoptions);
@@ -1680,5 +1950,18 @@ PYBIND11_MODULE(sekai_deck_recommend, m) {
         .def("update_musicmetas", &SekaiDeckRecommend::update_musicmetas)
         .def("update_musicmetas_from_string", &SekaiDeckRecommend::update_musicmetas_from_string)
         .def("get_world_bloom_support_cards", &SekaiDeckRecommend::get_world_bloom_support_cards)
+        .def("recommend_area_items", &SekaiDeckRecommend::recommend_area_items)
+        .def("recommend_music", &SekaiDeckRecommend::recommend_music)
+        .def(
+            "calculate_exact_live",
+            &SekaiDeckRecommend::calculate_exact_live,
+            py::arg("region"),
+            py::arg("power"),
+            py::arg("skills"),
+            py::arg("live_type"),
+            py::arg("music_score_json"),
+            py::arg("multi_sum_power") = 0,
+            py::arg("fever_music_score_json") = py::none()
+        )
         .def("recommend", &SekaiDeckRecommend::recommend);
 }

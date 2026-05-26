@@ -165,7 +165,13 @@ void BaseDeckRecommend::findBestCardsGA(
     const std::vector<std::vector<const CardDetail*>>* seedDecks
 ) {
     int fixedSize = fixedCards.size();
-    auto remainingFixedCharacters = resolveRemainingFixedCharacters(cfg, fixedCards, eventId);
+    bool isWorldBloomFinale = eventId.has_value() && this->dataProvider.masterData->isWorldBloomFinale(eventId.value());
+    auto remainingFixedCharacters = resolveRemainingFixedCharacters(
+        cfg,
+        fixedCards,
+        eventId,
+        isWorldBloomFinale
+    );
     std::unordered_set<int> remainingFixedCharacterSet(
         remainingFixedCharacters.begin(),
         remainingFixedCharacters.end()
