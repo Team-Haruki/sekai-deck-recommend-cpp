@@ -169,7 +169,6 @@ void BaseDeckRecommend::findBestCardsGA(
     auto remainingFixedCharacters = resolveRemainingFixedCharacters(
         cfg,
         fixedCards,
-        eventId,
         isWorldBloomFinale
     );
     std::unordered_set<int> remainingFixedCharacterSet(

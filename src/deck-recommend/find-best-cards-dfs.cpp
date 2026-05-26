@@ -296,7 +296,6 @@ void BaseDeckRecommend::findBestCardsDFS(
     auto remainingFixedCharacters = resolveRemainingFixedCharacters(
         cfg,
         fixedCards,
-        eventId,
         isWorldBloomFinale
     );
 

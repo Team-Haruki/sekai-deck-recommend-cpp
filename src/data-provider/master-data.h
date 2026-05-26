@@ -4,7 +4,10 @@
 #include "data-provider/master-data-types.h"
 
 
-constexpr int finalChapterEventId = 180;
+constexpr int legacyWorldBloom2FinaleEventId = 180;
+constexpr int legacyWorldBloom2FinaleCardBonusCountLimit = 4;
+constexpr int legacyWorldBloom2FinaleMysekaiFixtureBonusLimit = 20;
+constexpr double legacyWorldBloom2FinaleSkillScoreUpLimit = 140.0;
 
 
 class MasterData {

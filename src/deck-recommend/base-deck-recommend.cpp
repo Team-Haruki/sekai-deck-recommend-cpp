@@ -95,7 +95,7 @@ BestPermutationResult BaseDeckRecommend::getBestPermutation(
                 return {};
             }
         }
-        for (const auto& characterId : resolveRequiredCharacters(config, eventId, isWorldBloomFinale, specialCharacterId)) {
+        for (const auto& characterId : resolveRequiredCharacters(config, isWorldBloomFinale, specialCharacterId)) {
             if (!characterIds.count(characterId)) {
                 return {};
             }
@@ -106,7 +106,7 @@ BestPermutationResult BaseDeckRecommend::getBestPermutation(
         return {};
     }
 
-    auto leaderCharacterId = resolveLeaderCharacterId(config, eventId, isWorldBloomFinale, specialCharacterId);
+    auto leaderCharacterId = resolveLeaderCharacterId(config, isWorldBloomFinale, specialCharacterId);
     if (leaderCharacterId.has_value()) {
         auto leaderIt = std::find_if(
             orderedDeckCards.begin(),
@@ -180,7 +180,6 @@ std::vector<RecommendDeck> BaseDeckRecommend::recommendHighScoreDeck(
 
     auto requiredCharacters = resolveRequiredCharacters(
         config,
-        eventConfig.eventId,
         eventConfig.isWorldBloomFinale,
         eventConfig.specialCharacterId
     );
@@ -1009,13 +1008,11 @@ std::vector<RecommendDeck> BaseDeckRecommend::recommendHighScoreDeck(
         auto remainingRequiredCharacters = resolveRemainingFixedCharacters(
             config,
             fixedCards,
-            eventConfig.eventId,
             eventConfig.isWorldBloomFinale,
             eventConfig.specialCharacterId
         );
         auto leaderCharacterId = resolveLeaderCharacterId(
             config,
-            eventConfig.eventId,
             eventConfig.isWorldBloomFinale,
             eventConfig.specialCharacterId
         );

@@ -128,14 +128,12 @@ struct DfsScoreUpperBoundContext {
 
 inline std::vector<int> resolveRequiredCharacters(
     const DeckRecommendConfig& config,
-    std::optional<int> eventId,
     bool isWorldBloomFinale = false,
     int specialCharacterId = 0
 ) {
     std::vector<int> requiredCharacters = config.fixedCharacters;
     std::optional<int> leaderCharacterId = std::nullopt;
-    if ((eventId.value_or(0) == finalChapterEventId || isWorldBloomFinale)
-        && config.forcedLeaderCharacterId.has_value()) {
+    if (isWorldBloomFinale && config.forcedLeaderCharacterId.has_value()) {
         leaderCharacterId = config.forcedLeaderCharacterId.value();
     } else if (isWorldBloomFinale && specialCharacterId > 0) {
         leaderCharacterId = specialCharacterId;
@@ -153,7 +151,6 @@ inline std::vector<int> resolveRequiredCharacters(
 inline std::vector<int> resolveRemainingFixedCharacters(
     const DeckRecommendConfig& config,
     const std::vector<CardDetail>& fixedCards,
-    std::optional<int> eventId,
     bool isWorldBloomFinale = false,
     int specialCharacterId = 0
 ) {
@@ -163,7 +160,7 @@ inline std::vector<int> resolveRemainingFixedCharacters(
     }
 
     std::vector<int> remainingCharacters{};
-    for (const auto& characterId : resolveRequiredCharacters(config, eventId, isWorldBloomFinale, specialCharacterId)) {
+    for (const auto& characterId : resolveRequiredCharacters(config, isWorldBloomFinale, specialCharacterId)) {
         if (!fixedCardCharacters.count(characterId)) {
             remainingCharacters.push_back(characterId);
         }
@@ -173,12 +170,10 @@ inline std::vector<int> resolveRemainingFixedCharacters(
 
 inline std::optional<int> resolveLeaderCharacterId(
     const DeckRecommendConfig& config,
-    std::optional<int> eventId,
     bool isWorldBloomFinale = false,
     int specialCharacterId = 0
 ) {
-    if ((eventId.value_or(0) == finalChapterEventId || isWorldBloomFinale)
-        && config.forcedLeaderCharacterId.has_value()) {
+    if (isWorldBloomFinale && config.forcedLeaderCharacterId.has_value()) {
         return config.forcedLeaderCharacterId;
     }
     if (isWorldBloomFinale && specialCharacterId > 0) {

@@ -50,7 +50,7 @@ void DataProvider::init()
                         // Generated fake WL events use synthetic chapter ordering, so only real WL2
                         // chapters can be used to map a badge to its exact character.
                         if (item.eventId >= 1000
-                         || item.eventId == finalChapterEventId
+                         || item.eventId == legacyWorldBloom2FinaleEventId
                          || masterData->getWorldBloomEventTurn(item.eventId) != 2)
                             continue;
                         if (characters.count(item.gameCharacterId) && item.chapterNo == chapter) {

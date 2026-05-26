@@ -148,10 +148,10 @@ CardEventBonusInfo CardEventCalculator::getCardEventBonus(
                 leaderHonorBonus += it.bonusRate;
             }
         }
-        if (!hasEventHonorBonusMaster && eventId == finalChapterEventId) {
+        if (!hasEventHonorBonusMaster && eventId == legacyWorldBloom2FinaleEventId) {
             leaderHonorBonus = this->dataProvider.userData->userCharacterFinalChapterHonorEventBonusMap[card.characterId];
         }
-        if (leaderLimitBonus == 0.0 && matchedEventCard && eventId == finalChapterEventId) {
+        if (leaderLimitBonus == 0.0 && matchedEventCard && eventId == legacyWorldBloom2FinaleEventId) {
             leaderLimitBonus = 20.0;
         }
         return CardEventBonusInfo{

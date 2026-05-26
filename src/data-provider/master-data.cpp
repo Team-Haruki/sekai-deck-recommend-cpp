@@ -1,6 +1,7 @@
 ﻿#include "data-provider/master-data.h"
 #include "data-provider/static-data.h"
 
+#include <algorithm>
 #include <fstream>
 #include <iostream>
 #include <iterator>
@@ -90,25 +91,25 @@ void loadMasterDataJsonFromStrings(std::map<std::string, json_doc>& jsons, std::
 }
 
 
-void addFinalChapterEventIfNeeded(MasterData& md) {
-    bool hasFinalChapter = false;
+void addLegacyWorldBloom2FinaleIfNeeded(MasterData& md) {
+    bool hasFinalChapterEvent = false;
     for (const auto& e : md.events) {
-        if (e.id == finalChapterEventId) {
-            hasFinalChapter = true;
+        if (e.id == legacyWorldBloom2FinaleEventId) {
+            hasFinalChapterEvent = true;
             break;
         }
     }
-    if (!hasFinalChapter) {
+    if (!hasFinalChapterEvent) {
         // 活动本身
         Event event;
-        event.id = finalChapterEventId;
+        event.id = legacyWorldBloom2FinaleEventId;
         event.eventType = Enums::EventType::world_bloom;
         md.events.push_back(event);
 
         // 角色加成
         for (auto& gameCharacterUnit : md.gameCharacterUnits) {
             EventDeckBonus bonus;
-            bonus.eventId = finalChapterEventId;
+            bonus.eventId = legacyWorldBloom2FinaleEventId;
             bonus.gameCharacterUnitId = gameCharacterUnit.id;
             bonus.bonusRate = 5.0;
             bonus.cardAttr = Enums::Attr::null;
@@ -121,7 +122,7 @@ void addFinalChapterEventIfNeeded(MasterData& md) {
         for (const auto& eventCard : md.eventCards) {
             if (worldBloomEventIds.count(eventCard.eventId)) {
                 auto newEventCard = eventCard;
-                newEventCard.eventId = finalChapterEventId;
+                newEventCard.eventId = legacyWorldBloom2FinaleEventId;
                 newEventCard.bonusRate = 25.0;
                 newEventCards.push_back(newEventCard);
             }
@@ -132,7 +133,7 @@ void addFinalChapterEventIfNeeded(MasterData& md) {
         std::vector<WorldBloomSupportDeckUnitEventLimitedBonus> newLimitedBonuses{};
         for (const auto& limitedBonus : md.worldBloomSupportDeckUnitEventLimitedBonuses) {
             auto newLimitBonus = limitedBonus;
-            newLimitBonus.eventId = finalChapterEventId;
+            newLimitBonus.eventId = legacyWorldBloom2FinaleEventId;
             newLimitedBonuses.push_back(newLimitBonus);
         }
         md.worldBloomSupportDeckUnitEventLimitedBonuses.insert(
@@ -141,6 +142,20 @@ void addFinalChapterEventIfNeeded(MasterData& md) {
             newLimitedBonuses.end()
         );
     }
+
+    for (const auto& worldBloom : md.worldBlooms) {
+        if (worldBloom.eventId == legacyWorldBloom2FinaleEventId
+         && worldBloom.worldBloomChapterType == "finale") {
+            return;
+        }
+    }
+
+    WorldBloom worldBloom;
+    worldBloom.id = legacyWorldBloom2FinaleEventId * 100 + 1;
+    worldBloom.eventId = legacyWorldBloom2FinaleEventId;
+    worldBloom.worldBloomChapterType = "finale";
+    worldBloom.chapterNo = 1;
+    md.worldBlooms.push_back(worldBloom);
 }
 
 static std::vector<WorldBloomSupportDeckUnitEventLimitedBonus> buildFakeWorldBloomSupportDeckUnitEventLimitedBonuses(
@@ -153,7 +168,7 @@ static std::vector<WorldBloomSupportDeckUnitEventLimitedBonus> buildFakeWorldBlo
 
     if (turn == 2) {
         for (const auto& bonus : md.worldBloomSupportDeckUnitEventLimitedBonuses) {
-            if (bonus.eventId != finalChapterEventId
+            if (bonus.eventId != legacyWorldBloom2FinaleEventId
              && md.getWorldBloomEventTurn(bonus.eventId) == 2
              && charas.count(bonus.gameCharacterId)) {
                 auto newBonus = bonus;
@@ -176,7 +191,7 @@ static std::vector<WorldBloomSupportDeckUnitEventLimitedBonus> buildFakeWorldBlo
 
         std::set<std::pair<int, int>> used{};
         for (const auto& eventCard : md.eventCards) {
-            if (eventCard.eventId == finalChapterEventId
+            if (eventCard.eventId == legacyWorldBloom2FinaleEventId
              || md.getWorldBloomEventTurn(eventCard.eventId) > 2
              || eventCard.bonusRate <= 0) {
                 continue;
@@ -280,7 +295,7 @@ void MasterData::loadFromJsons(std::map<std::string, json_doc>& jsons) {
     addFakeEvent(Enums::EventType::world_bloom);
     addFakeEvent(Enums::EventType::marathon);
     addFakeEvent(Enums::EventType::cheerful);
-    addFinalChapterEventIfNeeded(*this);
+    addLegacyWorldBloom2FinaleIfNeeded(*this);
 }
 
 void MasterData::loadFromFiles(const std::string& baseDir) {
@@ -461,9 +476,6 @@ int MasterData::getWorldBloomEventTurn(int eventId) const
 
 bool MasterData::isWorldBloomFinale(int eventId) const
 {
-    if (eventId == finalChapterEventId) {
-        return true;
-    }
     for (const auto& worldBloom : worldBlooms) {
         if (worldBloom.eventId == eventId && worldBloom.worldBloomChapterType == "finale") {
             return true;
@@ -479,18 +491,27 @@ int MasterData::getEventCardBonusCountLimit(int eventId) const
             return limit.memberCountLimit;
         }
     }
-    return isWorldBloomFinale(eventId) ? 4 : 5;
+    if (eventId == legacyWorldBloom2FinaleEventId) {
+        return legacyWorldBloom2FinaleCardBonusCountLimit;
+    }
+    if (isWorldBloomFinale(eventId)) {
+        throw std::runtime_error("Event card bonus count limit not found for world bloom finale eventId=" + std::to_string(eventId));
+    }
+    return 5;
 }
 
 std::optional<double> MasterData::getEventSkillScoreUpLimit(int eventId) const
 {
+    if (eventId == legacyWorldBloom2FinaleEventId) {
+        return legacyWorldBloom2FinaleSkillScoreUpLimit;
+    }
     for (const auto& limit : eventSkillScoreUpLimits) {
         if (limit.eventId == eventId) {
-            return limit.scoreUpRateLimit;
+            return std::max(0.0, limit.scoreUpRateLimit - 100.0);
         }
     }
     if (isWorldBloomFinale(eventId)) {
-        return 140.0;
+        throw std::runtime_error("Event skill score up limit not found for world bloom finale eventId=" + std::to_string(eventId));
     }
     return std::nullopt;
 }
@@ -502,8 +523,11 @@ std::optional<int> MasterData::getMysekaiFixtureBonusLimit(int eventId) const
             return limit.bonusRateLimit;
         }
     }
+    if (eventId == legacyWorldBloom2FinaleEventId) {
+        return legacyWorldBloom2FinaleMysekaiFixtureBonusLimit;
+    }
     if (isWorldBloomFinale(eventId)) {
-        return 20;
+        throw std::runtime_error("MySekai fixture bonus limit not found for world bloom finale eventId=" + std::to_string(eventId));
     }
     return std::nullopt;
 }
