@@ -429,7 +429,9 @@ void BaseDeckRecommend::findBestCardsDFS(
     const CardDetail* preCard = nullptr;
 
     for (const auto& card : cardDetails) {
-        if (dfsInfo.isTimeout()) {
+        if (scoreUpperBoundContext != nullptr
+            && scoreUpperBoundContext->hasCharacterBounds
+            && dfsInfo.isTimeout()) {
             return;
         }
 
