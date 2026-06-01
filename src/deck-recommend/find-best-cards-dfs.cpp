@@ -429,6 +429,10 @@ void BaseDeckRecommend::findBestCardsDFS(
     const CardDetail* preCard = nullptr;
 
     for (const auto& card : cardDetails) {
+        if (dfsInfo.isTimeout()) {
+            return;
+        }
+
         // 跳过已经重复出现过的卡牌
         bool has_card = false;
         for (const auto& deckCard : deckCards) {

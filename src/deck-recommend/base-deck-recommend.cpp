@@ -633,12 +633,14 @@ std::vector<RecommendDeck> BaseDeckRecommend::recommendHighScoreDeck(
         }
         return context;
     };
-    auto runDfsExact = [&](const DeckRecommendConfig& runConfig, const std::vector<CardDetail>& sourceCards, RecommendCalcInfo& info) {
+    auto runDfsExact = [&](const DeckRecommendConfig& runConfig, const std::vector<CardDetail>& sourceCards, RecommendCalcInfo& info, bool useCharacterBounds = false) {
         auto sortedCards = sortCardsByStrength(sourceCards);
         initDfsState(info);
         std::optional<DfsScoreUpperBoundContext> scoreUpperBoundContext = std::nullopt;
         if (runConfig.target == RecommendTarget::Score || runConfig.target == RecommendTarget::Skill) {
-            scoreUpperBoundContext = buildDfsScoreUpperBoundContext(sortedCards);
+            scoreUpperBoundContext = useCharacterBounds
+                ? buildDfsScoreUpperBoundContext(sortedCards)
+                : DfsScoreUpperBoundContext{ .musicMeta = musicMeta };
         }
         auto searchStart = std::chrono::high_resolution_clock::now();
         findBestCardsDFS(
@@ -1151,7 +1153,7 @@ std::vector<RecommendDeck> BaseDeckRecommend::recommendHighScoreDeck(
         std::vector<CardDetail> seedCards = cards;
         std::vector<CardDetail> seedPrev{};
         seedCards = filterCardPriority(liveType, eventConfig.eventType, seedCards, seedPrev, baseConfig.member);
-        runDfsExact(baseConfig, seedCards, seedInfo);
+        runDfsExact(baseConfig, seedCards, seedInfo, true);
         mergeCalcInfo(hybridInfo, seedInfo);
 
         auto seedDecks = collectSeedDecks(seedInfo, fullSorted, std::max(baseConfig.limit * 3, 8));
