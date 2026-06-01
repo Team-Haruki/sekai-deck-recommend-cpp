@@ -5,6 +5,7 @@
 #include <fstream>
 #include <iostream>
 #include <iterator>
+#include <tuple>
 #include <unordered_map>
 #include <vector>
 #include "master-data.h"
@@ -59,6 +60,20 @@ static const std::vector<std::vector<int>> worldBloom3PartCharacterIds = {
     {26, 2, 12, 16, 20},
     {25, 7, 11, 15, 19},
 };
+
+namespace {
+
+int makePairKey(int a, int b) {
+    return (a << 16) ^ (b & 0xffff);
+}
+
+template <typename T>
+const std::vector<T*>& emptyPointerVector() {
+    static const std::vector<T*> empty{};
+    return empty;
+}
+
+} // namespace
 
 
 void loadMasterDataJsonFromFile(std::map<std::string, json_doc>& jsons, const std::string& baseDir, const std::string& key) {
@@ -296,6 +311,7 @@ void MasterData::loadFromJsons(std::map<std::string, json_doc>& jsons) {
     addFakeEvent(Enums::EventType::marathon);
     addFakeEvent(Enums::EventType::cheerful);
     addLegacyWorldBloom2FinaleIfNeeded(*this);
+    buildIndexes();
 }
 
 void MasterData::loadFromFiles(const std::string& baseDir) {
@@ -316,6 +332,146 @@ void MasterData::loadFromStrings(std::map<std::string, std::string>& data) {
     for (const auto& key : notRequiredMasterDataKeys)
         loadMasterDataJsonFromStrings(jsons, data, key);
     loadFromJsons(jsons);
+}
+
+void MasterData::buildIndexes() {
+    indexes = MasterDataIndexes{};
+
+    indexes.areaItemLevelByItemLevel.reserve(areaItemLevels.size());
+    indexes.maxAreaItemLevelByItem.reserve(areaItemLevels.size());
+    for (const auto& item : areaItemLevels) {
+        indexes.areaItemLevelByItemLevel.emplace(makePairKey(item.areaItemId, item.level), &item);
+        auto& maxLevel = indexes.maxAreaItemLevelByItem[item.areaItemId];
+        maxLevel = std::max(maxLevel, item.level);
+    }
+
+    indexes.cardById.reserve(cards.size());
+    for (const auto& card : cards) {
+        indexes.cardById.emplace(card.id, &card);
+    }
+
+    indexes.cardEpisodesByCardId.reserve(cardEpisodes.size());
+    indexes.cardEpisodeById.reserve(cardEpisodes.size());
+    for (const auto& episode : cardEpisodes) {
+        indexes.cardEpisodesByCardId[episode.cardId].push_back(&episode);
+        indexes.cardEpisodeById.emplace(episode.id, &episode);
+    }
+    for (auto& [_, episodes] : indexes.cardEpisodesByCardId) {
+        std::sort(episodes.begin(), episodes.end(), [](const CardEpisode* a, const CardEpisode* b) {
+            return std::tuple(a->seq, a->id) < std::tuple(b->seq, b->id);
+        });
+    }
+
+    indexes.canvasBonusByRarity.reserve(cardMysekaiCanvasBonuses.size());
+    for (const auto& bonus : cardMysekaiCanvasBonuses) {
+        indexes.canvasBonusByRarity.emplace(bonus.cardRarityType, &bonus);
+    }
+
+    indexes.cardRarityByType.reserve(cardRarities.size());
+    for (const auto& rarity : cardRarities) {
+        indexes.cardRarityByType.emplace(rarity.cardRarityType, &rarity);
+    }
+
+    indexes.characterRankByCharacterRank.reserve(characterRanks.size());
+    for (const auto& rank : characterRanks) {
+        indexes.characterRankByCharacterRank.emplace(makePairKey(rank.characterId, rank.characterRank), &rank);
+    }
+
+    indexes.gameCharacterById.reserve(gameCharacters.size());
+    for (const auto& character : gameCharacters) {
+        indexes.gameCharacterById.emplace(character.id, &character);
+    }
+
+    indexes.honorById.reserve(honors.size());
+    for (const auto& honor : honors) {
+        indexes.honorById.emplace(honor.id, &honor);
+    }
+
+    indexes.masterLessonsByRarity.reserve(masterLessons.size());
+    for (const auto& lesson : masterLessons) {
+        indexes.masterLessonsByRarity[lesson.cardRarityType].push_back(&lesson);
+    }
+
+    indexes.skillById.reserve(skills.size());
+    for (const auto& skill : skills) {
+        indexes.skillById.emplace(skill.id, &skill);
+    }
+
+    indexes.worldBloomDiffAttrBonusByCount.reserve(worldBloomDifferentAttributeBonuses.size());
+    for (const auto& bonus : worldBloomDifferentAttributeBonuses) {
+        indexes.worldBloomDiffAttrBonusByCount.emplace(bonus.attributeCount, &bonus);
+    }
+}
+
+const AreaItemLevel* MasterData::findAreaItemLevel(int areaItemId, int level) const {
+    auto it = indexes.areaItemLevelByItemLevel.find(makePairKey(areaItemId, level));
+    return it == indexes.areaItemLevelByItemLevel.end() ? nullptr : it->second;
+}
+
+int MasterData::getMaxAreaItemLevelIndexed(int areaItemId) const {
+    auto it = indexes.maxAreaItemLevelByItem.find(areaItemId);
+    return it == indexes.maxAreaItemLevelByItem.end() ? 0 : it->second;
+}
+
+const Card* MasterData::findCard(int cardId) const {
+    auto it = indexes.cardById.find(cardId);
+    return it == indexes.cardById.end() ? nullptr : it->second;
+}
+
+const CardEpisode* MasterData::findCardEpisode(int cardEpisodeId) const {
+    auto it = indexes.cardEpisodeById.find(cardEpisodeId);
+    return it == indexes.cardEpisodeById.end() ? nullptr : it->second;
+}
+
+const std::vector<const CardEpisode*>& MasterData::getCardEpisodesByCardId(int cardId) const {
+    auto it = indexes.cardEpisodesByCardId.find(cardId);
+    if (it == indexes.cardEpisodesByCardId.end()) {
+        return emptyPointerVector<const CardEpisode>();
+    }
+    return it->second;
+}
+
+const CardMysekaiCanvasBonus* MasterData::findCanvasBonus(int cardRarityType) const {
+    auto it = indexes.canvasBonusByRarity.find(cardRarityType);
+    return it == indexes.canvasBonusByRarity.end() ? nullptr : it->second;
+}
+
+const CardRarity* MasterData::findCardRarity(int cardRarityType) const {
+    auto it = indexes.cardRarityByType.find(cardRarityType);
+    return it == indexes.cardRarityByType.end() ? nullptr : it->second;
+}
+
+const CharacterRank* MasterData::findCharacterRank(int characterId, int characterRank) const {
+    auto it = indexes.characterRankByCharacterRank.find(makePairKey(characterId, characterRank));
+    return it == indexes.characterRankByCharacterRank.end() ? nullptr : it->second;
+}
+
+const GameCharacter* MasterData::findGameCharacter(int characterId) const {
+    auto it = indexes.gameCharacterById.find(characterId);
+    return it == indexes.gameCharacterById.end() ? nullptr : it->second;
+}
+
+const Honor* MasterData::findHonor(int honorId) const {
+    auto it = indexes.honorById.find(honorId);
+    return it == indexes.honorById.end() ? nullptr : it->second;
+}
+
+const std::vector<const MasterLesson*>& MasterData::getMasterLessonsByRarity(int cardRarityType) const {
+    auto it = indexes.masterLessonsByRarity.find(cardRarityType);
+    if (it == indexes.masterLessonsByRarity.end()) {
+        return emptyPointerVector<const MasterLesson>();
+    }
+    return it->second;
+}
+
+const Skill* MasterData::findSkill(int skillId) const {
+    auto it = indexes.skillById.find(skillId);
+    return it == indexes.skillById.end() ? nullptr : it->second;
+}
+
+const WorldBloomDifferentAttributeBonus* MasterData::findWorldBloomDiffAttrBonus(int attributeCount) const {
+    auto it = indexes.worldBloomDiffAttrBonusByCount.find(attributeCount);
+    return it == indexes.worldBloomDiffAttrBonusByCount.end() ? nullptr : it->second;
 }
 
 

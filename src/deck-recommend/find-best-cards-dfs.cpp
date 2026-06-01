@@ -282,7 +282,8 @@ void BaseDeckRecommend::findBestCardsDFS(
     std::optional<int> eventType,
     std::optional<int> eventId,
     const std::vector<CardDetail>& fixedCards,
-    const DfsScoreUpperBoundContext* scoreUpperBoundContext
+    const DfsScoreUpperBoundContext* scoreUpperBoundContext,
+    RecommendEvalCache* evalCache
 )
 {
     // 超时
@@ -307,7 +308,7 @@ void BaseDeckRecommend::findBestCardsDFS(
     if (int(deckCards.size()) == member) {
         auto ret = getBestPermutation(
             this->deckCalculator, deckCards, supportCards, scoreFunc, 
-            honorBonus, eventType, eventId, liveType, cfg
+            honorBonus, eventType, eventId, liveType, cfg, evalCache
         );
         if (ret.bestDeck.has_value())
             dfsInfo.update(ret.bestDeck.value(), limit);
@@ -471,7 +472,7 @@ void BaseDeckRecommend::findBestCardsDFS(
         if (!prunedByBound) {
             findBestCardsDFS(
                 liveType, cfg, cardDetails, supportCards, scoreFunc, dfsInfo,
-                limit, isChallengeLive, member, honorBonus, eventType, eventId, fixedCards, scoreUpperBoundContext
+                limit, isChallengeLive, member, honorBonus, eventType, eventId, fixedCards, scoreUpperBoundContext, evalCache
             );
         }
 

@@ -5,23 +5,13 @@
 
 namespace {
 
-void applyEpisodeReadCount(UserCard& userCard, const std::vector<CardEpisode>& cardEpisodes, int cardId, int readCount)
+void applyEpisodeReadCount(UserCard& userCard, const std::vector<const CardEpisode*>& episodes, int readCount)
 {
-    std::vector<CardEpisode> episodes{};
-    for (const auto& episode : cardEpisodes) {
-        if (episode.cardId == cardId) {
-            episodes.push_back(episode);
-        }
-    }
-    std::sort(episodes.begin(), episodes.end(), [](const CardEpisode& a, const CardEpisode& b) {
-        return std::tuple(a.seq, a.id) < std::tuple(b.seq, b.id);
-    });
-
     std::vector<UserCardEpisodes> userEpisodes{};
     userEpisodes.reserve(episodes.size());
     for (int i = 0; i < (int)episodes.size(); i++) {
         UserCardEpisodes episode{};
-        episode.cardEpisodeId = episodes[i].id;
+        episode.cardEpisodeId = episodes[i]->id;
         episode.scenarioStatus = i < readCount
             ? Enums::ScenarioStatus::already_read
             : 0;
@@ -34,16 +24,16 @@ void applyEpisodeReadCount(UserCard& userCard, const std::vector<CardEpisode>& c
 
 std::vector<int> CardService::getCardUnits(const Card &card)
 {
-    auto& gameCharacters = dataProvider.masterData->gameCharacters;
     // 组合（V家支援组合、角色原始组合）
     std::vector<int> cardUnits{};
     if (card.supportUnit != Enums::Unit::none) {
         cardUnits.push_back(card.supportUnit);
     }
-    cardUnits.push_back(findOrThrow(gameCharacters, [&](const GameCharacter& it) {
-            return it.id == card.characterId;
-        }, [&]() { return "Game character not found for characterId=" + std::to_string(card.characterId); }
-    ).unit);
+    const auto* gameCharacter = dataProvider.masterData->findGameCharacter(card.characterId);
+    if (gameCharacter == nullptr) {
+        throw ElementNoFoundError("Game character not found for characterId=" + std::to_string(card.characterId));
+    }
+    cardUnits.push_back(gameCharacter->unit);
     return cardUnits;
 }
 
@@ -62,22 +52,22 @@ UserCard CardService::applyCardConfig(const UserCard &userCard, const Card &card
     if (!rankMax && !episodeRead && !masterMax && !skillMax && !hasPreciseConfig)
         return userCard;
 
-    auto cardRarities = dataProvider.masterData->cardRarities;
-    auto cardRarity = findOrThrow(cardRarities, [&](const CardRarity& it) {
-        return it.cardRarityType == card.cardRarityType;
-    }, [&]() { return "Card rarity not found for cardRarityType=" + std::to_string(card.cardRarityType); });
+    const auto* cardRarity = dataProvider.masterData->findCardRarity(card.cardRarityType);
+    if (cardRarity == nullptr) {
+        throw ElementNoFoundError("Card rarity not found for cardRarityType=" + std::to_string(card.cardRarityType));
+    }
 
     UserCard ret = userCard;
 
     // 处理最大等级 
     if (rankMax) {
         // 是否可以觉醒
-        if (cardRarity.trainingMaxLevel != 0) {
-            ret.level = cardRarity.trainingMaxLevel;
+        if (cardRarity->trainingMaxLevel != 0) {
+            ret.level = cardRarity->trainingMaxLevel;
             ret.specialTrainingStatus = Enums::SpecialTrainingStatus::done;
             ret.defaultImage = Enums::DefaultImage::special_training;
         } else {
-            ret.level = cardRarity.maxLevel;
+            ret.level = cardRarity->maxLevel;
             ret.defaultImage = Enums::DefaultImage::original;
         }
     }
@@ -86,9 +76,9 @@ UserCard CardService::applyCardConfig(const UserCard &userCard, const Card &card
         if (cardConfig.level.value() <= 0) {
             throw std::invalid_argument("Invalid card config level: " + std::to_string(cardConfig.level.value()));
         }
-        int maxLevel = cardRarity.trainingMaxLevel != 0 ? cardRarity.trainingMaxLevel : cardRarity.maxLevel;
+        int maxLevel = cardRarity->trainingMaxLevel != 0 ? cardRarity->trainingMaxLevel : cardRarity->maxLevel;
         ret.level = std::clamp(cardConfig.level.value(), 1, maxLevel);
-        if (cardRarity.trainingMaxLevel != 0 && ret.level > cardRarity.maxLevel) {
+        if (cardRarity->trainingMaxLevel != 0 && ret.level > cardRarity->maxLevel) {
             ret.specialTrainingStatus = Enums::SpecialTrainingStatus::done;
             ret.defaultImage = Enums::DefaultImage::special_training;
         } else {
@@ -99,7 +89,7 @@ UserCard CardService::applyCardConfig(const UserCard &userCard, const Card &card
 
     // 处理前后篇解锁
     if (episodeRead) {
-        applyEpisodeReadCount(ret, dataProvider.masterData->cardEpisodes, card.id, 2);
+        applyEpisodeReadCount(ret, dataProvider.masterData->getCardEpisodesByCardId(card.id), 2);
     }
 
     if (cardConfig.episodeReadCount.has_value()) {
@@ -107,7 +97,7 @@ UserCard CardService::applyCardConfig(const UserCard &userCard, const Card &card
             throw std::invalid_argument("Invalid card config episode_read_count: " + std::to_string(cardConfig.episodeReadCount.value()));
         }
         int readCount = std::clamp(cardConfig.episodeReadCount.value(), 0, 2);
-        applyEpisodeReadCount(ret, dataProvider.masterData->cardEpisodes, card.id, readCount);
+        applyEpisodeReadCount(ret, dataProvider.masterData->getCardEpisodesByCardId(card.id), readCount);
     }
 
     // 突破
@@ -124,14 +114,14 @@ UserCard CardService::applyCardConfig(const UserCard &userCard, const Card &card
 
     // 技能
     if (skillMax) {
-        ret.skillLevel = cardRarity.maxSkillLevel;
+        ret.skillLevel = cardRarity->maxSkillLevel;
     }
 
     if (cardConfig.skillLevel.has_value()) {
         if (cardConfig.skillLevel.value() <= 0) {
             throw std::invalid_argument("Invalid card config skill_level: " + std::to_string(cardConfig.skillLevel.value()));
         }
-        ret.skillLevel = std::clamp(cardConfig.skillLevel.value(), 1, cardRarity.maxSkillLevel);
+        ret.skillLevel = std::clamp(cardConfig.skillLevel.value(), 1, cardRarity->maxSkillLevel);
     }
 
     return ret;

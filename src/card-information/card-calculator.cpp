@@ -15,17 +15,12 @@ std::optional<CardDetail> CardCalculator::getCardDetail(
     const std::optional<std::unordered_map<int, int>>& customBonusSupportUnits
 )
 {
-    auto& cards = this->dataProvider.masterData->cards;
-
-    Card card{};
-    try {
-        card = findOrThrow(cards, [&](const auto &it) { 
-            return it.id == userCard.cardId; 
-        });
-    } catch (const ElementNoFoundError& e) {
+    const Card* cardPtr = this->dataProvider.masterData->findCard(userCard.cardId);
+    if (cardPtr == nullptr) {
         std::cerr << "[warning] card id " << userCard.cardId << " appears in user data but not in master data." << std::endl;
         return std::nullopt;
     }
+    const Card& card = *cardPtr;
 
     CardConfig cfg{};
     // 单独卡配置覆盖稀有度卡配置
@@ -159,14 +154,14 @@ SupportDeckCard CardCalculator::getSupportDeckCard(
 {
     UserCard supportCard = card;
     if (masterMax || skillMax) {
-        auto& cards = this->dataProvider.masterData->cards;
-        auto cardData = findOrThrow(cards, [&](const Card& it) {
-            return it.id == card.cardId;
-        }, [&]() { return "Support Deck Card not found for cardId=" + std::to_string(card.cardId); });
+        const Card* cardData = this->dataProvider.masterData->findCard(card.cardId);
+        if (cardData == nullptr) {
+            throw ElementNoFoundError("Support Deck Card not found for cardId=" + std::to_string(card.cardId));
+        }
         CardConfig cfg{};
         cfg.masterMax = masterMax;
         cfg.skillMax = skillMax;
-        supportCard = this->cardService.applyCardConfig(card, cardData, cfg);
+        supportCard = this->cardService.applyCardConfig(card, *cardData, cfg);
     }
 
     auto bonus = this->bloomEventCalculator.getCardSupportDeckBonus(supportCard, eventId, specialCharacterId);

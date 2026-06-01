@@ -21,7 +21,8 @@ void BaseDeckRecommend::findBestCardsSA(
     int honorBonus, 
     std::optional<int> eventType, 
     std::optional<int> eventId,
-    const std::vector<CardDetail>& fixedCards
+    const std::vector<CardDetail>& fixedCards,
+    RecommendEvalCache* evalCache
 )
 {
     if (isChallengeLive) {
@@ -98,7 +99,7 @@ void BaseDeckRecommend::findBestCardsSA(
 
         auto ret = getBestPermutation(
             this->deckCalculator, deck, supportCards, scoreFunc,
-            honorBonus, eventType, eventId, liveType, cfg
+            honorBonus, eventType, eventId, liveType, cfg, evalCache
         );
         double targetValue = -1e18;
         if (ret.bestDeck.has_value()) {

@@ -19,32 +19,33 @@ void DataProvider::init()
     userData->userCharacterFinalChapterHonorEventBonusMap.clear();
     for (const auto& userHonor : userData->userHonors) {
         try {
-            auto& honor = findOrThrow(masterData->honors,  [&](const Honor& it) { 
-                return it.id == userHonor.honorId; 
-            });
-            if (honor.honorRarity == Enums::HonorRarity::high
-            || honor.honorRarity == Enums::HonorRarity::highest) {
-                auto start_idx = honor.assetbundleName.find("wl_2nd");
+            const auto* honor = masterData->findHonor(userHonor.honorId);
+            if (honor == nullptr) {
+                throw ElementNoFoundError("Honor not found for honorId=" + std::to_string(userHonor.honorId));
+            }
+            if (honor->honorRarity == Enums::HonorRarity::high
+            || honor->honorRarity == Enums::HonorRarity::highest) {
+                auto start_idx = honor->assetbundleName.find("wl_2nd");
                 if (start_idx != std::string::npos) {
                     start_idx += 7;
-                    auto end_idx = honor.assetbundleName.find("_cp", start_idx);
+                    auto end_idx = honor->assetbundleName.find("_cp", start_idx);
                     if (end_idx == std::string::npos)
                         continue;
-                    auto unit_name = honor.assetbundleName.substr(start_idx, end_idx - start_idx);
+                    auto unit_name = honor->assetbundleName.substr(start_idx, end_idx - start_idx);
                     auto unit_it = unitCharacters.find(unit_name);
                     if (unit_it == unitCharacters.end())
                         continue;
                     auto chapter_start_idx = end_idx + 3;
                     auto chapter_end_idx = chapter_start_idx;
                     while (
-                        chapter_end_idx < honor.assetbundleName.size()
-                        && std::isdigit(static_cast<unsigned char>(honor.assetbundleName[chapter_end_idx]))
+                        chapter_end_idx < honor->assetbundleName.size()
+                        && std::isdigit(static_cast<unsigned char>(honor->assetbundleName[chapter_end_idx]))
                     ) {
                         chapter_end_idx++;
                     }
                     if (chapter_end_idx == chapter_start_idx)
                         continue;
-                    int chapter = std::stoi(honor.assetbundleName.substr(chapter_start_idx, chapter_end_idx - chapter_start_idx));
+                    int chapter = std::stoi(honor->assetbundleName.substr(chapter_start_idx, chapter_end_idx - chapter_start_idx));
                     auto& characters = unit_it->second;
                     for (auto& item : masterData->worldBlooms) {
                         // Generated fake WL events use synthetic chapter ordering, so only real WL2

@@ -122,6 +122,12 @@ struct BestPermutationResult {
     double maxMultiLiveScoreUp = 0.0;
 };
 
+struct RecommendEvalCache {
+    std::unordered_map<std::string, BestPermutationResult> bestPermutationCache{};
+    std::size_t bestPermutationHits = 0;
+    std::size_t bestPermutationMisses = 0;
+};
+
 struct DfsScoreUpperBoundContext {
     MusicMeta musicMeta;
 };
@@ -204,7 +210,7 @@ public:
           areaItemService(dataProvider) {}
 
     // 计算第一位+后几位顺序无关的哈希值
-    uint64_t calcDeckHash(const std::vector<const CardDetail*>& deck);
+    uint64_t calcDeckHash(const std::vector<const CardDetail*>& deck) const;
 
     /**
      * 获取卡组的最佳排列并计算分数，返回可能用到的最优推荐卡组信息
@@ -219,7 +225,8 @@ public:
         std::optional<int> eventType,
         std::optional<int> eventId,
         int liveType,
-        const DeckRecommendConfig& config
+        const DeckRecommendConfig& config,
+        RecommendEvalCache* evalCache = nullptr
     ) const;
 
     /**
@@ -251,7 +258,8 @@ public:
         std::optional<int> eventType = std::nullopt,
         std::optional<int> eventId = std::nullopt,
         const std::vector<CardDetail>& fixedCards = {},
-        const DfsScoreUpperBoundContext* scoreUpperBoundContext = nullptr
+        const DfsScoreUpperBoundContext* scoreUpperBoundContext = nullptr,
+        RecommendEvalCache* evalCache = nullptr
     );
 
     /**
@@ -282,7 +290,8 @@ public:
         int honorBonus = 0,
         std::optional<int> eventType = std::nullopt,
         std::optional<int> eventId = std::nullopt,
-        const std::vector<CardDetail>& fixedCards = {}
+        const std::vector<CardDetail>& fixedCards = {},
+        RecommendEvalCache* evalCache = nullptr
     );
 
     /**
@@ -314,7 +323,8 @@ public:
         std::optional<int> eventType = std::nullopt,
         std::optional<int> eventId = std::nullopt,
         const std::vector<CardDetail>& fixedCards = {},
-        const std::vector<std::vector<const CardDetail*>>* seedDecks = nullptr
+        const std::vector<std::vector<const CardDetail*>>* seedDecks = nullptr,
+        RecommendEvalCache* evalCache = nullptr
     );
 
     /**
@@ -335,7 +345,8 @@ public:
         int limit = 1,
         int member = 5,
         std::optional<int> eventType = std::nullopt,
-        std::optional<int> eventId = std::nullopt
+        std::optional<int> eventId = std::nullopt,
+        RecommendEvalCache* evalCache = nullptr
     );
 
     /**
@@ -356,7 +367,8 @@ public:
         int limit = 1,
         int member = 5,
         std::optional<int> eventType = std::nullopt,
-        std::optional<int> eventId = std::nullopt
+        std::optional<int> eventId = std::nullopt,
+        RecommendEvalCache* evalCache = nullptr
     );
 
     /**

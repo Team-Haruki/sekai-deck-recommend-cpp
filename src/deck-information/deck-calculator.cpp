@@ -53,17 +53,17 @@ DeckBonusInfo DeckCalculator::getDeckBonus(
     // WL异色加成
     if (eventType == Enums::EventType::world_bloom) 
     {
-        auto& worldBloomDifferentAttributeBonuses = this->dataProvider.masterData->worldBloomDifferentAttributeBonuses;
         bool attr_vis[10] = {};
         for (const auto &card : deckCards) 
             attr_vis[card->attr] = true;
         int attr_count = 0;
         for (int i = 0; i < 10; ++i) 
             attr_count += attr_vis[i];
-        auto it = findOrThrow(worldBloomDifferentAttributeBonuses, [&](const auto &it) { 
-            return it.attributeCount == attr_count; 
-        }, [&]() { return "World bloom different attribute bonus not found for attributeCount=" + std::to_string(attr_count); });
-        ret.diffAttrBonus = it.bonusRate;
+        const auto* bonus = this->dataProvider.masterData->findWorldBloomDiffAttrBonus(attr_count);
+        if (bonus == nullptr) {
+            throw ElementNoFoundError("World bloom different attribute bonus not found for attributeCount=" + std::to_string(attr_count));
+        }
+        ret.diffAttrBonus = bonus->bonusRate;
     }
 
     ret.totalBonus = ret.diffAttrBonus + std::accumulate(ret.cardBonus.begin(), ret.cardBonus.end(), 0.0);
@@ -110,17 +110,20 @@ SupportDeckBonus DeckCalculator::getSupportDeckBonus(
 
 int DeckCalculator::getHonorBonusPower()
 {
-    auto& honors = this->dataProvider.masterData->honors;
     auto& userHonors = this->dataProvider.userData->userHonors;
     int bonus = 0;
     for (const auto &userHonor : userHonors) {
-        auto it = findOrThrow(honors, [&](const auto &it) { 
-            return it.id == userHonor.honorId; 
-        }, [&]() { return "Honor not found for honorId=" + std::to_string(userHonor.honorId); });
-        auto levelIt = findOrThrow(it.levels, [&](const auto &it) { 
+        const auto* honor = this->dataProvider.masterData->findHonor(userHonor.honorId);
+        if (honor == nullptr) {
+            throw ElementNoFoundError("Honor not found for honorId=" + std::to_string(userHonor.honorId));
+        }
+        auto levelIt = std::find_if(honor->levels.begin(), honor->levels.end(), [&](const auto &it) {
             return it.level == userHonor.level; 
-        }, [&]() { return "Honor level not found for honorId=" + std::to_string(userHonor.honorId) + " level=" + std::to_string(userHonor.level); });
-        bonus += levelIt.bonus;
+        });
+        if (levelIt == honor->levels.end()) {
+            throw ElementNoFoundError("Honor level not found for honorId=" + std::to_string(userHonor.honorId) + " level=" + std::to_string(userHonor.level));
+        }
+        bonus += levelIt->bonus;
     }
     return bonus;
 }

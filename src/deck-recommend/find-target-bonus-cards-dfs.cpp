@@ -140,7 +140,8 @@ void BaseDeckRecommend::findTargetBonusCardsDFS(
     int limit, 
     int member, 
     std::optional<int> eventType, 
-    std::optional<int> eventId
+    std::optional<int> eventId,
+    RecommendEvalCache* evalCache
 )
 {
     std::map<int, std::vector<SupportDeckCard>> emptySupportCards{};
@@ -197,7 +198,7 @@ void BaseDeckRecommend::findTargetBonusCardsDFS(
                 // 计算卡组详情
                 auto deckRes = getBestPermutation(
                     deckCalculator, deckCards, emptySupportCards, scoreFunc,
-                    0, eventType, eventId, liveType, config
+                    0, eventType, eventId, liveType, config, evalCache
                 ).bestDeck.value();
                 // 需要验证加成正确
                 if(std::abs(deckRes.eventBonus.value_or(0) * 2 - bonus) < 1e-6)

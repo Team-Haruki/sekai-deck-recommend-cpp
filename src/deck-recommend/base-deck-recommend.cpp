@@ -2,16 +2,17 @@
 #include "card-priority/card-priority-filter.h"
 #include "common/timer.h"
 #include <chrono>
+#include <cstdlib>
 #include <cmath>
 #include <cstdio>
-#include <cstdlib>
 #include <fstream>
+#include <iostream>
 #include <mutex>
 #include <random>
 #include <sstream>
 
 
-uint64_t BaseDeckRecommend::calcDeckHash(const std::vector<const CardDetail*>& deck) {
+uint64_t BaseDeckRecommend::calcDeckHash(const std::vector<const CardDetail*>& deck) const {
     int card_num = (int)deck.size();
     std::array<int, 5> v{};
     for (int i = 0; i < card_num; ++i)
@@ -25,6 +26,137 @@ uint64_t BaseDeckRecommend::calcDeckHash(const std::vector<const CardDetail*>& d
 };
 
 namespace {
+
+struct RecommendTimings {
+    long long cardBuildNs = 0;
+    long long supportBuildNs = 0;
+    long long searchNs = 0;
+    long long finalDecorateNs = 0;
+};
+
+struct CardHotFields {
+    int cardId = 0;
+    int characterId = 0;
+    int attr = 0;
+    int unitMask = 0;
+    int powerMin = 0;
+    int powerMax = 0;
+    double skillMin = 0.0;
+    double skillMax = 0.0;
+    double eventBonus = 0.0;
+    double supportBonus = 0.0;
+    double scoreHeuristic = 0.0;
+    uint64_t scoreNoEventKey = 0;
+};
+
+int makeUnitMask(const CardDetail& card) {
+    int mask = 0;
+    for (const auto unit : card.units) {
+        if (unit >= 0 && unit < 31) {
+            mask |= (1 << unit);
+        }
+    }
+    return mask;
+}
+
+CardHotFields buildCardHotField(const CardDetail& card, const DeckRecommendConfig& config) {
+    double eventBonus = std::max(
+        card.maxEventBonus.value_or(0.0),
+        card.limitedEventBonus.value_or(0.0)
+    );
+    double powerNorm = std::max(0.0, double(card.power.max) / POWER_MAX);
+    double skillNorm = std::max(0.0, double(card.skill.max) / SKILL_MAX);
+    double eventNorm = std::max(0.0, eventBonus / 70.0);
+    double supportNorm = std::max(0.0, card.supportDeckBonus.value_or(0.0) / 50.0);
+    double scoreHeuristic = 0.0;
+    if (config.target == RecommendTarget::Mysekai) {
+        scoreHeuristic = 0.90 * powerNorm + 1.35 * eventNorm + 0.25 * supportNorm;
+    } else if (config.target == RecommendTarget::Bonus) {
+        scoreHeuristic = 1.30 * eventNorm + 0.35 * supportNorm + 0.10 * powerNorm + 0.05 * skillNorm;
+    } else {
+        scoreHeuristic = 0.55 * powerNorm + 0.75 * skillNorm + 0.30 * eventNorm + 0.15 * supportNorm;
+    }
+    return CardHotFields{
+            .cardId = card.cardId,
+            .characterId = card.characterId,
+            .attr = card.attr,
+            .unitMask = makeUnitMask(card),
+            .powerMin = card.power.min,
+            .powerMax = card.power.max,
+            .skillMin = static_cast<double>(card.skill.min),
+            .skillMax = static_cast<double>(card.skill.max),
+            .eventBonus = eventBonus,
+            .supportBonus = card.supportDeckBonus.value_or(0.0),
+            .scoreHeuristic = scoreHeuristic,
+            .scoreNoEventKey = uint64_t(std::max(0, card.power.max)) * (256 + uint64_t(std::max(0.0, double(card.skill.max)))),
+        };
+}
+
+std::vector<CardHotFields> buildCardHotFields(
+    const std::vector<CardDetail>& cards,
+    const DeckRecommendConfig& config
+) {
+    std::vector<CardHotFields> hot{};
+    hot.reserve(cards.size());
+    for (const auto& card : cards) {
+        hot.push_back(buildCardHotField(card, config));
+    }
+    return hot;
+}
+
+std::unordered_map<int, CardHotFields> buildCardHotMap(const std::vector<CardHotFields>& hotFields) {
+    std::unordered_map<int, CardHotFields> hotById{};
+    hotById.reserve(hotFields.size());
+    for (const auto& hot : hotFields) {
+        hotById.emplace(hot.cardId, hot);
+    }
+    return hotById;
+}
+
+std::string makeBestPermutationCacheKey(
+    uint64_t deckHash,
+    int honorBonus,
+    std::optional<int> eventType,
+    std::optional<int> eventId,
+    int liveType,
+    const DeckRecommendConfig& config
+) {
+    std::string key = std::to_string(deckHash);
+    key += "|h=" + std::to_string(honorBonus);
+    key += "|et=" + std::to_string(eventType.value_or(-1));
+    key += "|eid=" + std::to_string(eventId.value_or(-1));
+    key += "|lt=" + std::to_string(liveType);
+    key += "|target=" + std::to_string(int(config.target));
+    key += "|skillRef=" + std::to_string(int(config.skillReferenceChooseStrategy));
+    key += "|keepState=" + std::to_string(config.keepAfterTrainingState);
+    key += "|bestLeader=" + std::to_string(config.bestSkillAsLeader);
+    key += "|lower=" + std::to_string(config.multiScoreUpLowerBound);
+    key += "|skillOrder=" + std::to_string(int(config.liveSkillOrder));
+    if (config.specificSkillOrder.has_value()) {
+        key += "|specific=";
+        for (const auto order : config.specificSkillOrder.value()) {
+            key += std::to_string(order) + ",";
+        }
+    }
+    key += "|teamSU=" + std::to_string(config.multiTeammateScoreUp.value_or(-1));
+    key += "|teamP=" + std::to_string(config.multiTeammatePower.value_or(-1));
+    return key;
+}
+
+void maybePrintTimings(const RecommendTimings& timings, const RecommendEvalCache& cache) {
+    if (std::getenv("SEKAI_DECK_RECOMMEND_TIMING") == nullptr) {
+        return;
+    }
+    auto ms = [](long long ns) { return double(ns) / 1'000'000.0; };
+    std::cerr << "[sekai-deck-recommend-cpp] timings"
+              << " card_build_ms=" << ms(timings.cardBuildNs)
+              << " support_build_ms=" << ms(timings.supportBuildNs)
+              << " search_ms=" << ms(timings.searchNs)
+              << " final_decorate_ms=" << ms(timings.finalDecorateNs)
+              << " best_perm_cache_hits=" << cache.bestPermutationHits
+              << " best_perm_cache_misses=" << cache.bestPermutationMisses
+              << std::endl;
+}
 
 bool applyFixedCardOrder(
     std::vector<const CardDetail*>& deck,
@@ -68,8 +200,34 @@ BestPermutationResult BaseDeckRecommend::getBestPermutation(
     std::optional<int> eventType,
     std::optional<int> eventId,
     int liveType,
-    const DeckRecommendConfig& config
+    const DeckRecommendConfig& config,
+    RecommendEvalCache* evalCache
 ) const {
+    const uint64_t inputDeckHash = this->calcDeckHash(deckCards);
+    const auto cacheKey = makeBestPermutationCacheKey(
+        inputDeckHash,
+        honorBonus,
+        eventType,
+        eventId,
+        liveType,
+        config
+    );
+    if (evalCache != nullptr) {
+        auto it = evalCache->bestPermutationCache.find(cacheKey);
+        if (it != evalCache->bestPermutationCache.end()) {
+            evalCache->bestPermutationHits++;
+            return it->second;
+        }
+        evalCache->bestPermutationMisses++;
+    }
+
+    auto cacheAndReturn = [&](BestPermutationResult result) {
+        if (evalCache != nullptr) {
+            evalCache->bestPermutationCache.emplace(cacheKey, result);
+        }
+        return result;
+    };
+
     auto orderedDeckCards = deckCards;
     bool isWorldBloomFinale = eventId.has_value() && this->dataProvider.masterData->isWorldBloomFinale(eventId.value());
     int specialCharacterId = 0;
@@ -81,14 +239,14 @@ BestPermutationResult BaseDeckRecommend::getBestPermutation(
         std::unordered_set<int> characterIds{};
         for (const auto* card : orderedDeckCards) {
             if (!card) {
-                return {};
+                return cacheAndReturn({});
             }
             if (!cardIds.insert(card->cardId).second) {
-                return {};
+                return cacheAndReturn({});
             }
             if (!Enums::LiveType::isChallenge(liveType)) {
                 if (!characterIds.insert(card->characterId).second) {
-                    return {};
+                    return cacheAndReturn({});
                 }
             } else {
                 characterIds.insert(card->characterId);
@@ -97,18 +255,18 @@ BestPermutationResult BaseDeckRecommend::getBestPermutation(
 
         for (const auto& fixedCardId : config.fixedCards) {
             if (!cardIds.count(fixedCardId)) {
-                return {};
+                return cacheAndReturn({});
             }
         }
         for (const auto& characterId : resolveRequiredCharacters(config, isWorldBloomFinale, specialCharacterId)) {
             if (!characterIds.count(characterId)) {
-                return {};
+                return cacheAndReturn({});
             }
         }
     }
 
     if (!config.fixedCards.empty() && !applyFixedCardOrder(orderedDeckCards, config.fixedCards)) {
-        return {};
+        return cacheAndReturn({});
     }
 
     auto leaderCharacterId = resolveLeaderCharacterId(config, isWorldBloomFinale, specialCharacterId);
@@ -121,7 +279,7 @@ BestPermutationResult BaseDeckRecommend::getBestPermutation(
             }
         );
         if (leaderIt == orderedDeckCards.end()) {
-            return {};
+            return cacheAndReturn({});
         }
         if (leaderIt != orderedDeckCards.begin()) {
             std::rotate(orderedDeckCards.begin(), leaderIt, leaderIt + 1);
@@ -158,7 +316,7 @@ BestPermutationResult BaseDeckRecommend::getBestPermutation(
             ret.bestDeck = std::move(candidate);
         }
     }
-    return ret;
+    return cacheAndReturn(std::move(ret));
 }
 
 
@@ -197,9 +355,11 @@ std::vector<RecommendDeck> BaseDeckRecommend::recommendHighScoreDeck(
         throw std::runtime_error("Cannot set fixed characters in challenge live");
 
     auto musicMeta = this->liveCalculator.getMusicMeta(config.musicId, config.musicDiff);
+    RecommendTimings timings{};
+    RecommendEvalCache evalCache{};
+    auto phaseStart = std::chrono::high_resolution_clock::now();
 
     auto areaItemLevels = areaItemService.getAreaItemLevels();
-    auto& cardEpisodes = this->dataProvider.masterData->cardEpisodes;
 
     std::optional<double> scoreUpLimit = std::nullopt;
     if (eventConfig.skillScoreUpLimit.has_value() && !Enums::LiveType::isChallenge(liveType))
@@ -210,8 +370,12 @@ std::vector<RecommendDeck> BaseDeckRecommend::recommendHighScoreDeck(
         eventConfig, areaItemLevels, scoreUpLimit,
         config.customBonusCharacterIds, config.customBonusAttr, config.customBonusSupportUnits
     );
+    timings.cardBuildNs += std::chrono::duration_cast<std::chrono::nanoseconds>(
+        std::chrono::high_resolution_clock::now() - phaseStart
+    ).count();
 
     // 归类支援卡组
+    phaseStart = std::chrono::high_resolution_clock::now();
     std::map<int, std::vector<SupportDeckCard>> supportCards{};
     if (eventConfig.isWorldBloomFinale) {
         // Finale scores a support deck for every possible leader character.
@@ -242,6 +406,9 @@ std::vector<RecommendDeck> BaseDeckRecommend::recommendHighScoreDeck(
         std::sort(sc.begin(), sc.end(), [](const SupportDeckCard& a, const SupportDeckCard& b) { return a.bonus > b.bonus; });
         supportCards[0] = sc;
     }
+    timings.supportBuildNs += std::chrono::duration_cast<std::chrono::nanoseconds>(
+        std::chrono::high_resolution_clock::now() - phaseStart
+    ).count();
 
     int filterUnit = eventConfig.worldBloomSupportUnit ? eventConfig.worldBloomSupportUnit : eventConfig.eventUnit;
     // 过滤箱活/World Bloom应援组合的卡，不上其它组合的
@@ -274,25 +441,29 @@ std::vector<RecommendDeck> BaseDeckRecommend::recommendHighScoreDeck(
             uc.masterRank = 0;
             uc.specialTrainingStatus = Enums::SpecialTrainingStatus::not_doing;
             
-            auto& c = findOrThrow(this->dataProvider.masterData->cards, [&](const Card& c) {
-                return c.id == card_id;
-            }, [&]() { return "Card not found for fixed cardId=" + std::to_string(card_id); });
-            bool hasSpecialTraining = c.cardRarityType == Enums::CardRarityType::rarity_3
-                                    || c.cardRarityType == Enums::CardRarityType::rarity_4;
+            const Card* c = this->dataProvider.masterData->findCard(card_id);
+            if (c == nullptr) {
+                throw ElementNoFoundError("Card not found for fixed cardId=" + std::to_string(card_id));
+            }
+            bool hasSpecialTraining = c->cardRarityType == Enums::CardRarityType::rarity_3
+                                    || c->cardRarityType == Enums::CardRarityType::rarity_4;
             uc.defaultImage = hasSpecialTraining ? Enums::DefaultImage::special_training : Enums::DefaultImage::original;
 
-            for (auto& ep : cardEpisodes) 
-                if (ep.cardId == card_id) {
-                    UserCardEpisodes uce{};
-                    uce.cardEpisodeId = ep.id;
-                    uce.scenarioStatus = 0;
-                    uc.episodes.push_back(uce);
-                }
+            for (const auto* ep : this->dataProvider.masterData->getCardEpisodesByCardId(card_id)) {
+                UserCardEpisodes uce{};
+                uce.cardEpisodeId = ep->id;
+                uce.scenarioStatus = 0;
+                uc.episodes.push_back(uce);
+            }
+            phaseStart = std::chrono::high_resolution_clock::now();
             auto card = cardCalculator.batchGetCardDetail(
                 {uc}, config.cardConfig, config.singleCardConfig, 
                 eventConfig, areaItemLevels, scoreUpLimit,
                 config.customBonusCharacterIds, config.customBonusAttr, config.customBonusSupportUnits
             );
+            timings.cardBuildNs += std::chrono::duration_cast<std::chrono::nanoseconds>(
+                std::chrono::high_resolution_clock::now() - phaseStart
+            ).count();
             if (card.size() > 0) {
                 fixedCards.push_back(card[0]);
                 cards.push_back(card[0]);
@@ -363,32 +534,19 @@ std::vector<RecommendDeck> BaseDeckRecommend::recommendHighScoreDeck(
         );
     };
     auto scoreHeuristic = [&](const CardDetail& card) {
-        double powerNorm = std::max(0.0, double(card.power.max) / POWER_MAX);
-        double skillNorm = std::max(0.0, double(card.skill.max) / SKILL_MAX);
-        double eventBonus = cardEventBonus(card);
-        double eventNorm = std::max(0.0, eventBonus / 70.0);
-        double supportNorm = std::max(0.0, card.supportDeckBonus.value_or(0.0) / 50.0);
-        if (config.target == RecommendTarget::Mysekai) {
-            return 0.90 * powerNorm
-                + 1.35 * eventNorm
-                + 0.25 * supportNorm;
-        }
-        if (config.target == RecommendTarget::Bonus) {
-            return 1.30 * eventNorm
-                + 0.35 * supportNorm
-                + 0.10 * powerNorm
-                + 0.05 * skillNorm;
-        }
-        return 0.55 * powerNorm
-            + 0.75 * skillNorm
-            + 0.30 * eventNorm
-            + 0.15 * supportNorm;
+        return buildCardHotField(card, config).scoreHeuristic;
     };
     auto sortCardsByStrength = [&](std::vector<CardDetail> input) {
+        auto hotById = buildCardHotMap(buildCardHotFields(input, config));
+        auto hot = [&](const CardDetail& card) -> const CardHotFields& {
+            return hotById.at(card.cardId);
+        };
         if (config.target == RecommendTarget::Skill) {
-            std::sort(input.begin(), input.end(), [](const CardDetail& a, const CardDetail& b) {
-                return std::make_tuple(a.skill.max, a.skill.min, a.cardId)
-                    > std::make_tuple(b.skill.max, b.skill.min, b.cardId);
+            std::sort(input.begin(), input.end(), [&](const CardDetail& a, const CardDetail& b) {
+                const auto& ah = hot(a);
+                const auto& bh = hot(b);
+                return std::make_tuple(ah.skillMax, ah.skillMin, ah.cardId)
+                    > std::make_tuple(bh.skillMax, bh.skillMin, bh.cardId);
             });
         } else if (
             config.target == RecommendTarget::Score
@@ -396,13 +554,17 @@ std::vector<RecommendDeck> BaseDeckRecommend::recommendHighScoreDeck(
             || config.target == RecommendTarget::Bonus
         ) {
             std::sort(input.begin(), input.end(), [&](const CardDetail& a, const CardDetail& b) {
-                return std::make_tuple(scoreHeuristic(a), cardEventBonus(a), a.skill.max, a.power.max, a.cardId)
-                    > std::make_tuple(scoreHeuristic(b), cardEventBonus(b), b.skill.max, b.power.max, b.cardId);
+                const auto& ah = hot(a);
+                const auto& bh = hot(b);
+                return std::make_tuple(ah.scoreHeuristic, ah.eventBonus, ah.skillMax, ah.powerMax, ah.cardId)
+                    > std::make_tuple(bh.scoreHeuristic, bh.eventBonus, bh.skillMax, bh.powerMax, bh.cardId);
             });
         } else {
-            std::sort(input.begin(), input.end(), [](const CardDetail& a, const CardDetail& b) {
-                return std::make_tuple(a.power.max, a.power.min, a.cardId)
-                    > std::make_tuple(b.power.max, b.power.min, b.cardId);
+            std::sort(input.begin(), input.end(), [&](const CardDetail& a, const CardDetail& b) {
+                const auto& ah = hot(a);
+                const auto& bh = hot(b);
+                return std::make_tuple(ah.powerMax, ah.powerMin, ah.cardId)
+                    > std::make_tuple(bh.powerMax, bh.powerMin, bh.cardId);
             });
         }
         return input;
@@ -449,13 +611,18 @@ std::vector<RecommendDeck> BaseDeckRecommend::recommendHighScoreDeck(
         if (runConfig.target == RecommendTarget::Score || runConfig.target == RecommendTarget::Skill) {
             scoreUpperBoundContext = DfsScoreUpperBoundContext{ .musicMeta = musicMeta };
         }
+        auto searchStart = std::chrono::high_resolution_clock::now();
         findBestCardsDFS(
             liveType, runConfig, sortedCards, supportCards, sf,
             info,
             runConfig.limit, Enums::LiveType::isChallenge(liveType), runConfig.member, honorBonus,
             eventConfig.eventType, eventConfig.eventId, fixedCards,
-            scoreUpperBoundContext.has_value() ? &scoreUpperBoundContext.value() : nullptr
+            scoreUpperBoundContext.has_value() ? &scoreUpperBoundContext.value() : nullptr,
+            &evalCache
         );
+        timings.searchNs += std::chrono::duration_cast<std::chrono::nanoseconds>(
+            std::chrono::high_resolution_clock::now() - searchStart
+        ).count();
     };
     auto tuneGaConfig = [&](DeckRecommendConfig runConfig, std::size_t candidateCount, bool warmupOnly, bool seeded) {
         int minPop = warmupOnly ? 600 : 2000;
@@ -477,12 +644,16 @@ std::vector<RecommendDeck> BaseDeckRecommend::recommendHighScoreDeck(
             seed = nowNs();
         }
         auto rng = Rng(seed);
+        auto searchStart = std::chrono::high_resolution_clock::now();
         findBestCardsGA(
             liveType, runConfig, rng, sortedCards, supportCards, sf,
             info,
             runConfig.limit, Enums::LiveType::isChallenge(liveType), runConfig.member, honorBonus,
-            eventConfig.eventType, eventConfig.eventId, fixedCards, seedDecks
+            eventConfig.eventType, eventConfig.eventId, fixedCards, seedDecks, &evalCache
         );
+        timings.searchNs += std::chrono::duration_cast<std::chrono::nanoseconds>(
+            std::chrono::high_resolution_clock::now() - searchStart
+        ).count();
     };
     auto collectSeedDecks = [&](const RecommendCalcInfo& info, const std::vector<CardDetail>& sourceCards, int maxSeedCount) {
         std::unordered_map<int, const CardDetail*> cardById{};
@@ -845,7 +1016,9 @@ std::vector<RecommendDeck> BaseDeckRecommend::recommendHighScoreDeck(
         return pruned;
     };
     auto attachSupportDeckCards = [&](std::vector<RecommendDeck> decks) {
+        auto decorateStart = std::chrono::high_resolution_clock::now();
         if (supportCards.empty()) {
+            maybePrintTimings(timings, evalCache);
             return decks;
         }
         std::unordered_map<int, const CardDetail*> cardById{};
@@ -888,6 +1061,10 @@ std::vector<RecommendDeck> BaseDeckRecommend::recommendHighScoreDeck(
             deck.supportDeckBonus = supportDeckBonus.bonus;
             deck.supportDeckCards = std::move(supportDeckBonus.cards);
         }
+        timings.finalDecorateNs += std::chrono::duration_cast<std::chrono::nanoseconds>(
+            std::chrono::high_resolution_clock::now() - decorateStart
+        ).count();
+        maybePrintTimings(timings, evalCache);
         return decks;
     };
     auto ensureResults = [&](std::vector<RecommendDeck> decks) {
@@ -907,18 +1084,21 @@ std::vector<RecommendDeck> BaseDeckRecommend::recommendHighScoreDeck(
             throw std::runtime_error("Bonus target only supports DFS algorithm");
 
         // WL和普通活动采用不同代码
+        auto searchStart = std::chrono::high_resolution_clock::now();
         if (eventConfig.eventType != Enums::EventType::world_bloom) {
             findTargetBonusCardsDFS(
                 liveType, config, cards, sf, calcInfo,
-                config.limit, config.member, eventConfig.eventType, eventConfig.eventId
+                config.limit, config.member, eventConfig.eventType, eventConfig.eventId, &evalCache
             );
-        }
-        else {
+        } else {
             findWorldBloomTargetBonusCardsDFS(
                 liveType, config, cards, sf, calcInfo,
-                config.limit, config.member, eventConfig.eventType, eventConfig.eventId
+                config.limit, config.member, eventConfig.eventType, eventConfig.eventId, &evalCache
             );
         }
+        timings.searchNs += std::chrono::duration_cast<std::chrono::nanoseconds>(
+            std::chrono::high_resolution_clock::now() - searchStart
+        ).count();
 
         while (calcInfo.deckQueue.size()) {
             ans.emplace_back(calcInfo.deckQueue.top());
@@ -960,12 +1140,16 @@ std::vector<RecommendDeck> BaseDeckRecommend::recommendHighScoreDeck(
         }
         auto rng = Rng(seed);
         for (int i = 0; i < config.saRunCount && !calcInfo.isTimeout(); ++i) {
+            auto searchStart = std::chrono::high_resolution_clock::now();
             findBestCardsSA(
                 liveType, config, rng, sortedCards, supportCards, sf,
                 calcInfo,
                 config.limit, Enums::LiveType::isChallenge(liveType), config.member, honorBonus,
-                eventConfig.eventType, eventConfig.eventId, fixedCards
+                eventConfig.eventType, eventConfig.eventId, fixedCards, &evalCache
             );
+            timings.searchNs += std::chrono::duration_cast<std::chrono::nanoseconds>(
+                std::chrono::high_resolution_clock::now() - searchStart
+            ).count();
         }
         return ensureResults(collectResults(calcInfo));
     }
@@ -1442,7 +1626,7 @@ std::vector<RecommendDeck> BaseDeckRecommend::recommendHighScoreDeck(
             }
             auto ret = getBestPermutation(
                 this->deckCalculator, normalizedDeck, supportCards, sf,
-                honorBonus, eventConfig.eventType, eventConfig.eventId, liveType, runConfig
+                honorBonus, eventConfig.eventType, eventConfig.eventId, liveType, runConfig, &evalCache
             );
             double targetValue = -1e18;
             if (ret.bestDeck.has_value()) {

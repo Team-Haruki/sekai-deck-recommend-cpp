@@ -16,22 +16,17 @@ std::vector<AreaItemLevel> AreaItemService::getAreaItemLevels()
 
 AreaItemLevel AreaItemService::getAreaItemLevel(int areaItemId, int level)
 {
-    auto& areaItemLevels = this->dataProvider.masterData->areaItemLevels;
     int clampedLevel = std::min(level, this->getMaxAreaItemLevel(areaItemId));
-    return findOrThrow(areaItemLevels, [&](const AreaItemLevel& it) {
-        return it.areaItemId == areaItemId && it.level == clampedLevel;
-    }, [&]() { return "Area item level not found for areaItemId=" + std::to_string(areaItemId) + " level=" + std::to_string(level); });
+    const auto* areaItemLevel = this->dataProvider.masterData->findAreaItemLevel(areaItemId, clampedLevel);
+    if (areaItemLevel == nullptr) {
+        throw ElementNoFoundError("Area item level not found for areaItemId=" + std::to_string(areaItemId) + " level=" + std::to_string(level));
+    }
+    return *areaItemLevel;
 }
 
 int AreaItemService::getMaxAreaItemLevel(int areaItemId)
 {
-    auto& areaItemLevels = this->dataProvider.masterData->areaItemLevels;
-    int maxLevel = 0;
-    for (const auto& areaItemLevel : areaItemLevels) {
-        if (areaItemLevel.areaItemId == areaItemId) {
-            maxLevel = std::max(maxLevel, areaItemLevel.level);
-        }
-    }
+    int maxLevel = this->dataProvider.masterData->getMaxAreaItemLevelIndexed(areaItemId);
     if (maxLevel == 0) {
         throw ElementNoFoundError("Area item levels not found for areaItemId=" + std::to_string(areaItemId));
     }

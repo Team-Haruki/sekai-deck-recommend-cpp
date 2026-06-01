@@ -162,7 +162,8 @@ void BaseDeckRecommend::findBestCardsGA(
     std::optional<int> eventType, 
     std::optional<int> eventId,
     const std::vector<CardDetail>& fixedCards,
-    const std::vector<std::vector<const CardDetail*>>* seedDecks
+    const std::vector<std::vector<const CardDetail*>>* seedDecks,
+    RecommendEvalCache* evalCache
 ) {
     int fixedSize = fixedCards.size();
     bool isWorldBloomFinale = eventId.has_value() && this->dataProvider.masterData->isWorldBloomFinale(eventId.value());
@@ -202,7 +203,7 @@ void BaseDeckRecommend::findBestCardsGA(
                 deck.push_back(cardPtr);
             auto ret = getBestPermutation(
                 this->deckCalculator, deck, supportCards, scoreFunc, 
-                honorBonus, eventType, eventId, liveType, cfg
+                honorBonus, eventType, eventId, liveType, cfg, evalCache
             );
             if (ret.bestDeck.has_value()) {
                 targetValue = ret.bestDeck.value().targetValue;

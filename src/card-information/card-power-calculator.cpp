@@ -52,9 +52,6 @@ DeckCardPowerDetail CardPowerCalculator::getPower(const Card &card, const BasePo
 
 BasePower CardPowerCalculator::getBasePower(const UserCard &userCard, const Card &card, bool hasMysekaiCanvas)
 {
-    auto& cardEpisodes = dataProvider.masterData->cardEpisodes;
-    auto& masterLessons = dataProvider.masterData->masterLessons;
-
     BasePower ret = {0, 0, 0};
     // 等级
     for (auto& it : card.cardParameters) {
@@ -76,31 +73,32 @@ BasePower CardPowerCalculator::getBasePower(const UserCard &userCard, const Card
     // 剧情
     for (auto& it : userCard.episodes) {
         if (it.scenarioStatus == Enums::ScenarioStatus::already_read) {
-            auto episode = findOrThrow(cardEpisodes, [&](auto& e) {
-                return e.id == it.cardEpisodeId;
-            }, [&]() { return "Card episode not found for cardId=" + std::to_string(card.id) + " episodeId=" + std::to_string(it.cardEpisodeId); });
-            ret[0] += episode.power1BonusFixed;
-            ret[1] += episode.power2BonusFixed;
-            ret[2] += episode.power3BonusFixed;
+            const auto* episode = dataProvider.masterData->findCardEpisode(it.cardEpisodeId);
+            if (episode == nullptr) {
+                throw ElementNoFoundError("Card episode not found for cardId=" + std::to_string(card.id) + " episodeId=" + std::to_string(it.cardEpisodeId));
+            }
+            ret[0] += episode->power1BonusFixed;
+            ret[1] += episode->power2BonusFixed;
+            ret[2] += episode->power3BonusFixed;
         }
     }
     // 突破
-    for (auto& it : masterLessons) {
-        if (it.cardRarityType == card.cardRarityType && it.masterRank <= userCard.masterRank) {
-            ret[0] += it.power1BonusFixed;
-            ret[1] += it.power2BonusFixed;
-            ret[2] += it.power3BonusFixed;
+    for (const auto* it : dataProvider.masterData->getMasterLessonsByRarity(card.cardRarityType)) {
+        if (it->masterRank <= userCard.masterRank) {
+            ret[0] += it->power1BonusFixed;
+            ret[1] += it->power2BonusFixed;
+            ret[2] += it->power3BonusFixed;
         }
     }
     // 从5.1.0版本开始，画布加成直接算进基础综合力中
     if (hasMysekaiCanvas) {
-        auto& cardMysekaiCanvasBonuses = dataProvider.masterData->cardMysekaiCanvasBonuses;
-        auto canvasBonus = findOrThrow(cardMysekaiCanvasBonuses, [&](auto& it) {
-            return it.cardRarityType == card.cardRarityType;
-        }, [&]() { return "Card mysekai canvas bonus not found for cardRarityType=" + std::to_string(card.cardRarityType); });
-        ret[0] += canvasBonus.power1BonusFixed;
-        ret[1] += canvasBonus.power2BonusFixed;
-        ret[2] += canvasBonus.power3BonusFixed;
+        const auto* canvasBonus = dataProvider.masterData->findCanvasBonus(card.cardRarityType);
+        if (canvasBonus == nullptr) {
+            throw ElementNoFoundError("Card mysekai canvas bonus not found for cardRarityType=" + std::to_string(card.cardRarityType));
+        }
+        ret[0] += canvasBonus->power1BonusFixed;
+        ret[1] += canvasBonus->power2BonusFixed;
+        ret[2] += canvasBonus->power3BonusFixed;
     }
     return ret;
 }
@@ -139,20 +137,19 @@ int CardPowerCalculator::getAreaItemBonusPower(const std::vector<AreaItemLevel> 
 
 int CardPowerCalculator::getCharacterBonusPower(const BasePower &basePower, int characterId)
 {
-    auto& characterRanks = dataProvider.masterData->characterRanks;
     auto& userCharacters = dataProvider.userData->userCharacters;
 
     auto userCharacter = findOrThrow(userCharacters, [&](auto& it) {
         return it.characterId == characterId;
     }, [&]() { return "User character not found for characterId=" + std::to_string(characterId); });
-    auto characterRank = findOrThrow(characterRanks, [&](auto& it) {
-        return it.characterId == userCharacter.characterId &&
-               it.characterRank == userCharacter.characterRank;
-    }, [&]() { return "Character rank not found for characterId=" + std::to_string(userCharacter.characterId) + " rank=" + std::to_string(userCharacter.characterRank); });
+    const auto* characterRank = dataProvider.masterData->findCharacterRank(userCharacter.characterId, userCharacter.characterRank);
+    if (characterRank == nullptr) {
+        throw ElementNoFoundError("Character rank not found for characterId=" + std::to_string(userCharacter.characterId) + " rank=" + std::to_string(userCharacter.characterRank));
+    }
     double rates[3] = {
-        characterRank.power1BonusRate,
-        characterRank.power2BonusRate,
-        characterRank.power3BonusRate
+        characterRank->power1BonusRate,
+        characterRank->power2BonusRate,
+        characterRank->power3BonusRate
     };
     int total = 0;
     for (int i = 0; i < 3; ++i) {

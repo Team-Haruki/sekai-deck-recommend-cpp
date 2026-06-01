@@ -3,11 +3,29 @@
 
 #include "data-provider/master-data-types.h"
 
+#include <unordered_map>
+
 
 constexpr int legacyWorldBloom2FinaleEventId = 180;
 constexpr int legacyWorldBloom2FinaleCardBonusCountLimit = 4;
 constexpr int legacyWorldBloom2FinaleMysekaiFixtureBonusLimit = 20;
 constexpr double legacyWorldBloom2FinaleSkillScoreUpLimit = 140.0;
+
+struct MasterDataIndexes {
+    std::unordered_map<int, const AreaItemLevel*> areaItemLevelByItemLevel;
+    std::unordered_map<int, int> maxAreaItemLevelByItem;
+    std::unordered_map<int, const Card*> cardById;
+    std::unordered_map<int, std::vector<const CardEpisode*>> cardEpisodesByCardId;
+    std::unordered_map<int, const CardEpisode*> cardEpisodeById;
+    std::unordered_map<int, const CardMysekaiCanvasBonus*> canvasBonusByRarity;
+    std::unordered_map<int, const CardRarity*> cardRarityByType;
+    std::unordered_map<int, const CharacterRank*> characterRankByCharacterRank;
+    std::unordered_map<int, const GameCharacter*> gameCharacterById;
+    std::unordered_map<int, const Honor*> honorById;
+    std::unordered_map<int, std::vector<const MasterLesson*>> masterLessonsByRarity;
+    std::unordered_map<int, const Skill*> skillById;
+    std::unordered_map<int, const WorldBloomDifferentAttributeBonus*> worldBloomDiffAttrBonusByCount;
+};
 
 
 class MasterData {
@@ -18,6 +36,7 @@ private:
 
 public:
     std::string baseDir;
+    MasterDataIndexes indexes;
 
     std::vector<AreaItemLevel> areaItemLevels;
     std::vector<AreaItem> areaItems;
@@ -65,6 +84,34 @@ public:
     void loadFromFiles(const std::string& baseDir);
 
     void loadFromStrings(std::map<std::string, std::string>& data);
+
+    void buildIndexes();
+
+    const AreaItemLevel* findAreaItemLevel(int areaItemId, int level) const;
+
+    int getMaxAreaItemLevelIndexed(int areaItemId) const;
+
+    const Card* findCard(int cardId) const;
+
+    const CardEpisode* findCardEpisode(int cardEpisodeId) const;
+
+    const std::vector<const CardEpisode*>& getCardEpisodesByCardId(int cardId) const;
+
+    const CardMysekaiCanvasBonus* findCanvasBonus(int cardRarityType) const;
+
+    const CardRarity* findCardRarity(int cardRarityType) const;
+
+    const CharacterRank* findCharacterRank(int characterId, int characterRank) const;
+
+    const GameCharacter* findGameCharacter(int characterId) const;
+
+    const Honor* findHonor(int honorId) const;
+
+    const std::vector<const MasterLesson*>& getMasterLessonsByRarity(int cardRarityType) const;
+
+    const Skill* findSkill(int skillId) const;
+
+    const WorldBloomDifferentAttributeBonus* findWorldBloomDiffAttrBonus(int attributeCount) const;
 
     int getNoEventFakeEventId(int eventType) const;
 

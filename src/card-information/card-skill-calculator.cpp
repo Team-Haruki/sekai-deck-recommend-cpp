@@ -130,10 +130,11 @@ Skill CardSkillCalculator::getSkill(const UserCard &userCard, const Card &card, 
     if (card.specialTrainingSkillId != 0 && afterTraining) {
         skillId = card.specialTrainingSkillId;
     }
-    auto skills = dataProvider.masterData->skills;
-    return findOrThrow(skills, [&](auto& it) {
-        return it.id == skillId;
-    }, [&]() { return "Skill not found for skillId=" + std::to_string(skillId); });
+    const auto* skill = dataProvider.masterData->findSkill(skillId);
+    if (skill == nullptr) {
+        throw ElementNoFoundError("Skill not found for skillId=" + std::to_string(skillId));
+    }
+    return *skill;
 }
 
 int CardSkillCalculator::getCharacterRank(int characterId)
