@@ -649,7 +649,7 @@ std::vector<RecommendDeck> BaseDeckRecommend::recommendHighScoreDeck(
             runConfig.limit, Enums::LiveType::isChallenge(liveType), runConfig.member, honorBonus,
             eventConfig.eventType, eventConfig.eventId, fixedCards,
             scoreUpperBoundContext.has_value() ? &scoreUpperBoundContext.value() : nullptr,
-            &evalCache
+            nullptr
         );
         timings.searchNs += std::chrono::duration_cast<std::chrono::nanoseconds>(
             std::chrono::high_resolution_clock::now() - searchStart
