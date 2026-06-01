@@ -182,16 +182,17 @@ BestPermutationResult BaseDeckRecommend::getBestPermutation(
     const DeckRecommendConfig& config,
     RecommendEvalCache* evalCache
 ) const {
-    const uint64_t inputDeckHash = this->calcDeckHash(deckCards);
-    const auto cacheKey = makeBestPermutationCacheKey(
-        inputDeckHash,
-        honorBonus,
-        eventType,
-        eventId,
-        liveType,
-        config
-    );
+    std::string cacheKey{};
     if (evalCache != nullptr) {
+        const uint64_t inputDeckHash = this->calcDeckHash(deckCards);
+        cacheKey = makeBestPermutationCacheKey(
+            inputDeckHash,
+            honorBonus,
+            eventType,
+            eventId,
+            liveType,
+            config
+        );
         auto it = evalCache->bestPermutationCache.find(cacheKey);
         if (it != evalCache->bestPermutationCache.end()) {
             evalCache->bestPermutationHits++;
