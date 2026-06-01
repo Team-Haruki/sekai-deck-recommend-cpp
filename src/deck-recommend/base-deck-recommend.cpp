@@ -618,12 +618,27 @@ std::vector<RecommendDeck> BaseDeckRecommend::recommendHighScoreDeck(
             info.deckCharacters.flip(card.characterId);
         }
     };
+    auto buildDfsScoreUpperBoundContext = [&](const std::vector<CardDetail>& sourceCards) {
+        DfsScoreUpperBoundContext context{};
+        context.musicMeta = musicMeta;
+        context.hasCharacterBounds = true;
+        for (const auto& card : sourceCards) {
+            if (card.characterId < 0 || card.characterId >= int(context.bestPowerByCharacter.size())) {
+                context.hasCharacterBounds = false;
+                continue;
+            }
+            auto index = std::size_t(card.characterId);
+            context.bestPowerByCharacter[index] = std::max(context.bestPowerByCharacter[index], card.power.max);
+            context.bestSkillByCharacter[index] = std::max(context.bestSkillByCharacter[index], double(card.skill.max));
+        }
+        return context;
+    };
     auto runDfsExact = [&](const DeckRecommendConfig& runConfig, const std::vector<CardDetail>& sourceCards, RecommendCalcInfo& info) {
         auto sortedCards = sortCardsByStrength(sourceCards);
         initDfsState(info);
         std::optional<DfsScoreUpperBoundContext> scoreUpperBoundContext = std::nullopt;
         if (runConfig.target == RecommendTarget::Score || runConfig.target == RecommendTarget::Skill) {
-            scoreUpperBoundContext = DfsScoreUpperBoundContext{ .musicMeta = musicMeta };
+            scoreUpperBoundContext = buildDfsScoreUpperBoundContext(sortedCards);
         }
         auto searchStart = std::chrono::high_resolution_clock::now();
         findBestCardsDFS(

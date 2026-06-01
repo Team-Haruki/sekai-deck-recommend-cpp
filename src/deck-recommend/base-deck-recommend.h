@@ -7,6 +7,7 @@
 #include "live-score/live-calculator.h"
 #include "area-item-information/area-item-service.h"
 #include <algorithm>
+#include <array>
 #include <limits>
 #include <optional>
 #include <random>
@@ -130,6 +131,9 @@ struct RecommendEvalCache {
 
 struct DfsScoreUpperBoundContext {
     MusicMeta musicMeta;
+    std::array<int, 32> bestPowerByCharacter{};
+    std::array<double, 32> bestSkillByCharacter{};
+    bool hasCharacterBounds = false;
 };
 
 inline std::vector<int> resolveRequiredCharacters(

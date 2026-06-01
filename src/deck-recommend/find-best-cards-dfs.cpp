@@ -62,6 +62,80 @@ static int calcPowerUpperBound(
     return powerUpperBound;
 }
 
+static int calcPowerUpperBoundFromCharacterBounds(
+    const std::vector<const CardDetail*>& deckCards,
+    const std::bitset<32>& deckCharacters,
+    const DfsScoreUpperBoundContext& scoreUpperBoundContext,
+    int member,
+    int honorBonus
+) {
+    int selectedPowerSum = 0;
+    for (const auto* deckCard : deckCards) {
+        selectedPowerSum += deckCard->power.max;
+    }
+
+    std::vector<int> remainingPowers{};
+    remainingPowers.reserve(scoreUpperBoundContext.bestPowerByCharacter.size());
+    for (std::size_t characterId = 0; characterId < scoreUpperBoundContext.bestPowerByCharacter.size(); ++characterId) {
+        auto power = scoreUpperBoundContext.bestPowerByCharacter[characterId];
+        if (power <= 0 || deckCharacters.test(characterId)) {
+            continue;
+        }
+        remainingPowers.push_back(power);
+    }
+
+    int needed = member - int(deckCards.size());
+    if (needed < 0 || int(remainingPowers.size()) < needed) {
+        return std::numeric_limits<int>::max();
+    }
+
+    std::sort(remainingPowers.begin(), remainingPowers.end(), std::greater<>());
+
+    int powerUpperBound = honorBonus + selectedPowerSum;
+    for (int i = 0; i < needed; ++i) {
+        powerUpperBound += remainingPowers[i];
+    }
+    return powerUpperBound;
+}
+
+static bool buildOptimisticSkillsFromCharacterBounds(
+    const std::vector<const CardDetail*>& deckCards,
+    const std::bitset<32>& deckCharacters,
+    const DfsScoreUpperBoundContext& scoreUpperBoundContext,
+    int member,
+    std::vector<double>& skills
+) {
+    skills.clear();
+    skills.reserve(member);
+    for (const auto* deckCard : deckCards) {
+        skills.push_back(deckCard->skill.max);
+    }
+
+    std::vector<double> remainingSkills{};
+    remainingSkills.reserve(scoreUpperBoundContext.bestSkillByCharacter.size());
+    for (std::size_t characterId = 0; characterId < scoreUpperBoundContext.bestSkillByCharacter.size(); ++characterId) {
+        auto skill = scoreUpperBoundContext.bestSkillByCharacter[characterId];
+        if (skill <= 0 || deckCharacters.test(characterId)) {
+            continue;
+        }
+        remainingSkills.push_back(skill);
+    }
+
+    if (int(skills.size() + remainingSkills.size()) < member) {
+        return false;
+    }
+
+    std::sort(remainingSkills.begin(), remainingSkills.end(), std::greater<>());
+    for (const auto skill : remainingSkills) {
+        if (int(skills.size()) >= member) {
+            break;
+        }
+        skills.push_back(skill);
+    }
+    std::sort(skills.begin(), skills.end(), std::greater<>());
+    return true;
+}
+
 static double calcScoreUpperBound(
     LiveCalculator& liveCalculator,
     const DfsScoreUpperBoundContext& scoreUpperBoundContext,
@@ -74,57 +148,75 @@ static double calcScoreUpperBound(
     bool isChallengeLive,
     int honorBonus
 ) {
-    auto powerUpperBound = calcPowerUpperBound(
-        deckCards,
-        deckCharacters,
-        cardDetails,
-        member,
-        isChallengeLive,
-        honorBonus
-    );
+    auto powerUpperBound = scoreUpperBoundContext.hasCharacterBounds && !isChallengeLive
+        ? calcPowerUpperBoundFromCharacterBounds(
+            deckCards,
+            deckCharacters,
+            scoreUpperBoundContext,
+            member,
+            honorBonus
+        )
+        : calcPowerUpperBound(
+            deckCards,
+            deckCharacters,
+            cardDetails,
+            member,
+            isChallengeLive,
+            honorBonus
+        );
     if (powerUpperBound == std::numeric_limits<int>::max()) {
         return std::numeric_limits<double>::infinity();
     }
 
     std::vector<double> skills{};
-    skills.reserve(member);
-    for (const auto* deckCard : deckCards) {
-        skills.push_back(deckCard->skill.max);
-    }
-
-    std::vector<double> remainingSkills{};
-    remainingSkills.reserve(cardDetails.size());
-    for (const auto& card : cardDetails) {
-        bool duplicated = false;
+    if (scoreUpperBoundContext.hasCharacterBounds && !isChallengeLive) {
+        if (!buildOptimisticSkillsFromCharacterBounds(
+            deckCards,
+            deckCharacters,
+            scoreUpperBoundContext,
+            member,
+            skills
+        )) {
+            return std::numeric_limits<double>::infinity();
+        }
+    } else {
+        skills.reserve(member);
         for (const auto* deckCard : deckCards) {
-            if (deckCard->cardId == card.cardId) {
-                duplicated = true;
+            skills.push_back(deckCard->skill.max);
+        }
+
+        std::vector<double> remainingSkills{};
+        remainingSkills.reserve(cardDetails.size());
+        for (const auto& card : cardDetails) {
+            bool duplicated = false;
+            for (const auto* deckCard : deckCards) {
+                if (deckCard->cardId == card.cardId) {
+                    duplicated = true;
+                    break;
+                }
+            }
+            if (duplicated) {
+                continue;
+            }
+            if (!isChallengeLive && deckCharacters.test(card.characterId)) {
+                continue;
+            }
+
+            remainingSkills.push_back(card.skill.max);
+        }
+
+        std::sort(remainingSkills.begin(), remainingSkills.end(), std::greater<>());
+        for (const auto skill : remainingSkills) {
+            if (int(skills.size()) >= member) {
                 break;
             }
+            skills.push_back(skill);
         }
-        if (duplicated) {
-            continue;
+        if (int(skills.size()) < member) {
+            return std::numeric_limits<double>::infinity();
         }
-        if (!isChallengeLive && deckCharacters.test(card.characterId)) {
-            continue;
-        }
-
-        remainingSkills.push_back(card.skill.max);
+        std::sort(skills.begin(), skills.end(), std::greater<>());
     }
-
-    std::sort(remainingSkills.begin(), remainingSkills.end(), std::greater<>());
-    for (const auto skill : remainingSkills) {
-        if (int(skills.size()) >= member) {
-            break;
-        }
-        skills.push_back(skill);
-    }
-
-    if (int(skills.size()) < member) {
-        return std::numeric_limits<double>::infinity();
-    }
-
-    std::sort(skills.begin(), skills.end(), std::greater<>());
 
     DeckDetail optimisticDeck{};
     optimisticDeck.power.total = powerUpperBound;
@@ -174,44 +266,54 @@ static double calcSkillTargetUpperBound(
     std::optional<int> eventType
 ) {
     std::vector<double> skills{};
-    skills.reserve(member);
-    for (const auto* deckCard : deckCards) {
-        skills.push_back(deckCard->skill.max);
-    }
-
-    std::vector<double> remainingSkills{};
-    remainingSkills.reserve(cardDetails.size());
-    for (const auto& card : cardDetails) {
-        bool duplicated = false;
+    if (scoreUpperBoundContext.hasCharacterBounds && !isChallengeLive) {
+        if (!buildOptimisticSkillsFromCharacterBounds(
+            deckCards,
+            deckCharacters,
+            scoreUpperBoundContext,
+            member,
+            skills
+        )) {
+            return std::numeric_limits<double>::infinity();
+        }
+    } else {
+        skills.reserve(member);
         for (const auto* deckCard : deckCards) {
-            if (deckCard->cardId == card.cardId) {
-                duplicated = true;
+            skills.push_back(deckCard->skill.max);
+        }
+
+        std::vector<double> remainingSkills{};
+        remainingSkills.reserve(cardDetails.size());
+        for (const auto& card : cardDetails) {
+            bool duplicated = false;
+            for (const auto* deckCard : deckCards) {
+                if (deckCard->cardId == card.cardId) {
+                    duplicated = true;
+                    break;
+                }
+            }
+            if (duplicated) {
+                continue;
+            }
+            if (!isChallengeLive && deckCharacters.test(card.characterId)) {
+                continue;
+            }
+
+            remainingSkills.push_back(card.skill.max);
+        }
+
+        std::sort(remainingSkills.begin(), remainingSkills.end(), std::greater<>());
+        for (const auto skill : remainingSkills) {
+            if (int(skills.size()) >= member) {
                 break;
             }
+            skills.push_back(skill);
         }
-        if (duplicated) {
-            continue;
+        if (int(skills.size()) < member) {
+            return std::numeric_limits<double>::infinity();
         }
-        if (!isChallengeLive && deckCharacters.test(card.characterId)) {
-            continue;
-        }
-
-        remainingSkills.push_back(card.skill.max);
+        std::sort(skills.begin(), skills.end(), std::greater<>());
     }
-
-    std::sort(remainingSkills.begin(), remainingSkills.end(), std::greater<>());
-    for (const auto skill : remainingSkills) {
-        if (int(skills.size()) >= member) {
-            break;
-        }
-        skills.push_back(skill);
-    }
-
-    if (int(skills.size()) < member) {
-        return std::numeric_limits<double>::infinity();
-    }
-
-    std::sort(skills.begin(), skills.end(), std::greater<>());
     double optimisticSkill = skills[0];
     for (int i = 1; i < member; ++i) {
         optimisticSkill += skills[i] * 0.2;
@@ -221,14 +323,22 @@ static double calcSkillTargetUpperBound(
         return std::numeric_limits<double>::infinity();
     }
 
-    auto powerUpperBound = calcPowerUpperBound(
-        deckCards,
-        deckCharacters,
-        cardDetails,
-        member,
-        isChallengeLive,
-        honorBonus
-    );
+    auto powerUpperBound = scoreUpperBoundContext.hasCharacterBounds && !isChallengeLive
+        ? calcPowerUpperBoundFromCharacterBounds(
+            deckCards,
+            deckCharacters,
+            scoreUpperBoundContext,
+            member,
+            honorBonus
+        )
+        : calcPowerUpperBound(
+            deckCards,
+            deckCharacters,
+            cardDetails,
+            member,
+            isChallengeLive,
+            honorBonus
+        );
     if (powerUpperBound == std::numeric_limits<int>::max()) {
         return std::numeric_limits<double>::infinity();
     }
