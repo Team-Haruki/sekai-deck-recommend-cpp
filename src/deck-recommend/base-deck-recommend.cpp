@@ -92,27 +92,6 @@ CardHotFields buildCardHotField(const CardDetail& card, const DeckRecommendConfi
         };
 }
 
-std::vector<CardHotFields> buildCardHotFields(
-    const std::vector<CardDetail>& cards,
-    const DeckRecommendConfig& config
-) {
-    std::vector<CardHotFields> hot{};
-    hot.reserve(cards.size());
-    for (const auto& card : cards) {
-        hot.push_back(buildCardHotField(card, config));
-    }
-    return hot;
-}
-
-std::unordered_map<int, CardHotFields> buildCardHotMap(const std::vector<CardHotFields>& hotFields) {
-    std::unordered_map<int, CardHotFields> hotById{};
-    hotById.reserve(hotFields.size());
-    for (const auto& hot : hotFields) {
-        hotById.emplace(hot.cardId, hot);
-    }
-    return hotById;
-}
-
 std::string makeBestPermutationCacheKey(
     uint64_t deckHash,
     int honorBonus,
@@ -537,14 +516,23 @@ std::vector<RecommendDeck> BaseDeckRecommend::recommendHighScoreDeck(
         return buildCardHotField(card, config).scoreHeuristic;
     };
     auto sortCardsByStrength = [&](std::vector<CardDetail> input) {
-        auto hotById = buildCardHotMap(buildCardHotFields(input, config));
-        auto hot = [&](const CardDetail& card) -> const CardHotFields& {
-            return hotById.at(card.cardId);
+        struct SortableCard {
+            CardDetail card;
+            CardHotFields hot;
         };
+        std::vector<SortableCard> sortable{};
+        sortable.reserve(input.size());
+        for (auto& card : input) {
+            auto hot = buildCardHotField(card, config);
+            sortable.push_back(SortableCard{
+                .card = std::move(card),
+                .hot = hot
+            });
+        }
         if (config.target == RecommendTarget::Skill) {
-            std::sort(input.begin(), input.end(), [&](const CardDetail& a, const CardDetail& b) {
-                const auto& ah = hot(a);
-                const auto& bh = hot(b);
+            std::sort(sortable.begin(), sortable.end(), [](const SortableCard& a, const SortableCard& b) {
+                const auto& ah = a.hot;
+                const auto& bh = b.hot;
                 return std::make_tuple(ah.skillMax, ah.skillMin, ah.cardId)
                     > std::make_tuple(bh.skillMax, bh.skillMin, bh.cardId);
             });
@@ -553,21 +541,26 @@ std::vector<RecommendDeck> BaseDeckRecommend::recommendHighScoreDeck(
             || config.target == RecommendTarget::Mysekai
             || config.target == RecommendTarget::Bonus
         ) {
-            std::sort(input.begin(), input.end(), [&](const CardDetail& a, const CardDetail& b) {
-                const auto& ah = hot(a);
-                const auto& bh = hot(b);
+            std::sort(sortable.begin(), sortable.end(), [](const SortableCard& a, const SortableCard& b) {
+                const auto& ah = a.hot;
+                const auto& bh = b.hot;
                 return std::make_tuple(ah.scoreHeuristic, ah.eventBonus, ah.skillMax, ah.powerMax, ah.cardId)
                     > std::make_tuple(bh.scoreHeuristic, bh.eventBonus, bh.skillMax, bh.powerMax, bh.cardId);
             });
         } else {
-            std::sort(input.begin(), input.end(), [&](const CardDetail& a, const CardDetail& b) {
-                const auto& ah = hot(a);
-                const auto& bh = hot(b);
+            std::sort(sortable.begin(), sortable.end(), [](const SortableCard& a, const SortableCard& b) {
+                const auto& ah = a.hot;
+                const auto& bh = b.hot;
                 return std::make_tuple(ah.powerMax, ah.powerMin, ah.cardId)
                     > std::make_tuple(bh.powerMax, bh.powerMin, bh.cardId);
             });
         }
-        return input;
+        std::vector<CardDetail> sorted{};
+        sorted.reserve(sortable.size());
+        for (auto& item : sortable) {
+            sorted.push_back(std::move(item.card));
+        }
+        return sorted;
     };
     auto collectResults = [](const RecommendCalcInfo& info) {
         std::vector<RecommendDeck> decks{};
@@ -649,7 +642,7 @@ std::vector<RecommendDeck> BaseDeckRecommend::recommendHighScoreDeck(
             liveType, runConfig, rng, sortedCards, supportCards, sf,
             info,
             runConfig.limit, Enums::LiveType::isChallenge(liveType), runConfig.member, honorBonus,
-            eventConfig.eventType, eventConfig.eventId, fixedCards, seedDecks, &evalCache
+            eventConfig.eventType, eventConfig.eventId, fixedCards, seedDecks, nullptr
         );
         timings.searchNs += std::chrono::duration_cast<std::chrono::nanoseconds>(
             std::chrono::high_resolution_clock::now() - searchStart
@@ -1145,7 +1138,7 @@ std::vector<RecommendDeck> BaseDeckRecommend::recommendHighScoreDeck(
                 liveType, config, rng, sortedCards, supportCards, sf,
                 calcInfo,
                 config.limit, Enums::LiveType::isChallenge(liveType), config.member, honorBonus,
-                eventConfig.eventType, eventConfig.eventId, fixedCards, &evalCache
+                eventConfig.eventType, eventConfig.eventId, fixedCards, nullptr
             );
             timings.searchNs += std::chrono::duration_cast<std::chrono::nanoseconds>(
                 std::chrono::high_resolution_clock::now() - searchStart
