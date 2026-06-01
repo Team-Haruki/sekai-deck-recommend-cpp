@@ -513,9 +513,49 @@ std::vector<RecommendDeck> BaseDeckRecommend::recommendHighScoreDeck(
         );
     };
     auto scoreHeuristic = [&](const CardDetail& card) {
-        return buildCardHotField(card, config).scoreHeuristic;
+        double powerNorm = std::max(0.0, double(card.power.max) / POWER_MAX);
+        double skillNorm = std::max(0.0, double(card.skill.max) / SKILL_MAX);
+        double eventBonus = cardEventBonus(card);
+        double eventNorm = std::max(0.0, eventBonus / 70.0);
+        double supportNorm = std::max(0.0, card.supportDeckBonus.value_or(0.0) / 50.0);
+        if (config.target == RecommendTarget::Mysekai) {
+            return 0.90 * powerNorm
+                + 1.35 * eventNorm
+                + 0.25 * supportNorm;
+        } else if (config.target == RecommendTarget::Bonus) {
+            return 1.30 * eventNorm
+                + 0.35 * supportNorm
+                + 0.10 * powerNorm
+                + 0.05 * skillNorm;
+        }
+        return 0.55 * powerNorm
+            + 0.75 * skillNorm
+            + 0.30 * eventNorm
+            + 0.15 * supportNorm;
     };
     auto sortCardsByStrength = [&](std::vector<CardDetail> input) {
+        if (config.target == RecommendTarget::Skill) {
+            std::sort(input.begin(), input.end(), [](const CardDetail& a, const CardDetail& b) {
+                return std::make_tuple(a.skill.max, a.skill.min, a.cardId)
+                    > std::make_tuple(b.skill.max, b.skill.min, b.cardId);
+            });
+            return input;
+        }
+        if (config.target == RecommendTarget::Score) {
+            std::sort(input.begin(), input.end(), [&](const CardDetail& a, const CardDetail& b) {
+                return std::make_tuple(scoreHeuristic(a), cardEventBonus(a), a.skill.max, a.power.max, a.cardId)
+                    > std::make_tuple(scoreHeuristic(b), cardEventBonus(b), b.skill.max, b.power.max, b.cardId);
+            });
+            return input;
+        }
+        if (config.target != RecommendTarget::Mysekai && config.target != RecommendTarget::Bonus) {
+            std::sort(input.begin(), input.end(), [](const CardDetail& a, const CardDetail& b) {
+                return std::make_tuple(a.power.max, a.power.min, a.cardId)
+                    > std::make_tuple(b.power.max, b.power.min, b.cardId);
+            });
+            return input;
+        }
+
         struct SortableCard {
             CardDetail card;
             CardHotFields hot;
@@ -529,32 +569,12 @@ std::vector<RecommendDeck> BaseDeckRecommend::recommendHighScoreDeck(
                 .hot = hot
             });
         }
-        if (config.target == RecommendTarget::Skill) {
-            std::sort(sortable.begin(), sortable.end(), [](const SortableCard& a, const SortableCard& b) {
-                const auto& ah = a.hot;
-                const auto& bh = b.hot;
-                return std::make_tuple(ah.skillMax, ah.skillMin, ah.cardId)
-                    > std::make_tuple(bh.skillMax, bh.skillMin, bh.cardId);
-            });
-        } else if (
-            config.target == RecommendTarget::Score
-            || config.target == RecommendTarget::Mysekai
-            || config.target == RecommendTarget::Bonus
-        ) {
-            std::sort(sortable.begin(), sortable.end(), [](const SortableCard& a, const SortableCard& b) {
-                const auto& ah = a.hot;
-                const auto& bh = b.hot;
-                return std::make_tuple(ah.scoreHeuristic, ah.eventBonus, ah.skillMax, ah.powerMax, ah.cardId)
-                    > std::make_tuple(bh.scoreHeuristic, bh.eventBonus, bh.skillMax, bh.powerMax, bh.cardId);
-            });
-        } else {
-            std::sort(sortable.begin(), sortable.end(), [](const SortableCard& a, const SortableCard& b) {
-                const auto& ah = a.hot;
-                const auto& bh = b.hot;
-                return std::make_tuple(ah.powerMax, ah.powerMin, ah.cardId)
-                    > std::make_tuple(bh.powerMax, bh.powerMin, bh.cardId);
-            });
-        }
+        std::sort(sortable.begin(), sortable.end(), [](const SortableCard& a, const SortableCard& b) {
+            const auto& ah = a.hot;
+            const auto& bh = b.hot;
+            return std::make_tuple(ah.scoreHeuristic, ah.eventBonus, ah.skillMax, ah.powerMax, ah.cardId)
+                > std::make_tuple(bh.scoreHeuristic, bh.eventBonus, bh.skillMax, bh.powerMax, bh.cardId);
+        });
         std::vector<CardDetail> sorted{};
         sorted.reserve(sortable.size());
         for (auto& item : sortable) {
