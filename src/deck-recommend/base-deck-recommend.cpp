@@ -3,7 +3,12 @@
 #include "common/timer.h"
 #include <chrono>
 #include <cmath>
+#include <cstdio>
+#include <cstdlib>
+#include <fstream>
+#include <mutex>
 #include <random>
+#include <sstream>
 
 
 uint64_t BaseDeckRecommend::calcDeckHash(const std::vector<const CardDetail*>& deck) {
@@ -1003,6 +1008,191 @@ std::vector<RecommendDeck> BaseDeckRecommend::recommendHighScoreDeck(
         };
         static std::unordered_map<std::string, RlPolicyBucket> rlPolicyBuckets{};
         static std::unordered_map<std::string, RlSeedBucket> rlSeedBuckets{};
+        static std::mutex rlMemoryMutex;
+        static bool rlSeedCacheLoaded = false;
+
+        auto calcStoredSeedHash = [](const std::array<int, 5>& cardIds, int size) {
+            auto ids = cardIds;
+            std::sort(ids.begin() + 1, ids.begin() + size);
+            constexpr uint64_t base = 10007;
+            uint64_t hash = 0;
+            for (int i = 0; i < size; ++i) {
+                hash = hash * base + ids[i];
+            }
+            return hash;
+        };
+        auto normalizeSeedBucket = [](RlSeedBucket& bucket, std::size_t maxSeedCount) {
+            std::sort(bucket.bestSeeds.begin(), bucket.bestSeeds.end(), [](const RlStoredSeed& a, const RlStoredSeed& b) {
+                if (a.targetValue != b.targetValue) {
+                    return a.targetValue > b.targetValue;
+                }
+                return a.hash < b.hash;
+            });
+            std::vector<RlStoredSeed> uniqueSeeds{};
+            uniqueSeeds.reserve(bucket.bestSeeds.size());
+            for (const auto& seed : bucket.bestSeeds) {
+                auto it = std::find_if(uniqueSeeds.begin(), uniqueSeeds.end(), [&](const RlStoredSeed& existing) {
+                    return existing.hash == seed.hash;
+                });
+                if (it == uniqueSeeds.end()) {
+                    uniqueSeeds.push_back(seed);
+                } else if (seed.targetValue > it->targetValue) {
+                    *it = seed;
+                }
+            }
+            bucket.bestSeeds = std::move(uniqueSeeds);
+            if (bucket.bestSeeds.size() > maxSeedCount) {
+                bucket.bestSeeds.resize(maxSeedCount);
+            }
+            bucket.bestTargetValue = -1e18;
+            for (const auto& seed : bucket.bestSeeds) {
+                bucket.bestTargetValue = std::max(bucket.bestTargetValue, seed.targetValue);
+            }
+        };
+        auto mergeSeedBucket = [&](RlSeedBucket& target, const RlSeedBucket& source, std::size_t maxSeedCount) {
+            for (const auto& seed : source.bestSeeds) {
+                if (seed.size <= 0 || seed.targetValue <= -1e17) {
+                    continue;
+                }
+                auto it = std::find_if(target.bestSeeds.begin(), target.bestSeeds.end(), [&](const RlStoredSeed& existing) {
+                    return existing.hash == seed.hash;
+                });
+                if (it == target.bestSeeds.end()) {
+                    target.bestSeeds.push_back(seed);
+                } else if (seed.targetValue > it->targetValue) {
+                    *it = seed;
+                }
+            }
+            target.bestTargetValue = std::max(target.bestTargetValue, source.bestTargetValue);
+            normalizeSeedBucket(target, maxSeedCount);
+        };
+        auto rlSeedCachePath = []() {
+            const char* disabled = std::getenv("DECK_RL_SEED_CACHE_DISABLE");
+            if (disabled && std::string(disabled) == "1") {
+                return std::string();
+            }
+            const char* explicitPath = std::getenv("DECK_RL_SEED_CACHE_FILE");
+            if (explicitPath && explicitPath[0] != '\0') {
+                return std::string(explicitPath);
+            }
+            const char* dataDir = std::getenv("DECK_DATA_DIR");
+            if (dataDir && dataDir[0] != '\0') {
+                return std::string(dataDir) + "/rl_seed_cache.tsv";
+            }
+            return std::string();
+        };
+        auto loadPersistentSeedBuckets = [&](const std::string& path) {
+            if (path.empty()) {
+                return;
+            }
+            std::ifstream in(path);
+            if (!in) {
+                return;
+            }
+
+            std::string line;
+            while (std::getline(in, line)) {
+                if (line.empty() || line[0] == '#') {
+                    continue;
+                }
+                try {
+                    std::stringstream ss(line);
+                    std::string version;
+                    std::string key;
+                    std::string bucketBestValue;
+                    std::string seedTargetValue;
+                    std::string sizeValue;
+                    std::string cardsValue;
+                    if (!std::getline(ss, version, '\t')
+                        || !std::getline(ss, key, '\t')
+                        || !std::getline(ss, bucketBestValue, '\t')
+                        || !std::getline(ss, seedTargetValue, '\t')
+                        || !std::getline(ss, sizeValue, '\t')
+                        || !std::getline(ss, cardsValue, '\t')) {
+                        continue;
+                    }
+                    if (version != "v1" || key.find(":transfer_seeds") == std::string::npos) {
+                        continue;
+                    }
+
+                    RlStoredSeed seed{};
+                    seed.targetValue = std::stod(seedTargetValue);
+                    seed.size = std::stoi(sizeValue);
+                    if (seed.size <= 0 || seed.size > int(seed.cardIds.size())) {
+                        continue;
+                    }
+
+                    std::stringstream cardStream(cardsValue);
+                    std::string cardIdValue;
+                    int index = 0;
+                    while (std::getline(cardStream, cardIdValue, ',') && index < seed.size) {
+                        seed.cardIds[index++] = std::stoi(cardIdValue);
+                    }
+                    if (index != seed.size) {
+                        continue;
+                    }
+                    seed.hash = calcStoredSeedHash(seed.cardIds, seed.size);
+
+                    auto& bucket = rlSeedBuckets[key];
+                    bucket.bestTargetValue = std::max(bucket.bestTargetValue, std::stod(bucketBestValue));
+                    bucket.bestSeeds.push_back(seed);
+                } catch (...) {
+                    continue;
+                }
+            }
+
+            for (auto& [key, bucket] : rlSeedBuckets) {
+                if (key.find(":transfer_seeds") != std::string::npos) {
+                    normalizeSeedBucket(bucket, 32);
+                }
+            }
+        };
+        auto savePersistentSeedBuckets = [&](const std::string& path) {
+            if (path.empty()) {
+                return;
+            }
+
+            std::string tmpPath = path + ".tmp";
+            std::ofstream out(tmpPath, std::ios::trunc);
+            if (!out) {
+                return;
+            }
+            out << "# deck-service RL transfer seed cache v1\n";
+
+            std::size_t bucketCount = 0;
+            constexpr std::size_t maxPersistentBuckets = 512;
+            for (const auto& [key, bucket] : rlSeedBuckets) {
+                if (key.find(":transfer_seeds") == std::string::npos || bucket.bestSeeds.empty()) {
+                    continue;
+                }
+                if (bucketCount++ >= maxPersistentBuckets) {
+                    break;
+                }
+                for (const auto& seed : bucket.bestSeeds) {
+                    if (seed.size <= 0 || seed.targetValue <= -1e17) {
+                        continue;
+                    }
+                    out << "v1\t" << key << '\t'
+                        << bucket.bestTargetValue << '\t'
+                        << seed.targetValue << '\t'
+                        << seed.size << '\t';
+                    for (int i = 0; i < seed.size; ++i) {
+                        if (i) {
+                            out << ',';
+                        }
+                        out << seed.cardIds[i];
+                    }
+                    out << '\n';
+                }
+            }
+            out.close();
+            if (!out) {
+                std::remove(tmpPath.c_str());
+                return;
+            }
+            std::remove(path.c_str());
+            std::rename(tmpPath.c_str(), path.c_str());
+        };
 
         auto fullSorted = sortCardsByStrength(cards);
         auto remainingRequiredCharacters = resolveRemainingFixedCharacters(
@@ -1276,6 +1466,17 @@ std::vector<RecommendDeck> BaseDeckRecommend::recommendHighScoreDeck(
             cardFingerprint = cardFingerprint * fingerprintBase + fullSorted[i].cardId;
         }
         cardFingerprint = cardFingerprint * fingerprintBase + cards.size();
+        std::vector<int> cardPoolIds{};
+        cardPoolIds.reserve(cards.size());
+        for (const auto& card : cards) {
+            cardPoolIds.push_back(card.cardId);
+        }
+        std::sort(cardPoolIds.begin(), cardPoolIds.end());
+        uint64_t cardPoolFingerprint = 0;
+        for (const auto& cardId : cardPoolIds) {
+            cardPoolFingerprint = cardPoolFingerprint * fingerprintBase + cardId;
+        }
+        cardPoolFingerprint = cardPoolFingerprint * fingerprintBase + cards.size();
 
         auto policyKey = std::to_string(int(this->dataProvider.region))
             + ":" + std::to_string(eventConfig.eventType)
@@ -1288,6 +1489,79 @@ std::vector<RecommendDeck> BaseDeckRecommend::recommendHighScoreDeck(
         if (leaderCharacterId.has_value()) {
             policyKey += ":leader=" + std::to_string(leaderCharacterId.value());
         }
+        auto sortUnique = [](std::vector<int>& values) {
+            std::sort(values.begin(), values.end());
+            values.erase(std::unique(values.begin(), values.end()), values.end());
+        };
+        std::vector<int> eventBonusAttrs{};
+        std::vector<int> eventBonusUnits{};
+        for (const auto& bonus : this->dataProvider.masterData->eventDeckBonuses) {
+            if (bonus.eventId != eventConfig.eventId) {
+                continue;
+            }
+            if (bonus.cardAttr != Enums::Attr::null) {
+                eventBonusAttrs.push_back(bonus.cardAttr);
+            }
+            if (bonus.gameCharacterUnitId != 0) {
+                auto unitIt = std::find_if(
+                    this->dataProvider.masterData->gameCharacterUnits.begin(),
+                    this->dataProvider.masterData->gameCharacterUnits.end(),
+                    [&](const GameCharacterUnit& unit) {
+                        return unit.id == bonus.gameCharacterUnitId;
+                    }
+                );
+                if (unitIt != this->dataProvider.masterData->gameCharacterUnits.end()) {
+                    eventBonusUnits.push_back(unitIt->unit);
+                }
+            }
+        }
+        if (config.customBonusAttr.has_value()) {
+            eventBonusAttrs.push_back(config.customBonusAttr.value());
+        }
+        if (eventConfig.eventUnit != 0) {
+            eventBonusUnits.push_back(eventConfig.eventUnit);
+        }
+        if (eventConfig.worldBloomSupportUnit != 0) {
+            eventBonusUnits.push_back(eventConfig.worldBloomSupportUnit);
+        }
+        sortUnique(eventBonusAttrs);
+        sortUnique(eventBonusUnits);
+
+        auto transferSeedKey = policyKey;
+        appendConstraintKey(transferSeedKey, "bonus_attrs", eventBonusAttrs, false);
+        appendConstraintKey(transferSeedKey, "bonus_units", eventBonusUnits, false);
+        appendScalarKey(transferSeedKey, "bonus_count_limit", std::to_string(eventConfig.cardBonusCountLimit));
+        appendScalarKey(
+            transferSeedKey,
+            "skill_limit",
+            eventConfig.skillScoreUpLimit.has_value()
+                ? std::to_string(std::llround(eventConfig.skillScoreUpLimit.value() * 1000.0))
+                : "-"
+        );
+        appendScalarKey(
+            transferSeedKey,
+            "fixture_limit",
+            eventConfig.mysekaiFixtureLimit.has_value()
+                ? std::to_string(eventConfig.mysekaiFixtureLimit.value())
+                : "-"
+        );
+        appendScalarKey(transferSeedKey, "filter_other_unit", config.filterOtherUnit ? "1" : "0");
+        if (config.customBonusCharacterIds.has_value()) {
+            appendConstraintKey(transferSeedKey, "custom_bonus_chars", config.customBonusCharacterIds.value(), true);
+        } else {
+            appendConstraintKey(transferSeedKey, "custom_bonus_chars", {}, true);
+        }
+        if (config.customBonusSupportUnits.has_value()) {
+            std::vector<int> customSupportUnits{};
+            for (const auto& [characterId, unit] : config.customBonusSupportUnits.value()) {
+                customSupportUnits.push_back(characterId * 100 + unit);
+            }
+            appendConstraintKey(transferSeedKey, "custom_support_units", customSupportUnits, true);
+        } else {
+            appendConstraintKey(transferSeedKey, "custom_support_units", {}, true);
+        }
+        appendScalarKey(transferSeedKey, "card_pool", std::to_string(cardPoolFingerprint));
+        transferSeedKey += ":transfer_seeds";
         auto rlStateKey = policyKey;
         appendScalarKey(rlStateKey, "event_id", std::to_string(eventConfig.eventId));
         appendScalarKey(rlStateKey, "event_chara", std::to_string(eventConfig.specialCharacterId));
@@ -1305,15 +1579,44 @@ std::vector<RecommendDeck> BaseDeckRecommend::recommendHighScoreDeck(
         appendScalarKey(rlStateKey, "score_up_lb", std::to_string(std::llround(config.multiScoreUpLowerBound * 1000.0)));
         appendScalarKey(rlStateKey, "fingerprint", std::to_string(cardFingerprint));
 
-        auto& bucket = rlPolicyBuckets[rlStateKey];
-        if (config.target == RecommendTarget::Mysekai && bucket.episodes == 0) {
-            bucket.weights = {
-                0.10, 1.20, 1.45, 0.15, 0.10,
-                0.90, 0.35, 0.20, -0.05, 1.10,
-                1.55, 0.25, 1.50
-            };
+        const auto persistentSeedCachePath = rlSeedCachePath();
+        RlPolicyBucket bucket{};
+        RlSeedBucket seedBucket{};
+        RlSeedBucket transferSeedBucketForRequest{};
+        {
+            std::lock_guard<std::mutex> lock(rlMemoryMutex);
+            if (!rlSeedCacheLoaded) {
+                loadPersistentSeedBuckets(persistentSeedCachePath);
+                rlSeedCacheLoaded = true;
+            }
+
+            auto policyIt = rlPolicyBuckets.find(rlStateKey);
+            if (policyIt != rlPolicyBuckets.end()) {
+                bucket = policyIt->second;
+            }
+            if (config.target == RecommendTarget::Mysekai && bucket.episodes == 0) {
+                bucket.weights = {
+                    0.10, 1.20, 1.45, 0.15, 0.10,
+                    0.90, 0.35, 0.20, -0.05, 1.10,
+                    1.55, 0.25, 1.50
+                };
+            }
+
+            auto seedIt = rlSeedBuckets.find(rlStateKey);
+            if (seedIt != rlSeedBuckets.end()) {
+                seedBucket = seedIt->second;
+            }
+            auto transferSeedIt = rlSeedBuckets.find(transferSeedKey);
+            if (seedBucket.bestSeeds.empty()
+                && transferSeedIt != rlSeedBuckets.end()
+                && !transferSeedIt->second.bestSeeds.empty()) {
+                transferSeedBucketForRequest = transferSeedIt->second;
+                transferSeedBucketForRequest.bestTargetValue = -1e18;
+                for (auto& seed : transferSeedBucketForRequest.bestSeeds) {
+                    seed.targetValue = -1e18;
+                }
+            }
         }
-        auto& seedBucket = rlSeedBuckets[rlStateKey];
         bool coldStartRequest = (bucket.episodes == 0 && seedBucket.bestSeeds.empty());
 
         auto rlCards = buildRlCandidateCards(fullSorted);
@@ -1387,25 +1690,33 @@ std::vector<RecommendDeck> BaseDeckRecommend::recommendHighScoreDeck(
             rlMaxPower = std::max(rlMaxPower, double(card.power.max));
             rlMaxSkill = std::max(rlMaxSkill, double(card.skill.max));
         }
-
-        auto calcStoredSeedHash = [&](const std::array<int, 5>& cardIds, int size) {
-            auto ids = cardIds;
-            std::sort(ids.begin() + 1, ids.begin() + size);
-            constexpr uint64_t base = 10007;
-            uint64_t hash = 0;
-            for (int i = 0; i < size; ++i) {
-                hash = hash * base + ids[i];
-            }
-            return hash;
+        struct RlCardFeatureCache {
+            double eventNorm = 0.0;
+            double powerNorm = 0.0;
+            double skillNorm = 0.0;
+            double supportNorm = 0.0;
+            double scoreHeuristicValue = 0.0;
         };
-        auto loadStoredSeedDecks = [&](const std::vector<CardDetail>& sourceCards) {
+        std::unordered_map<int, RlCardFeatureCache> rlCardFeatures{};
+        rlCardFeatures.reserve(rlCards.size());
+        for (const auto& card : rlCards) {
+            rlCardFeatures.emplace(card.cardId, RlCardFeatureCache{
+                .eventNorm = cardEventBonus(card) / 70.0,
+                .powerNorm = double(card.power.max) / rlMaxPower,
+                .skillNorm = double(card.skill.max) / rlMaxSkill,
+                .supportNorm = card.supportDeckBonus.value_or(0.0) / 50.0,
+                .scoreHeuristicValue = scoreHeuristic(card),
+            });
+        }
+
+        auto loadStoredSeedDecks = [&](const RlSeedBucket& sourceBucket, const std::vector<CardDetail>& sourceCards) {
             std::unordered_map<int, const CardDetail*> cardById{};
             for (const auto& card : sourceCards) {
                 cardById.emplace(card.cardId, &card);
             }
 
             std::vector<std::vector<const CardDetail*>> seeds{};
-            for (const auto& stored : seedBucket.bestSeeds) {
+            for (const auto& stored : sourceBucket.bestSeeds) {
                 std::vector<const CardDetail*> deck{};
                 deck.reserve(stored.size);
                 bool valid = true;
@@ -1423,7 +1734,7 @@ std::vector<RecommendDeck> BaseDeckRecommend::recommendHighScoreDeck(
             }
             return seeds;
         };
-        auto rememberStoredSeeds = [&](const RecommendCalcInfo& info, int maxSeedCount) {
+        auto rememberStoredSeeds = [&](RlSeedBucket& targetBucket, const RecommendCalcInfo& info, int maxSeedCount) {
             std::unordered_map<int, const CardDetail*> cardById{};
             for (const auto& card : fullSorted) {
                 cardById.emplace(card.cardId, &card);
@@ -1454,27 +1765,29 @@ std::vector<RecommendDeck> BaseDeckRecommend::recommendHighScoreDeck(
                 if (!deckMatchesFixedConstraints(seedDeck)) {
                     continue;
                 }
+                targetBucket.bestTargetValue = std::max(targetBucket.bestTargetValue, seed.targetValue);
 
-                auto it = std::find_if(seedBucket.bestSeeds.begin(), seedBucket.bestSeeds.end(), [&](const RlStoredSeed& existing) {
+                auto it = std::find_if(targetBucket.bestSeeds.begin(), targetBucket.bestSeeds.end(), [&](const RlStoredSeed& existing) {
                     return existing.hash == seed.hash;
                 });
-                if (it == seedBucket.bestSeeds.end()) {
-                    seedBucket.bestSeeds.push_back(seed);
+                if (it == targetBucket.bestSeeds.end()) {
+                    targetBucket.bestSeeds.push_back(seed);
                 } else if (seed.targetValue > it->targetValue) {
                     *it = seed;
                 }
             }
-            std::sort(seedBucket.bestSeeds.begin(), seedBucket.bestSeeds.end(), [](const RlStoredSeed& a, const RlStoredSeed& b) {
+            std::sort(targetBucket.bestSeeds.begin(), targetBucket.bestSeeds.end(), [](const RlStoredSeed& a, const RlStoredSeed& b) {
                 if (a.targetValue != b.targetValue) {
                     return a.targetValue > b.targetValue;
                 }
                 return a.hash < b.hash;
             });
-            if (seedBucket.bestSeeds.size() > 16) {
-                seedBucket.bestSeeds.resize(16);
+            if (targetBucket.bestSeeds.size() > std::size_t(maxSeedCount)) {
+                targetBucket.bestSeeds.resize(maxSeedCount);
             }
         };
-        auto rememberedSeedDecks = loadStoredSeedDecks(fullSorted);
+        auto rememberedSeedDecks = loadStoredSeedDecks(seedBucket, fullSorted);
+        auto transferSeedDecks = loadStoredSeedDecks(transferSeedBucketForRequest, fullSorted);
         auto monoAttrSeedDecks = collectChallengeMonoAttrSeedDecks(config, &totalInfo, std::max(config.limit, 2));
         if (!rememberedSeedDecks.empty()) {
             int replayLimit = std::min(
@@ -1487,10 +1800,25 @@ std::vector<RecommendDeck> BaseDeckRecommend::recommendHighScoreDeck(
                 evaluateDeckByCards(config, rememberedSeedDecks[i], policyInfo);
             }
         }
+        if (!transferSeedDecks.empty()) {
+            int replayLimit = std::min(int(transferSeedDecks.size()), std::max(config.limit, 4));
+            for (int i = 0; i < replayLimit && !policyInfo.isTimeout(); ++i) {
+                evaluateDeckByCards(config, transferSeedDecks[i], policyInfo);
+            }
+        }
 
         auto calcActionFeatures = [&](const std::vector<const CardDetail*>& deck, const CardDetail& candidate) {
             std::array<double, RL_FEATURE_DIM> features{};
-            double eventNorm = cardEventBonus(candidate) / 70.0;
+            const auto featureIt = rlCardFeatures.find(candidate.cardId);
+            const auto cached = featureIt != rlCardFeatures.end()
+                ? featureIt->second
+                : RlCardFeatureCache{
+                    .eventNorm = cardEventBonus(candidate) / 70.0,
+                    .powerNorm = double(candidate.power.max) / rlMaxPower,
+                    .skillNorm = double(candidate.skill.max) / rlMaxSkill,
+                    .supportNorm = candidate.supportDeckBonus.value_or(0.0) / 50.0,
+                    .scoreHeuristicValue = scoreHeuristic(candidate),
+                };
             int nextPos = int(deck.size());
             int sameAttrCount = 0;
             int sharedUnitCount = 0;
@@ -1516,8 +1844,8 @@ std::vector<RecommendDeck> BaseDeckRecommend::recommendHighScoreDeck(
                 && remainingRequiredCharacters.size() > std::size_t(fixedCharacterIndex);
 
             features[0] = 1.0;
-            features[1] = candidate.power.max / rlMaxPower;
-            features[2] = config.target == RecommendTarget::Mysekai ? eventNorm : candidate.skill.max / rlMaxSkill;
+            features[1] = cached.powerNorm;
+            features[2] = config.target == RecommendTarget::Mysekai ? cached.eventNorm : cached.skillNorm;
             features[3] = leader ? double(candidate.attr == leader->attr) : 0.0;
             features[4] = leader ? double(sharesAnyUnit(*leader, candidate)) : 0.0;
             features[5] = requiredCharacter
@@ -1527,11 +1855,11 @@ std::vector<RecommendDeck> BaseDeckRecommend::recommendHighScoreDeck(
             features[7] = double(sharedUnitCount + 1) / double(std::max(1, config.member));
             features[8] = double(nextPos) / double(std::max(1, config.member));
             features[9] = nextPos == int(fixedCards.size())
-                ? (config.target == RecommendTarget::Mysekai ? scoreHeuristic(candidate) : candidate.skill.max / rlMaxSkill)
+                ? (config.target == RecommendTarget::Mysekai ? cached.scoreHeuristicValue : cached.skillNorm)
                 : 0.0;
-            features[10] = eventNorm;
-            features[11] = candidate.supportDeckBonus.value_or(0.0) / 50.0;
-            features[12] = scoreHeuristic(candidate);
+            features[10] = cached.eventNorm;
+            features[11] = cached.supportNorm;
+            features[12] = cached.scoreHeuristicValue;
             return features;
         };
 
@@ -1718,7 +2046,7 @@ std::vector<RecommendDeck> BaseDeckRecommend::recommendHighScoreDeck(
             runPolicyEpisode(false, false);
         }
 
-        rememberStoredSeeds(policyInfo, std::max(config.limit * 3, 8));
+        rememberStoredSeeds(seedBucket, policyInfo, std::max(config.limit * 3, 8));
 
         mergeCalcInfo(totalInfo, policyInfo);
 
@@ -1747,6 +2075,9 @@ std::vector<RecommendDeck> BaseDeckRecommend::recommendHighScoreDeck(
         for (const auto& seedDeck : rememberedSeedDecks) {
             tryAddSeedDeck(seedDeck);
         }
+        for (const auto& seedDeck : transferSeedDecks) {
+            tryAddSeedDeck(seedDeck);
+        }
 
         if (!mergedSeedDecks.empty()) {
             auto refineCards = config.target == RecommendTarget::Score
@@ -1765,12 +2096,12 @@ std::vector<RecommendDeck> BaseDeckRecommend::recommendHighScoreDeck(
             auto refineInfo = makeCalcInfo(refineBudgetMs);
             runGaSearch(gaConfig, refineCards, refineInfo, &mergedSeedDecks);
             mergeCalcInfo(totalInfo, refineInfo);
-            rememberStoredSeeds(totalInfo, std::max(config.limit * 3, 8));
+            rememberStoredSeeds(seedBucket, totalInfo, std::max(config.limit * 3, 8));
         }
 
         if (coldStartRequest && config.target == RecommendTarget::Score && bucket.episodes >= 48) {
             for (int warmRound = 0; warmRound < 2; ++warmRound) {
-                auto warmedSeedDecks = loadStoredSeedDecks(fullSorted);
+                auto warmedSeedDecks = loadStoredSeedDecks(seedBucket, fullSorted);
                 if (warmedSeedDecks.empty()) {
                     break;
                 }
@@ -1798,6 +2129,9 @@ std::vector<RecommendDeck> BaseDeckRecommend::recommendHighScoreDeck(
                 for (const auto& seedDeck : warmedSeedDecks) {
                     tryAddWarmedSeedDeck(seedDeck);
                 }
+                for (const auto& seedDeck : transferSeedDecks) {
+                    tryAddWarmedSeedDeck(seedDeck);
+                }
 
                 int warmReplayBudgetMs = std::min(config.timeout_ms, resolveBudgetMs(config.timeout_ms, 0.06, 35, 140));
                 auto warmInfo = makeCalcInfo(warmReplayBudgetMs);
@@ -1822,8 +2156,21 @@ std::vector<RecommendDeck> BaseDeckRecommend::recommendHighScoreDeck(
                 }
 
                 mergeCalcInfo(totalInfo, warmInfo);
-                rememberStoredSeeds(totalInfo, std::max(config.limit * 3, 8));
+                rememberStoredSeeds(seedBucket, totalInfo, std::max(config.limit * 3, 8));
             }
+        }
+
+        RlSeedBucket transferSeedBucket{};
+        rememberStoredSeeds(transferSeedBucket, totalInfo, std::max(config.limit * 8, 32));
+        {
+            std::lock_guard<std::mutex> lock(rlMemoryMutex);
+            auto& storedPolicyBucket = rlPolicyBuckets[rlStateKey];
+            if (bucket.episodes >= storedPolicyBucket.episodes) {
+                storedPolicyBucket = bucket;
+            }
+            mergeSeedBucket(rlSeedBuckets[rlStateKey], seedBucket, 16);
+            mergeSeedBucket(rlSeedBuckets[transferSeedKey], transferSeedBucket, 32);
+            savePersistentSeedBuckets(persistentSeedCachePath);
         }
 
         auto result = collectResults(totalInfo);
