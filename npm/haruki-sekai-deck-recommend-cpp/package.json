@@ -1,6 +1,6 @@
 {
   "name": "haruki-sekai-deck-recommend-cpp",
-  "version": "0.2.31",
+  "version": "0.2.32",
   "description": "WebAssembly bindings for the Project Sekai deck recommendation engine.",
   "type": "module",
   "license": "LGPL-2.0-only",
