@@ -1417,7 +1417,9 @@ std::vector<RecommendDeck> BaseDeckRecommend::recommendHighScoreDeck(
             std::array<int, 32> perCharacterCount{};
             int perCharacterKeep = Enums::LiveType::isChallenge(liveType)
                 ? std::max(config.member + 1, 4)
-                : (config.target == RecommendTarget::Score ? 6 : 4);
+                : (config.target == RecommendTarget::Score
+                    ? (config.filterOtherUnit ? 12 : 8)
+                    : 4);
             for (const auto& card : sortedCards) {
                 auto& count = perCharacterCount[card.characterId];
                 if (count < perCharacterKeep) {
@@ -1428,7 +1430,10 @@ std::vector<RecommendDeck> BaseDeckRecommend::recommendHighScoreDeck(
 
             int globalKeep = std::min(
                 int(sortedCards.size()),
-                std::max(config.member * (config.target == RecommendTarget::Score ? 28 : 20), config.target == RecommendTarget::Score ? 140 : 96)
+                std::max(
+                    config.member * (config.target == RecommendTarget::Score ? (config.filterOtherUnit ? 40 : 32) : 20),
+                    config.target == RecommendTarget::Score ? (config.filterOtherUnit ? 220 : 170) : 96
+                )
             );
             for (int i = 0; i < globalKeep; ++i) {
                 tryAdd(sortedCards[i]);
@@ -1474,7 +1479,10 @@ std::vector<RecommendDeck> BaseDeckRecommend::recommendHighScoreDeck(
                 });
                 int skillKeep = std::min(
                     int(skillSorted.size()),
-                    std::max(config.member * (config.target == RecommendTarget::Score ? 16 : 12), config.target == RecommendTarget::Score ? 72 : 48)
+                    std::max(
+                        config.member * (config.target == RecommendTarget::Score ? (config.filterOtherUnit ? 24 : 18) : 12),
+                        config.target == RecommendTarget::Score ? (config.filterOtherUnit ? 120 : 84) : 48
+                    )
                 );
                 for (int i = 0; i < skillKeep; ++i) {
                     tryAdd(skillSorted[i]);
@@ -1497,7 +1505,10 @@ std::vector<RecommendDeck> BaseDeckRecommend::recommendHighScoreDeck(
                             b.cardId
                         );
                 });
-                int eventKeep = std::min(int(eventSorted.size()), std::max(config.member * 14, 56));
+                int eventKeep = std::min(
+                    int(eventSorted.size()),
+                    std::max(config.member * (config.filterOtherUnit ? 24 : 16), config.filterOtherUnit ? 120 : 64)
+                );
                 for (int i = 0; i < eventKeep; ++i) {
                     tryAdd(eventSorted[i]);
                 }
@@ -1517,7 +1528,10 @@ std::vector<RecommendDeck> BaseDeckRecommend::recommendHighScoreDeck(
                             b.cardId
                         );
                 });
-                int supportKeep = std::min(int(supportSorted.size()), std::max(config.member * 10, 40));
+                int supportKeep = std::min(
+                    int(supportSorted.size()),
+                    std::max(config.member * (config.filterOtherUnit ? 18 : 12), config.filterOtherUnit ? 90 : 48)
+                );
                 for (int i = 0; i < supportKeep; ++i) {
                     tryAdd(supportSorted[i]);
                 }
@@ -2602,6 +2616,196 @@ std::vector<RecommendDeck> BaseDeckRecommend::recommendHighScoreDeck(
             }
         };
 
+        auto runLocalRefine = [&](RecommendCalcInfo& baseInfo) {
+            if (config.target != RecommendTarget::Score || baseInfo.isTimeout()) {
+                return;
+            }
+
+            int refineBudgetMs = std::min(
+                config.timeout_ms,
+                resolveBudgetMs(
+                    config.timeout_ms,
+                    config.filterOtherUnit ? 0.10 : 0.09,
+                    config.filterOtherUnit ? 55 : 45,
+                    config.filterOtherUnit ? 190 : 180
+                )
+            );
+            auto refineInfo = makeCalcInfo(refineBudgetMs);
+
+            std::unordered_map<int, const CardDetail*> cardById{};
+            for (const auto& card : fullSorted) {
+                cardById.emplace(card.cardId, &card);
+            }
+
+            std::vector<const CardDetail*> refineCards{};
+            std::unordered_set<int> refineCardIds{};
+            auto addRefineCard = [&](const CardDetail& card) {
+                if (refineCardIds.insert(card.cardId).second) {
+                    refineCards.push_back(&card);
+                }
+            };
+            for (const auto& card : rlCards) {
+                auto it = cardById.find(card.cardId);
+                if (it != cardById.end()) {
+                    addRefineCard(*it->second);
+                }
+            }
+            for (const auto& card : fullSorted) {
+                if (int(refineCards.size()) >= (config.filterOtherUnit ? 190 : 150)) {
+                    break;
+                }
+                addRefineCard(card);
+            }
+
+            std::sort(refineCards.begin(), refineCards.end(), [&](const CardDetail* a, const CardDetail* b) {
+                auto aMemoryScore = memoryCardScores.count(a->cardId) ? memoryCardScores[a->cardId] : 0.0;
+                auto bMemoryScore = memoryCardScores.count(b->cardId) ? memoryCardScores[b->cardId] : 0.0;
+                auto aScore = aMemoryScore + 0.35 * scoreHeuristic(*a) + 0.08 * cardEventBonus(*a);
+                auto bScore = bMemoryScore + 0.35 * scoreHeuristic(*b) + 0.08 * cardEventBonus(*b);
+                if (std::abs(aScore - bScore) > 1e-9) {
+                    return aScore > bScore;
+                }
+                return std::make_tuple(a->skill.max, a->power.max, a->cardId)
+                    > std::make_tuple(b->skill.max, b->power.max, b->cardId);
+            });
+            int maxRefineCards = std::min(int(refineCards.size()), config.filterOtherUnit ? 120 : 100);
+            refineCards.resize(maxRefineCards);
+
+            int refineLimit = std::min(config.limit, 6);
+            auto seedDecks = collectSeedDecks(baseInfo, fullSorted, std::max(refineLimit * 4, 16));
+            auto storedDecks = loadStoredSeedDecks(seedBucket, fullSorted);
+            auto transferDecks = loadStoredSeedDecks(transferSeedBucketForRequest, fullSorted);
+            auto rankDecks = buildRankSeedDecks(cardRankBucketForRequest, fullSorted, std::max(config.limit * 2, 8));
+            auto appendSeeds = [&](const std::vector<std::vector<const CardDetail*>>& decks, int maxCount) {
+                int added = 0;
+                for (const auto& deck : decks) {
+                    if (added++ >= maxCount) {
+                        break;
+                    }
+                    seedDecks.push_back(deck);
+                }
+            };
+            appendSeeds(storedDecks, std::max(refineLimit * 2, 8));
+            appendSeeds(transferDecks, std::max(refineLimit * 2, 8));
+            appendSeeds(rankDecks, std::max(refineLimit * 2, 8));
+
+            std::unordered_set<uint64_t> visitedDecks{};
+            auto tryEvaluate = [&](const std::vector<const CardDetail*>& deck) {
+                if (refineInfo.isTimeout() || !deckMatchesFixedConstraints(deck)) {
+                    return;
+                }
+                auto normalized = normalizeDeckForLeader(deck);
+                if (normalized.empty() || !deckMatchesFixedConstraints(normalized)) {
+                    return;
+                }
+                auto hash = this->calcDeckHash(normalized);
+                if (!visitedDecks.insert(hash).second) {
+                    return;
+                }
+                evaluateDeckByCards(config, normalized, refineInfo);
+            };
+
+            std::unordered_set<int> fixedCardIdSet{};
+            for (const auto& card : fixedCards) {
+                fixedCardIdSet.insert(card.cardId);
+            }
+
+            int seedLimit = std::min(int(seedDecks.size()), std::max(refineLimit * 4, config.filterOtherUnit ? 18 : 16));
+            for (int seedIndex = 0; seedIndex < seedLimit && !refineInfo.isTimeout(); ++seedIndex) {
+                auto deck = normalizeDeckForLeader(seedDecks[seedIndex]);
+                if (deck.empty() || !deckMatchesFixedConstraints(deck)) {
+                    continue;
+                }
+                tryEvaluate(deck);
+
+                std::unordered_set<int> baseCardIds{};
+                std::unordered_set<int> baseCharacterIds{};
+                for (const auto* card : deck) {
+                    baseCardIds.insert(card->cardId);
+                    baseCharacterIds.insert(card->characterId);
+                }
+
+                for (int pos = 0; pos < int(deck.size()) && !refineInfo.isTimeout(); ++pos) {
+                    if (fixedCardIdSet.count(deck[pos]->cardId)) {
+                        continue;
+                    }
+                    int tried = 0;
+                    for (const auto* replacement : refineCards) {
+                        if (refineInfo.isTimeout()) {
+                            break;
+                        }
+                        if (++tried > (config.filterOtherUnit ? 52 : 44)) {
+                            break;
+                        }
+                        if (baseCardIds.count(replacement->cardId)) {
+                            continue;
+                        }
+                        if (!Enums::LiveType::isChallenge(liveType)
+                            && replacement->characterId != deck[pos]->characterId
+                            && baseCharacterIds.count(replacement->characterId)) {
+                            continue;
+                        }
+                        auto candidate = deck;
+                        candidate[pos] = replacement;
+                        tryEvaluate(candidate);
+                    }
+                }
+
+                int pairWidth = config.filterOtherUnit ? 18 : 14;
+                for (int first = 0; first < int(deck.size()) && !refineInfo.isTimeout(); ++first) {
+                    if (fixedCardIdSet.count(deck[first]->cardId)) {
+                        continue;
+                    }
+                    for (int second = first + 1; second < int(deck.size()) && !refineInfo.isTimeout(); ++second) {
+                        if (fixedCardIdSet.count(deck[second]->cardId)) {
+                            continue;
+                        }
+                        int firstTried = 0;
+                        for (const auto* firstReplacement : refineCards) {
+                            if (++firstTried > pairWidth || refineInfo.isTimeout()) {
+                                break;
+                            }
+                            if (baseCardIds.count(firstReplacement->cardId)) {
+                                continue;
+                            }
+                            int secondTried = 0;
+                            for (const auto* secondReplacement : refineCards) {
+                                if (++secondTried > pairWidth || refineInfo.isTimeout()) {
+                                    break;
+                                }
+                                if (firstReplacement->cardId == secondReplacement->cardId
+                                    || baseCardIds.count(secondReplacement->cardId)) {
+                                    continue;
+                                }
+                                if (!Enums::LiveType::isChallenge(liveType)) {
+                                    std::unordered_set<int> chars{};
+                                    bool duplicate = false;
+                                    for (int pos = 0; pos < int(deck.size()); ++pos) {
+                                        const CardDetail* card = pos == first
+                                            ? firstReplacement
+                                            : (pos == second ? secondReplacement : deck[pos]);
+                                        if (!chars.insert(card->characterId).second) {
+                                            duplicate = true;
+                                            break;
+                                        }
+                                    }
+                                    if (duplicate) {
+                                        continue;
+                                    }
+                                }
+                                auto candidate = deck;
+                                candidate[first] = firstReplacement;
+                                candidate[second] = secondReplacement;
+                                tryEvaluate(candidate);
+                            }
+                        }
+                    }
+                }
+            }
+
+            mergeCalcInfo(baseInfo, refineInfo);
+        };
+
         int policyEpisodeCap = 96;
         if (bucket.episodes >= 128) {
             policyEpisodeCap = 12;
@@ -2641,6 +2845,42 @@ std::vector<RecommendDeck> BaseDeckRecommend::recommendHighScoreDeck(
         rememberStoredSeeds(seedBucket, policyInfo, std::max(config.limit * 3, 8));
 
         mergeCalcInfo(totalInfo, policyInfo);
+        runLocalRefine(totalInfo);
+        if (config.target == RecommendTarget::Score && !totalInfo.isTimeout()) {
+            int refineLimit = std::min(config.limit, 6);
+            auto gaSeedDecks = collectSeedDecks(totalInfo, fullSorted, std::max(refineLimit * 5, 20));
+            auto storedSeedDecks = loadStoredSeedDecks(seedBucket, fullSorted);
+            int storedSeedLimit = std::min(int(storedSeedDecks.size()), std::max(refineLimit * 2, 8));
+            for (int i = 0; i < storedSeedLimit; ++i) {
+                gaSeedDecks.push_back(storedSeedDecks[i]);
+            }
+
+            int gaRefineBudgetMs = std::min(
+                config.timeout_ms,
+                resolveBudgetMs(
+                    config.timeout_ms,
+                    config.filterOtherUnit ? 0.08 : 0.08,
+                    config.filterOtherUnit ? 45 : 40,
+                    config.filterOtherUnit ? 170 : 160
+                )
+            );
+            auto gaRefineInfo = makeCalcInfo(gaRefineBudgetMs);
+            auto gaRefineCards = buildSeededRefineCards(
+                fullSorted,
+                totalInfo,
+                gaSeedDecks.empty() ? nullptr : &gaSeedDecks
+            );
+            auto gaRefineConfig = tuneGaConfig(config, gaRefineCards.size(), true, !gaSeedDecks.empty());
+            gaRefineConfig.gaSeed = static_cast<int>((stableRlSeed ^ 0x6a09e667f3bcc909ULL) & 0x7fffffffULL);
+            gaRefineConfig.gaPopSize = std::min(gaRefineConfig.gaPopSize, config.filterOtherUnit ? 1100 : 1000);
+            gaRefineConfig.gaParentSize = std::min(gaRefineConfig.gaParentSize, std::max(80, gaRefineConfig.gaPopSize / 5));
+            gaRefineConfig.gaEliteSize = std::min(gaRefineConfig.gaEliteSize, std::max(12, gaRefineConfig.gaPopSize / 25));
+            gaRefineConfig.gaMaxIter = std::min(gaRefineConfig.gaMaxIter, config.filterOtherUnit ? 44 : 44);
+            gaRefineConfig.gaMaxIterNoImprove = std::min(gaRefineConfig.gaMaxIterNoImprove, 3);
+            runGaSearch(gaRefineConfig, gaRefineCards, gaRefineInfo, gaSeedDecks.empty() ? nullptr : &gaSeedDecks);
+            mergeCalcInfo(totalInfo, gaRefineInfo);
+            runLocalRefine(totalInfo);
+        }
 
         if (coldStartRequest && config.target == RecommendTarget::Score && bucket.episodes >= 48) {
             for (int warmRound = 0; warmRound < 2; ++warmRound) {
