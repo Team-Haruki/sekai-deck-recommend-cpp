@@ -1750,6 +1750,7 @@ std::vector<RecommendDeck> BaseDeckRecommend::recommendHighScoreDeck(
 
         auto rlCards = buildRlCandidateCards(fullSorted);
         bool hasCardRankMemory = !cardRankBucketForRequest.cards.empty();
+        std::unordered_map<int, double> memoryCardScores{};
         if (hasCardRankMemory) {
             std::unordered_map<int, const CardDetail*> cardById{};
             for (const auto& card : fullSorted) {
@@ -1770,112 +1771,105 @@ std::vector<RecommendDeck> BaseDeckRecommend::recommendHighScoreDeck(
                 }
                 return a.cardId < b.cardId;
             });
-
-            int matureRankEntries = 0;
             for (const auto& entry : entries) {
-                if (entry.visits >= 2) {
-                    matureRankEntries++;
+                memoryCardScores[entry.cardId] = entry.score + 0.20 * entry.bestScore + 0.015 * std::log1p(double(entry.visits));
+            }
+
+            std::unordered_set<int> selectedCardIds{};
+            for (const auto& card : rlCards) {
+                selectedCardIds.insert(card.cardId);
+            }
+            int addedRankCards = 0;
+            int maxRankCardAdds = std::max(config.member * (config.target == RecommendTarget::Score ? 12 : 8), config.target == RecommendTarget::Score ? 60 : 32);
+            for (const auto& entry : entries) {
+                if (addedRankCards >= maxRankCardAdds) {
+                    break;
+                }
+                auto it = cardById.find(entry.cardId);
+                if (it == cardById.end() || selectedCardIds.count(entry.cardId)) {
+                    continue;
+                }
+                rlCards.push_back(*it->second);
+                selectedCardIds.insert(entry.cardId);
+                addedRankCards++;
+            }
+        }
+        if (hasCardRankMemory) {
+            std::sort(rlCards.begin(), rlCards.end(), [&](const CardDetail& a, const CardDetail& b) {
+                double aMemoryScore = memoryCardScores.count(a.cardId) ? memoryCardScores[a.cardId] : 0.0;
+                double bMemoryScore = memoryCardScores.count(b.cardId) ? memoryCardScores[b.cardId] : 0.0;
+                auto aScore = aMemoryScore + 0.15 * scoreHeuristic(a) + 0.03 * cardEventBonus(a);
+                auto bScore = bMemoryScore + 0.15 * scoreHeuristic(b) + 0.03 * cardEventBonus(b);
+                if (std::abs(aScore - bScore) > 1e-9) {
+                    return aScore > bScore;
+                }
+                return std::make_tuple(a.power.max, a.skill.max, a.cardId)
+                    > std::make_tuple(b.power.max, b.skill.max, b.cardId);
+            });
+        }
+        if (!Enums::LiveType::isChallenge(liveType) && rlCards.size() > std::size_t(std::max(config.member * 12, 48))) {
+            std::unordered_set<int> fixedCardIdSet{};
+            for (const auto& card : fixedCards) {
+                fixedCardIdSet.insert(card.cardId);
+            }
+            auto sameUnits = [](const CardDetail& a, const CardDetail& b) {
+                if (a.units.size() != b.units.size()) {
+                    return false;
+                }
+                for (const auto& unit : a.units) {
+                    if (std::find(b.units.begin(), b.units.end(), unit) == b.units.end()) {
+                        return false;
+                    }
+                }
+                return true;
+            };
+            auto dominatesCard = [&](const CardDetail& better, const CardDetail& worse) {
+                if (better.cardId == worse.cardId
+                    || better.characterId != worse.characterId
+                    || better.attr != worse.attr
+                    || !sameUnits(better, worse)) {
+                    return false;
+                }
+                double betterEvent = cardEventBonus(better);
+                double worseEvent = cardEventBonus(worse);
+                double betterSupport = better.supportDeckBonus.value_or(0.0);
+                double worseSupport = worse.supportDeckBonus.value_or(0.0);
+                bool noWorse = better.power.max >= worse.power.max
+                    && better.power.min >= worse.power.min
+                    && better.skill.max >= worse.skill.max
+                    && better.skill.min >= worse.skill.min
+                    && betterEvent >= worseEvent
+                    && betterSupport >= worseSupport
+                    && scoreHeuristic(better) >= scoreHeuristic(worse);
+                bool strictlyBetter = better.power.max > worse.power.max
+                    || better.power.min > worse.power.min
+                    || better.skill.max > worse.skill.max
+                    || better.skill.min > worse.skill.min
+                    || betterEvent > worseEvent
+                    || betterSupport > worseSupport
+                    || scoreHeuristic(better) > scoreHeuristic(worse);
+                return noWorse && strictlyBetter;
+            };
+
+            std::vector<CardDetail> dominancePruned{};
+            dominancePruned.reserve(rlCards.size());
+            for (const auto& card : rlCards) {
+                bool dominated = fixedCardIdSet.count(card.cardId) == 0;
+                if (dominated) {
+                    dominated = false;
+                    for (const auto& kept : dominancePruned) {
+                        if (dominatesCard(kept, card)) {
+                            dominated = true;
+                            break;
+                        }
+                    }
+                }
+                if (!dominated) {
+                    dominancePruned.push_back(card);
                 }
             }
-            bool matureRankMemory = cardRankBucketForRequest.updates >= 2
-                && matureRankEntries >= std::max(config.member * 4, 20);
-
-            if (matureRankMemory) {
-                std::unordered_set<int> keepIds{};
-                auto keepCard = [&](const CardDetail& card) {
-                    keepIds.insert(card.cardId);
-                };
-
-                for (const auto& card : fixedCards) {
-                    keepCard(card);
-                }
-                for (const auto& card : fullSorted) {
-                    if (requiredCharacterSet.count(card.characterId)) {
-                        keepCard(card);
-                    }
-                }
-
-                int memoryKeep = std::min(
-                    int(entries.size()),
-                    std::max(config.member * (config.target == RecommendTarget::Score ? 18 : 14), config.target == RecommendTarget::Score ? 90 : 70)
-                );
-                for (int i = 0; i < memoryKeep; ++i) {
-                    auto it = cardById.find(entries[i].cardId);
-                    if (it != cardById.end()) {
-                        keepCard(*it->second);
-                    }
-                }
-
-                int heuristicKeep = std::min(
-                    int(fullSorted.size()),
-                    std::max(config.member * (config.target == RecommendTarget::Score ? 14 : 10), config.target == RecommendTarget::Score ? 70 : 50)
-                );
-                for (int i = 0; i < heuristicKeep; ++i) {
-                    keepCard(fullSorted[i]);
-                }
-
-                auto eventSorted = fullSorted;
-                std::sort(eventSorted.begin(), eventSorted.end(), [&](const CardDetail& a, const CardDetail& b) {
-                    return std::make_tuple(scoreHeuristic(a), cardEventBonus(a), a.skill.max, a.power.max, a.cardId)
-                        > std::make_tuple(scoreHeuristic(b), cardEventBonus(b), b.skill.max, b.power.max, b.cardId);
-                });
-                int eventKeep = std::min(
-                    int(eventSorted.size()),
-                    std::max(config.member * (config.target == RecommendTarget::Score ? 10 : 8), config.target == RecommendTarget::Score ? 50 : 40)
-                );
-                for (int i = 0; i < eventKeep; ++i) {
-                    keepCard(eventSorted[i]);
-                }
-
-                std::array<int, 32> perCharacterCount{};
-                int perCharacterKeep = Enums::LiveType::isChallenge(liveType)
-                    ? std::max(config.member + 1, 4)
-                    : (config.target == RecommendTarget::Score ? 4 : 3);
-                for (const auto& card : fullSorted) {
-                    auto& count = perCharacterCount[card.characterId];
-                    if (count < perCharacterKeep) {
-                        keepCard(card);
-                        count++;
-                    }
-                }
-
-                std::vector<CardDetail> prunedByMemory{};
-                prunedByMemory.reserve(std::min(rlCards.size(), keepIds.size()));
-                for (const auto& card : rlCards) {
-                    if (keepIds.count(card.cardId)) {
-                        prunedByMemory.push_back(card);
-                    }
-                }
-                for (const auto& card : fullSorted) {
-                    if (canMakeDeck(liveType, eventConfig.eventType, prunedByMemory, config.member)) {
-                        break;
-                    }
-                    if (keepIds.insert(card.cardId).second) {
-                        prunedByMemory.push_back(card);
-                    }
-                }
-                if (canMakeDeck(liveType, eventConfig.eventType, prunedByMemory, config.member)) {
-                    rlCards = std::move(prunedByMemory);
-                }
-            } else {
-                std::unordered_set<int> selectedCardIds{};
-                for (const auto& card : rlCards) {
-                    selectedCardIds.insert(card.cardId);
-                }
-                int addedRankCards = 0;
-                int maxRankCardAdds = std::max(config.member * 8, 32);
-                for (const auto& entry : entries) {
-                    if (addedRankCards >= maxRankCardAdds) {
-                        break;
-                    }
-                    auto it = cardById.find(entry.cardId);
-                    if (it == cardById.end() || selectedCardIds.count(entry.cardId)) {
-                        continue;
-                    }
-                    rlCards.push_back(*it->second);
-                    selectedCardIds.insert(entry.cardId);
-                    addedRankCards++;
-                }
+            if (canMakeDeck(liveType, eventConfig.eventType, dominancePruned, config.member)) {
+                rlCards = std::move(dominancePruned);
             }
         }
         bool hasRememberedSeeds = !seedBucket.bestSeeds.empty();
@@ -2238,23 +2232,24 @@ std::vector<RecommendDeck> BaseDeckRecommend::recommendHighScoreDeck(
         } else if (!rankSeedDecks.empty()) {
             warmStartDeck = rankSeedDecks.front();
         }
+        int warmStartPrefixLimit = std::max(int(fixedCards.size()), config.member - 2);
         if (!rememberedSeedDecks.empty()) {
             int replayLimit = std::min(
                 int(rememberedSeedDecks.size()),
-                warmStartDeck.empty() ? config.limit : 0
+                warmStartDeck.empty() ? config.limit : std::min(config.limit, 2)
             );
             for (int i = 0; i < replayLimit && !policyInfo.isTimeout(); ++i) {
                 evaluateDeckByCards(config, rememberedSeedDecks[i], policyInfo);
             }
         }
         if (!transferSeedDecks.empty()) {
-            int replayLimit = warmStartDeck.empty() ? 1 : 0;
+            int replayLimit = warmStartDeck.empty() ? 1 : std::min(int(transferSeedDecks.size()), 2);
             for (int i = 0; i < replayLimit && !policyInfo.isTimeout(); ++i) {
                 evaluateDeckByCards(config, transferSeedDecks[i], policyInfo);
             }
         }
         if (!rankSeedDecks.empty()) {
-            int replayLimit = warmStartDeck.empty() ? 1 : 0;
+            int replayLimit = warmStartDeck.empty() ? 1 : std::min(int(rankSeedDecks.size()), 2);
             for (int i = 0; i < replayLimit && !policyInfo.isTimeout(); ++i) {
                 evaluateDeckByCards(config, rankSeedDecks[i], policyInfo);
             }
@@ -2328,7 +2323,7 @@ std::vector<RecommendDeck> BaseDeckRecommend::recommendHighScoreDeck(
             }
             if (warmStart != nullptr) {
                 for (const auto* card : *warmStart) {
-                    if (card == nullptr || int(deck.size()) >= config.member || usedCardIds.count(card->cardId)) {
+                    if (card == nullptr || int(deck.size()) >= warmStartPrefixLimit || usedCardIds.count(card->cardId)) {
                         continue;
                     }
                     if (!Enums::LiveType::isChallenge(liveType) && usedCharacterIds.count(card->characterId)) {
@@ -2501,7 +2496,7 @@ std::vector<RecommendDeck> BaseDeckRecommend::recommendHighScoreDeck(
             policyEpisodeCap = 24;
         }
         if (hasRememberedSeeds && bucket.episodes >= 48) {
-            policyEpisodeCap = config.target == RecommendTarget::Score ? 10 : 3;
+            policyEpisodeCap = config.target == RecommendTarget::Score ? 32 : 16;
         }
         if (coldStartRequest && hasCardRankMemory) {
             policyEpisodeCap = std::min(policyEpisodeCap, config.target == RecommendTarget::Score ? 48 : 32);
