@@ -1920,7 +1920,17 @@ std::vector<RecommendDeck> BaseDeckRecommend::recommendHighScoreDeck(
             return false;
         };
 
-        long long rlSeedBase = config.gaSeed == -1 ? nowNs() : config.gaSeed;
+        auto stableHashString = [](const std::string& value) {
+            uint64_t hash = 1469598103934665603ULL;
+            for (unsigned char ch : value) {
+                hash ^= uint64_t(ch);
+                hash *= 1099511628211ULL;
+            }
+            return hash;
+        };
+        uint64_t stableRlSeed = stableHashString(rlStateKey)
+            ^ (cardPoolFingerprint + 0x9e3779b97f4a7c15ULL + (uint64_t(config.musicId) << 6) + (uint64_t(config.musicDiff) >> 2));
+        long long rlSeedBase = config.gaSeed == -1 ? static_cast<long long>(stableRlSeed & 0x7fffffffffffffffULL) : config.gaSeed;
         Rng rlRng(rlSeedBase);
         double rlMaxPower = 1.0;
         double rlMaxSkill = 1.0;
@@ -2489,6 +2499,109 @@ std::vector<RecommendDeck> BaseDeckRecommend::recommendHighScoreDeck(
             }
         };
 
+        auto runPolicyBeam = [&](int beamWidth, int branchWidth, const std::vector<const CardDetail*>* warmStart = nullptr) {
+            struct BeamState {
+                std::vector<const CardDetail*> deck{};
+                std::unordered_set<int> usedCardIds{};
+                std::unordered_set<int> usedCharacterIds{};
+                double score = 0.0;
+            };
+
+            BeamState initial{};
+            initial.deck.reserve(config.member);
+            for (const auto& card : fixedCards) {
+                initial.deck.push_back(&card);
+                initial.usedCardIds.insert(card.cardId);
+                initial.usedCharacterIds.insert(card.characterId);
+            }
+            if (warmStart != nullptr) {
+                for (const auto* card : *warmStart) {
+                    if (card == nullptr || int(initial.deck.size()) >= warmStartPrefixLimit || initial.usedCardIds.count(card->cardId)) {
+                        continue;
+                    }
+                    if (!Enums::LiveType::isChallenge(liveType) && initial.usedCharacterIds.count(card->characterId)) {
+                        continue;
+                    }
+                    auto fixedCharacterIndex = int(initial.deck.size()) - int(fixedCards.size());
+                    if (fixedCharacterIndex >= 0
+                        && remainingRequiredCharacters.size() > std::size_t(fixedCharacterIndex)
+                        && remainingRequiredCharacters[fixedCharacterIndex] != card->characterId) {
+                        continue;
+                    }
+                    initial.deck.push_back(card);
+                    initial.usedCardIds.insert(card->cardId);
+                    initial.usedCharacterIds.insert(card->characterId);
+                }
+            }
+
+            std::vector<BeamState> beams{std::move(initial)};
+            while (!beams.empty() && int(beams.front().deck.size()) < config.member && !policyInfo.isTimeout()) {
+                std::vector<BeamState> nextBeams{};
+                for (const auto& beam : beams) {
+                    int nextPos = int(beam.deck.size());
+                    std::vector<std::pair<double, const CardDetail*>> options{};
+                    options.reserve(rlCards.size());
+                    for (const auto& card : rlCards) {
+                        if (beam.usedCardIds.count(card.cardId)) {
+                            continue;
+                        }
+                        if (!Enums::LiveType::isChallenge(liveType) && beam.usedCharacterIds.count(card.characterId)) {
+                            continue;
+                        }
+                        auto fixedCharacterIndex = nextPos - int(fixedCards.size());
+                        if (fixedCharacterIndex >= 0
+                            && remainingRequiredCharacters.size() > std::size_t(fixedCharacterIndex)
+                            && remainingRequiredCharacters[fixedCharacterIndex] != card.characterId) {
+                            continue;
+                        }
+                        auto features = calcActionFeatures(beam.deck, card);
+                        double actionScore = 0.0;
+                        for (int i = 0; i < RL_FEATURE_DIM; ++i) {
+                            actionScore += bucket.weights[i] * features[i];
+                        }
+                        actionScore += 0.08 * scoreHeuristic(card) + 0.015 * cardEventBonus(card);
+                        options.emplace_back(actionScore, &card);
+                    }
+                    std::sort(options.begin(), options.end(), [](const auto& a, const auto& b) {
+                        if (std::abs(a.first - b.first) > 1e-9) {
+                            return a.first > b.first;
+                        }
+                        return a.second->cardId < b.second->cardId;
+                    });
+                    int take = std::min(int(options.size()), branchWidth);
+                    for (int i = 0; i < take; ++i) {
+                        BeamState next = beam;
+                        next.deck.push_back(options[i].second);
+                        next.usedCardIds.insert(options[i].second->cardId);
+                        next.usedCharacterIds.insert(options[i].second->characterId);
+                        next.score += options[i].first;
+                        nextBeams.push_back(std::move(next));
+                    }
+                }
+                std::sort(nextBeams.begin(), nextBeams.end(), [](const BeamState& a, const BeamState& b) {
+                    if (std::abs(a.score - b.score) > 1e-9) {
+                        return a.score > b.score;
+                    }
+                    auto aLast = a.deck.empty() ? 0 : a.deck.back()->cardId;
+                    auto bLast = b.deck.empty() ? 0 : b.deck.back()->cardId;
+                    return aLast < bLast;
+                });
+                if (int(nextBeams.size()) > beamWidth) {
+                    nextBeams.resize(beamWidth);
+                }
+                beams = std::move(nextBeams);
+            }
+
+            for (const auto& beam : beams) {
+                if (policyInfo.isTimeout()) {
+                    break;
+                }
+                if (int(beam.deck.size()) == config.member) {
+                    evaluateDeckByCards(config, beam.deck, policyInfo);
+                }
+            }
+        };
+
         int policyEpisodeCap = 96;
         if (bucket.episodes >= 128) {
             policyEpisodeCap = 12;
@@ -2503,6 +2616,11 @@ std::vector<RecommendDeck> BaseDeckRecommend::recommendHighScoreDeck(
         }
 
         int policyEpisodes = 0;
+        runPolicyBeam(
+            config.target == RecommendTarget::Score ? 12 : 8,
+            config.target == RecommendTarget::Score ? 5 : 4,
+            !warmStartDeck.empty() ? &warmStartDeck : nullptr
+        );
         if (!warmStartDeck.empty() && !policyInfo.isTimeout()) {
             policyEpisodes++;
             runPolicyEpisode(true, true, &warmStartDeck);
