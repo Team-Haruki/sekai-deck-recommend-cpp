@@ -60,7 +60,8 @@ struct RecommendDeck : DeckDetail {
                 if (target == RecommendTarget::Power) {
                     targetValue = power + double(score) / SCORE_MAX;
                 } else if (target == RecommendTarget::Skill) {
-                    targetValue = multiLiveScoreUp + double(score) / SCORE_MAX;
+                    // Keep skill score-up primary; use live score only as a tiny tie-breaker.
+                    targetValue = multiLiveScoreUp + double(liveScore) / (SCORE_MAX * 1000.0);
                 } else if (target == RecommendTarget::Bonus) {
                     targetValue = deckDetail.eventBonus.value_or(0.0)
                         + deckDetail.supportDeckBonus.value_or(0.0)

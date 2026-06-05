@@ -716,7 +716,9 @@ std::vector<RecommendDeck> BaseDeckRecommend::recommendHighScoreDeck(
             }
         }
 
-        if (config.target == RecommendTarget::Score) {
+        bool skillOrScoreTarget = config.target == RecommendTarget::Score
+            || config.target == RecommendTarget::Skill;
+        if (skillOrScoreTarget) {
             auto skillSorted = sortedCards;
             std::sort(skillSorted.begin(), skillSorted.end(), [](const CardDetail& a, const CardDetail& b) {
                 return std::make_tuple(a.skill.max, a.skill.min, a.cardId)
@@ -776,6 +778,18 @@ std::vector<RecommendDeck> BaseDeckRecommend::recommendHighScoreDeck(
             int supportKeep = std::min(int(supportSorted.size()), std::max(config.member * 8, 36));
             for (int i = 0; i < supportKeep; ++i) {
                 tryAdd(supportSorted[i]);
+            }
+
+            if (config.target == RecommendTarget::Skill) {
+                auto powerSorted = sortedCards;
+                std::sort(powerSorted.begin(), powerSorted.end(), [](const CardDetail& a, const CardDetail& b) {
+                    return std::make_tuple(a.power.max, a.skill.max, a.power.min, a.cardId)
+                        > std::make_tuple(b.power.max, b.skill.max, b.power.min, b.cardId);
+                });
+                int powerKeep = std::min(int(powerSorted.size()), std::max(config.member * 12, 56));
+                for (int i = 0; i < powerKeep; ++i) {
+                    tryAdd(powerSorted[i]);
+                }
             }
 
             auto minKeep = std::min(sortedCards.size(), std::size_t(std::max(config.member * 18, 80)));
@@ -1414,10 +1428,12 @@ std::vector<RecommendDeck> BaseDeckRecommend::recommendHighScoreDeck(
                 }
             }
 
+            bool skillOrScoreTarget = config.target == RecommendTarget::Score
+                || config.target == RecommendTarget::Skill;
             std::array<int, 32> perCharacterCount{};
             int perCharacterKeep = Enums::LiveType::isChallenge(liveType)
                 ? std::max(config.member + 1, 4)
-                : (config.target == RecommendTarget::Score
+                : (skillOrScoreTarget
                     ? (config.filterOtherUnit ? 12 : 8)
                     : 4);
             for (const auto& card : sortedCards) {
@@ -1431,8 +1447,8 @@ std::vector<RecommendDeck> BaseDeckRecommend::recommendHighScoreDeck(
             int globalKeep = std::min(
                 int(sortedCards.size()),
                 std::max(
-                    config.member * (config.target == RecommendTarget::Score ? (config.filterOtherUnit ? 40 : 32) : 20),
-                    config.target == RecommendTarget::Score ? (config.filterOtherUnit ? 220 : 170) : 96
+                    config.member * (skillOrScoreTarget ? (config.filterOtherUnit ? 40 : 32) : 20),
+                    skillOrScoreTarget ? (config.filterOtherUnit ? 220 : 170) : 96
                 )
             );
             for (int i = 0; i < globalKeep; ++i) {
@@ -1471,7 +1487,7 @@ std::vector<RecommendDeck> BaseDeckRecommend::recommendHighScoreDeck(
                 }
             }
 
-            if (config.target != RecommendTarget::Skill && config.target != RecommendTarget::Mysekai) {
+            if (config.target != RecommendTarget::Mysekai) {
                 auto skillSorted = sortedCards;
                 std::sort(skillSorted.begin(), skillSorted.end(), [](const CardDetail& a, const CardDetail& b) {
                     return std::make_tuple(a.skill.max, a.skill.min, a.cardId)
@@ -1480,8 +1496,8 @@ std::vector<RecommendDeck> BaseDeckRecommend::recommendHighScoreDeck(
                 int skillKeep = std::min(
                     int(skillSorted.size()),
                     std::max(
-                        config.member * (config.target == RecommendTarget::Score ? (config.filterOtherUnit ? 24 : 18) : 12),
-                        config.target == RecommendTarget::Score ? (config.filterOtherUnit ? 120 : 84) : 48
+                        config.member * (skillOrScoreTarget ? (config.filterOtherUnit ? 24 : 18) : 12),
+                        skillOrScoreTarget ? (config.filterOtherUnit ? 120 : 84) : 48
                     )
                 );
                 for (int i = 0; i < skillKeep; ++i) {
@@ -1489,7 +1505,7 @@ std::vector<RecommendDeck> BaseDeckRecommend::recommendHighScoreDeck(
                 }
             }
 
-            if (config.target == RecommendTarget::Score) {
+            if (skillOrScoreTarget) {
                 auto eventSorted = sortedCards;
                 std::sort(eventSorted.begin(), eventSorted.end(), [](const CardDetail& a, const CardDetail& b) {
                     return std::make_tuple(
@@ -1534,6 +1550,21 @@ std::vector<RecommendDeck> BaseDeckRecommend::recommendHighScoreDeck(
                 );
                 for (int i = 0; i < supportKeep; ++i) {
                     tryAdd(supportSorted[i]);
+                }
+
+                if (config.target == RecommendTarget::Skill) {
+                    auto powerSorted = sortedCards;
+                    std::sort(powerSorted.begin(), powerSorted.end(), [](const CardDetail& a, const CardDetail& b) {
+                        return std::make_tuple(a.power.max, a.skill.max, a.power.min, a.cardId)
+                            > std::make_tuple(b.power.max, b.skill.max, b.power.min, b.cardId);
+                    });
+                    int powerKeep = std::min(
+                        int(powerSorted.size()),
+                        std::max(config.member * (config.filterOtherUnit ? 20 : 14), config.filterOtherUnit ? 96 : 64)
+                    );
+                    for (int i = 0; i < powerKeep; ++i) {
+                        tryAdd(powerSorted[i]);
+                    }
                 }
             }
 
@@ -1734,6 +1765,12 @@ std::vector<RecommendDeck> BaseDeckRecommend::recommendHighScoreDeck(
                     0.10, 1.20, 1.45, 0.15, 0.10,
                     0.90, 0.35, 0.20, -0.05, 1.10,
                     1.55, 0.25, 1.50
+                };
+            } else if (config.target == RecommendTarget::Skill && bucket.episodes == 0) {
+                bucket.weights = {
+                    0.10, 0.25, 2.80, 0.05, 0.04,
+                    0.95, 0.08, 0.06, -0.05, 1.80,
+                    0.04, 0.05, 0.25
                 };
             }
 
@@ -2573,7 +2610,13 @@ std::vector<RecommendDeck> BaseDeckRecommend::recommendHighScoreDeck(
                         for (int i = 0; i < RL_FEATURE_DIM; ++i) {
                             actionScore += bucket.weights[i] * features[i];
                         }
-                        actionScore += 0.08 * scoreHeuristic(card) + 0.015 * cardEventBonus(card);
+                        if (config.target == RecommendTarget::Skill) {
+                            actionScore += 0.55 * features[2]
+                                + 0.05 * features[12]
+                                + 0.03 * features[1];
+                        } else {
+                            actionScore += 0.08 * scoreHeuristic(card) + 0.015 * cardEventBonus(card);
+                        }
                         options.emplace_back(actionScore, &card);
                     }
                     std::sort(options.begin(), options.end(), [](const auto& a, const auto& b) {
@@ -2617,16 +2660,19 @@ std::vector<RecommendDeck> BaseDeckRecommend::recommendHighScoreDeck(
         };
 
         auto runLocalRefine = [&](RecommendCalcInfo& baseInfo) {
-            if (config.target != RecommendTarget::Score || baseInfo.isTimeout()) {
+            bool skillOrScoreTarget = config.target == RecommendTarget::Score
+                || config.target == RecommendTarget::Skill;
+            if (!skillOrScoreTarget || baseInfo.isTimeout()) {
                 return;
             }
+            bool skillTarget = config.target == RecommendTarget::Skill;
 
             int refineBudgetMs = std::min(
                 config.timeout_ms,
                 resolveBudgetMs(
                     config.timeout_ms,
-                    config.filterOtherUnit ? 0.10 : 0.09,
-                    config.filterOtherUnit ? 55 : 45,
+                    config.filterOtherUnit ? 0.10 : (skillTarget ? 0.10 : 0.09),
+                    config.filterOtherUnit ? 55 : (skillTarget ? 50 : 45),
                     config.filterOtherUnit ? 190 : 180
                 )
             );
@@ -2660,15 +2706,33 @@ std::vector<RecommendDeck> BaseDeckRecommend::recommendHighScoreDeck(
             std::sort(refineCards.begin(), refineCards.end(), [&](const CardDetail* a, const CardDetail* b) {
                 auto aMemoryScore = memoryCardScores.count(a->cardId) ? memoryCardScores[a->cardId] : 0.0;
                 auto bMemoryScore = memoryCardScores.count(b->cardId) ? memoryCardScores[b->cardId] : 0.0;
-                auto aScore = aMemoryScore + 0.35 * scoreHeuristic(*a) + 0.08 * cardEventBonus(*a);
-                auto bScore = bMemoryScore + 0.35 * scoreHeuristic(*b) + 0.08 * cardEventBonus(*b);
+                double aScore = 0.0;
+                double bScore = 0.0;
+                if (skillTarget) {
+                    aScore = aMemoryScore
+                        + 0.65 * (double(a->skill.max) / rlMaxSkill)
+                        + 0.08 * scoreHeuristic(*a)
+                        + 0.05 * (double(a->power.max) / rlMaxPower)
+                        + 0.01 * cardEventBonus(*a);
+                    bScore = bMemoryScore
+                        + 0.65 * (double(b->skill.max) / rlMaxSkill)
+                        + 0.08 * scoreHeuristic(*b)
+                        + 0.05 * (double(b->power.max) / rlMaxPower)
+                        + 0.01 * cardEventBonus(*b);
+                } else {
+                    aScore = aMemoryScore + 0.35 * scoreHeuristic(*a) + 0.08 * cardEventBonus(*a);
+                    bScore = bMemoryScore + 0.35 * scoreHeuristic(*b) + 0.08 * cardEventBonus(*b);
+                }
                 if (std::abs(aScore - bScore) > 1e-9) {
                     return aScore > bScore;
                 }
                 return std::make_tuple(a->skill.max, a->power.max, a->cardId)
                     > std::make_tuple(b->skill.max, b->power.max, b->cardId);
             });
-            int maxRefineCards = std::min(int(refineCards.size()), config.filterOtherUnit ? 120 : 100);
+            int maxRefineCards = std::min(
+                int(refineCards.size()),
+                config.filterOtherUnit ? 120 : (skillTarget ? 110 : 100)
+            );
             refineCards.resize(maxRefineCards);
 
             int refineLimit = std::min(config.limit, 6);
@@ -2819,10 +2883,20 @@ std::vector<RecommendDeck> BaseDeckRecommend::recommendHighScoreDeck(
             policyEpisodeCap = std::min(policyEpisodeCap, config.target == RecommendTarget::Score ? 48 : 32);
         }
 
+        int beamWidth = config.target == RecommendTarget::Score
+            ? 12
+            : (config.target == RecommendTarget::Skill
+                ? (config.filterOtherUnit ? 48 : 32)
+                : 8);
+        int branchWidth = config.target == RecommendTarget::Score
+            ? 5
+            : (config.target == RecommendTarget::Skill
+                ? (config.filterOtherUnit ? 10 : 8)
+                : 4);
         int policyEpisodes = 0;
         runPolicyBeam(
-            config.target == RecommendTarget::Score ? 12 : 8,
-            config.target == RecommendTarget::Score ? 5 : 4,
+            beamWidth,
+            branchWidth,
             !warmStartDeck.empty() ? &warmStartDeck : nullptr
         );
         if (!warmStartDeck.empty() && !policyInfo.isTimeout()) {
@@ -2872,7 +2946,10 @@ std::vector<RecommendDeck> BaseDeckRecommend::recommendHighScoreDeck(
             );
             auto gaRefineConfig = tuneGaConfig(config, gaRefineCards.size(), true, !gaSeedDecks.empty());
             gaRefineConfig.gaSeed = static_cast<int>((stableRlSeed ^ 0x6a09e667f3bcc909ULL) & 0x7fffffffULL);
-            gaRefineConfig.gaPopSize = std::min(gaRefineConfig.gaPopSize, config.filterOtherUnit ? 1100 : 1000);
+            gaRefineConfig.gaPopSize = std::min(
+                gaRefineConfig.gaPopSize,
+                config.filterOtherUnit ? 1100 : 1000
+            );
             gaRefineConfig.gaParentSize = std::min(gaRefineConfig.gaParentSize, std::max(80, gaRefineConfig.gaPopSize / 5));
             gaRefineConfig.gaEliteSize = std::min(gaRefineConfig.gaEliteSize, std::max(12, gaRefineConfig.gaPopSize / 25));
             gaRefineConfig.gaMaxIter = std::min(gaRefineConfig.gaMaxIter, config.filterOtherUnit ? 44 : 44);
@@ -2882,7 +2959,9 @@ std::vector<RecommendDeck> BaseDeckRecommend::recommendHighScoreDeck(
             runLocalRefine(totalInfo);
         }
 
-        if (coldStartRequest && config.target == RecommendTarget::Score && bucket.episodes >= 48) {
+        bool skillOrScoreTarget = config.target == RecommendTarget::Score
+            || config.target == RecommendTarget::Skill;
+        if (coldStartRequest && skillOrScoreTarget && bucket.episodes >= 48) {
             for (int warmRound = 0; warmRound < 2; ++warmRound) {
                 auto warmedSeedDecks = loadStoredSeedDecks(seedBucket, fullSorted);
                 if (warmedSeedDecks.empty()) {
