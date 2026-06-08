@@ -1600,6 +1600,8 @@ public:
         };
         dataProvider.init();
 
+        bool filterOtherUnit = pyoptions.filter_other_unit.value_or(false);
+
         CardCalculator cardCalculator(dataProvider);
         std::vector<PyRecommendSupportDeckCard> result{};
         for (const auto& card : userdata->userCards) {
@@ -1608,7 +1610,8 @@ public:
                 eventId,
                 characterId,
                 pyoptions.support_master_max.value_or(false),
-                pyoptions.support_skill_max.value_or(false)
+                pyoptions.support_skill_max.value_or(false),
+                !filterOtherUnit
             );
             result.push_back(PyRecommendSupportDeckCard{
                 .card_id = supportCard.cardId,

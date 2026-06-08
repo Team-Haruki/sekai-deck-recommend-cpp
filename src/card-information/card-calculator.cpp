@@ -154,7 +154,8 @@ SupportDeckCard CardCalculator::getSupportDeckCard(
     int eventId,
     int specialCharacterId,
     bool masterMax,
-    bool skillMax
+    bool skillMax,
+    bool requireSpecialUnitMatch
 )
 {
     UserCard supportCard = card;
@@ -169,7 +170,12 @@ SupportDeckCard CardCalculator::getSupportDeckCard(
         supportCard = this->cardService.applyCardConfig(card, cardData, cfg);
     }
 
-    auto bonus = this->bloomEventCalculator.getCardSupportDeckBonus(supportCard, eventId, specialCharacterId);
+    auto bonus = this->bloomEventCalculator.getCardSupportDeckBonus(
+        supportCard,
+        eventId,
+        specialCharacterId,
+        requireSpecialUnitMatch
+    );
     return SupportDeckCard{
         .cardId = card.cardId,
         .bonus = bonus.value_or(0.0),

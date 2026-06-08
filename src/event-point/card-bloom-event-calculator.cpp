@@ -1,6 +1,11 @@
 #include "event-point/card-bloom-event-calculator.h"
 
-std::optional<double> CardBloomEventCalculator::getCardSupportDeckBonus(const UserCard &userCard, int eventId, int specialCharacterId)
+std::optional<double> CardBloomEventCalculator::getCardSupportDeckBonus(
+    const UserCard &userCard,
+    int eventId,
+    int specialCharacterId,
+    bool requireSpecialUnitMatch
+)
 {
     if (specialCharacterId <= 0) return std::nullopt;
     auto& cards = dataProvider.masterData->cards;
@@ -8,15 +13,17 @@ std::optional<double> CardBloomEventCalculator::getCardSupportDeckBonus(const Us
         return it.id == userCard.cardId; 
     }, [&]() { return "Support Deck Card not found for cardId=" + std::to_string(userCard.cardId); });
 
-    // 需要先判断一张卡牌是否是指定组合，如果不是的话不使用支援加成
-    auto& gameCharacterUnits = dataProvider.masterData->gameCharacterUnits;
-    auto specialUnit = findOrThrow(gameCharacterUnits, [&](const GameCharacterUnit& it) { 
-            return it.gameCharacterId == specialCharacterId; 
-        }, [&]() { return "Game character unit not found for gameCharacterId=" + std::to_string(specialCharacterId); }
-    ).unit;
-    auto cardUnits = this->cardService.getCardUnits(card);
-    if (std::find(cardUnits.begin(), cardUnits.end(), specialUnit) == cardUnits.end())
-        return std::nullopt;
+    if (requireSpecialUnitMatch) {
+        // 需要先判断一张卡牌是否是指定组合，如果不是的话不使用支援加成
+        auto& gameCharacterUnits = dataProvider.masterData->gameCharacterUnits;
+        auto specialUnit = findOrThrow(gameCharacterUnits, [&](const GameCharacterUnit& it) {
+                return it.gameCharacterId == specialCharacterId;
+            }, [&]() { return "Game character unit not found for gameCharacterId=" + std::to_string(specialCharacterId); }
+        ).unit;
+        auto cardUnits = this->cardService.getCardUnits(card);
+        if (std::find(cardUnits.begin(), cardUnits.end(), specialUnit) == cardUnits.end())
+            return std::nullopt;
+    }
     
     auto turn = dataProvider.masterData->getWorldBloomEventTurn(eventId);
     auto& worldBloomSupportDeckBonuses = (

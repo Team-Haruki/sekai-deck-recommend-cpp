@@ -139,7 +139,8 @@ public:
         int eventId,
         int specialCharacterId,
         bool masterMax = false,
-        bool skillMax = false
+        bool skillMax = false,
+        bool requireSpecialUnitMatch = true
     );
 };
 

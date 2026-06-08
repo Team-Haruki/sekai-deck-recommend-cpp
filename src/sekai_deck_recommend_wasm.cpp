@@ -1138,12 +1138,13 @@ public:
 
         bool supportMasterMax = jsonOpt<bool>(opts, "support_master_max").value_or(false);
         bool supportSkillMax = jsonOpt<bool>(opts, "support_skill_max").value_or(false);
+        bool filterOtherUnit = jsonOpt<bool>(opts, "filter_other_unit").value_or(false);
 
         CardCalculator cardCalculator(dataProvider);
         std::vector<std::pair<int, double>> result;
         for (const auto& card : userdata->userCards) {
             auto sc = cardCalculator.getSupportDeckCard(
-                card, eventId, characterId, supportMasterMax, supportSkillMax);
+                card, eventId, characterId, supportMasterMax, supportSkillMax, !filterOtherUnit);
             result.emplace_back(sc.cardId, sc.bonus);
         }
         std::sort(result.begin(), result.end(), [](const auto& a, const auto& b) {
