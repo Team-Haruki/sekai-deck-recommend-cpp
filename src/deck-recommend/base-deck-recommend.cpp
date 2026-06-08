@@ -1646,7 +1646,6 @@ std::vector<RecommendDeck> BaseDeckRecommend::recommendHighScoreDeck(
         if (leaderCharacterId.has_value()) {
             policyKey += ":leader=" + std::to_string(leaderCharacterId.value());
         }
-        appendScalarKey(policyKey, "filter_other_unit", config.filterOtherUnit ? "1" : "0");
         auto sortUnique = [](std::vector<int>& values) {
             std::sort(values.begin(), values.end());
             values.erase(std::unique(values.begin(), values.end()), values.end());
@@ -1703,6 +1702,7 @@ std::vector<RecommendDeck> BaseDeckRecommend::recommendHighScoreDeck(
                 ? std::to_string(eventConfig.mysekaiFixtureLimit.value())
                 : "-"
         );
+        appendScalarKey(transferSeedKey, "filter_other_unit", config.filterOtherUnit ? "1" : "0");
         if (config.customBonusCharacterIds.has_value()) {
             appendConstraintKey(transferSeedKey, "custom_bonus_chars", config.customBonusCharacterIds.value(), true);
         } else {
@@ -1723,9 +1723,11 @@ std::vector<RecommendDeck> BaseDeckRecommend::recommendHighScoreDeck(
         appendConstraintKey(cardRankKey, "bonus_attrs", eventBonusAttrs, false);
         appendConstraintKey(cardRankKey, "bonus_units", eventBonusUnits, false);
         appendScalarKey(cardRankKey, "bonus_count_limit", std::to_string(eventConfig.cardBonusCountLimit));
+        appendScalarKey(cardRankKey, "filter_other_unit", config.filterOtherUnit ? "1" : "0");
         appendScalarKey(cardRankKey, "card_pool", std::to_string(cardPoolFingerprint));
         cardRankKey += ":card_ranks";
         auto broadCardRankKey = policyKey;
+        appendScalarKey(broadCardRankKey, "filter_other_unit", config.filterOtherUnit ? "1" : "0");
         appendScalarKey(broadCardRankKey, "card_pool", std::to_string(cardPoolFingerprint));
         broadCardRankKey += ":card_ranks";
         auto rlStateKey = policyKey;
@@ -1772,14 +1774,6 @@ std::vector<RecommendDeck> BaseDeckRecommend::recommendHighScoreDeck(
                     0.10, 0.25, 2.80, 0.05, 0.04,
                     0.95, 0.08, 0.06, -0.05, 1.80,
                     0.04, 0.05, 0.25
-                };
-            } else if (config.target == RecommendTarget::Score
-                && config.filterOtherUnit
-                && bucket.episodes == 0) {
-                bucket.weights = {
-                    0.00, 0.35, 0.30, 0.02, 0.02,
-                    0.40, -0.04, 0.02, 0.00, 0.20,
-                    1.10, -0.55, 0.35
                 };
             }
 
@@ -2294,23 +2288,13 @@ std::vector<RecommendDeck> BaseDeckRecommend::recommendHighScoreDeck(
             std::max(config.limit * 4, 12)
         );
         auto monoAttrSeedDecks = collectChallengeMonoAttrSeedDecks(config, &totalInfo, std::max(config.limit, 2));
-        enum class RlWarmStartSource {
-            None,
-            Exact,
-            Transfer,
-            Rank,
-        };
         std::vector<const CardDetail*> warmStartDeck{};
-        RlWarmStartSource warmStartSource = RlWarmStartSource::None;
         if (!rememberedSeedDecks.empty()) {
             warmStartDeck = rememberedSeedDecks.front();
-            warmStartSource = RlWarmStartSource::Exact;
         } else if (!transferSeedDecks.empty()) {
             warmStartDeck = transferSeedDecks.front();
-            warmStartSource = RlWarmStartSource::Transfer;
         } else if (!rankSeedDecks.empty()) {
             warmStartDeck = rankSeedDecks.front();
-            warmStartSource = RlWarmStartSource::Rank;
         }
         int warmStartPrefixLimit = std::max(int(fixedCards.size()), config.member - 2);
         if (!rememberedSeedDecks.empty()) {
@@ -2634,11 +2618,7 @@ std::vector<RecommendDeck> BaseDeckRecommend::recommendHighScoreDeck(
                                 + 0.05 * features[12]
                                 + 0.03 * features[1];
                         } else {
-                            double eventWeight = config.filterOtherUnit ? 0.035 : 0.015;
-                            double supportOpportunityCost = config.filterOtherUnit ? 0.30 : 0.0;
-                            actionScore += 0.08 * scoreHeuristic(card)
-                                + eventWeight * cardEventBonus(card)
-                                - supportOpportunityCost * features[11];
+                            actionScore += 0.08 * scoreHeuristic(card) + 0.015 * cardEventBonus(card);
                         }
                         options.emplace_back(actionScore, &card);
                     }
@@ -2752,43 +2732,6 @@ std::vector<RecommendDeck> BaseDeckRecommend::recommendHighScoreDeck(
                 return std::make_tuple(a->skill.max, a->power.max, a->cardId)
                     > std::make_tuple(b->skill.max, b->power.max, b->cardId);
             });
-            if (config.filterOtherUnit && !skillTarget) {
-                std::array<std::vector<const CardDetail*>, 32> perCharacterCards{};
-                for (const auto* card : refineCards) {
-                    if (card->characterId >= 0
-                        && card->characterId < int(perCharacterCards.size())
-                        && perCharacterCards[card->characterId].size() < 2) {
-                        perCharacterCards[card->characterId].push_back(card);
-                    }
-                }
-
-                std::vector<const CardDetail*> balancedRefineCards{};
-                balancedRefineCards.reserve(refineCards.size());
-                std::unordered_set<int> balancedRefineCardIds{};
-                auto addBalancedRefineCard = [&](const CardDetail* card) {
-                    if (card && balancedRefineCardIds.insert(card->cardId).second) {
-                        balancedRefineCards.push_back(card);
-                    }
-                };
-                int headKeep = std::min(int(refineCards.size()), 20);
-                for (int i = 0; i < headKeep; ++i) {
-                    addBalancedRefineCard(refineCards[i]);
-                }
-                for (auto& cardsForCharacter : perCharacterCards) {
-                    if (!cardsForCharacter.empty()) {
-                        addBalancedRefineCard(cardsForCharacter[0]);
-                    }
-                }
-                for (auto& cardsForCharacter : perCharacterCards) {
-                    if (cardsForCharacter.size() > 1) {
-                        addBalancedRefineCard(cardsForCharacter[1]);
-                    }
-                }
-                for (const auto* card : refineCards) {
-                    addBalancedRefineCard(card);
-                }
-                refineCards = std::move(balancedRefineCards);
-            }
             int maxRefineCards = std::min(
                 int(refineCards.size()),
                 config.filterOtherUnit ? 120 : (skillTarget ? 110 : 100)
@@ -2925,222 +2868,6 @@ std::vector<RecommendDeck> BaseDeckRecommend::recommendHighScoreDeck(
                         }
                     }
                 }
-
-                if (config.filterOtherUnit && !skillTarget && seedIndex < 2 && !refineInfo.isTimeout()) {
-                    auto replacementScore = [&](const CardDetail* card) {
-                        if (card == nullptr) {
-                            return -1e18;
-                        }
-                        auto memoryScore = memoryCardScores.count(card->cardId)
-                            ? memoryCardScores[card->cardId]
-                            : 0.0;
-                        return memoryScore
-                            + 0.45 * scoreHeuristic(*card)
-                            + 0.18 * (double(card->skill.max) / rlMaxSkill)
-                            + 0.12 * (double(card->power.max) / rlMaxPower)
-                            + 0.05 * cardEventBonus(*card);
-                    };
-                    auto buildPositionReplacementCandidates = [&](int replacePos, int maxCount) {
-                        std::vector<const CardDetail*> candidates{};
-                        std::unordered_set<int> candidateIds{};
-                        auto canUseReplacement = [&](const CardDetail* card) {
-                            if (card == nullptr || baseCardIds.count(card->cardId)) {
-                                return false;
-                            }
-                            if (!Enums::LiveType::isChallenge(liveType)) {
-                                for (int pos = 0; pos < int(deck.size()); ++pos) {
-                                    if (pos != replacePos && deck[pos]->characterId == card->characterId) {
-                                        return false;
-                                    }
-                                }
-                            }
-                            return true;
-                        };
-                        auto addCandidate = [&](const CardDetail* card) {
-                            if (canUseReplacement(card) && candidateIds.insert(card->cardId).second) {
-                                candidates.push_back(card);
-                            }
-                        };
-
-                        for (const auto* card : refineCards) {
-                            addCandidate(card);
-                        }
-                        for (const auto& card : fullSorted) {
-                            if (card.characterId == deck[replacePos]->characterId) {
-                                addCandidate(&card);
-                            }
-                        }
-                        for (const auto& card : fullSorted) {
-                            if (sharesAnyUnit(card, *deck[replacePos])) {
-                                addCandidate(&card);
-                            }
-                        }
-                        for (const auto& card : fullSorted) {
-                            addCandidate(&card);
-                        }
-
-                        std::sort(candidates.begin(), candidates.end(), [&](const CardDetail* a, const CardDetail* b) {
-                            auto aScore = replacementScore(a);
-                            auto bScore = replacementScore(b);
-                            if (std::abs(aScore - bScore) > 1e-9) {
-                                return aScore > bScore;
-                            }
-                            return std::make_tuple(a->skill.max, a->power.max, a->cardId)
-                                > std::make_tuple(b->skill.max, b->power.max, b->cardId);
-                        });
-                        if (int(candidates.size()) > maxCount) {
-                            candidates.resize(maxCount);
-                        }
-                        return candidates;
-                    };
-
-                    constexpr int tripleWidth = 24;
-                    std::vector<std::vector<const CardDetail*>> positionCandidates(deck.size());
-                    for (int pos = 0; pos < int(deck.size()); ++pos) {
-                        if (!fixedCardIdSet.count(deck[pos]->cardId)) {
-                            positionCandidates[pos] = buildPositionReplacementCandidates(pos, tripleWidth);
-                        }
-                    }
-
-                    std::vector<std::vector<const CardDetail*>> coordinateCandidates(deck.size());
-                    for (int pos = 0; pos < int(deck.size()); ++pos) {
-                        std::unordered_set<int> candidateIds{};
-                        auto addCoordinateCandidate = [&](const CardDetail* card) {
-                            if (card != nullptr && candidateIds.insert(card->cardId).second) {
-                                coordinateCandidates[pos].push_back(card);
-                            }
-                        };
-                        addCoordinateCandidate(deck[pos]);
-                        if (!fixedCardIdSet.count(deck[pos]->cardId)) {
-                            for (const auto* card : positionCandidates[pos]) {
-                                addCoordinateCandidate(card);
-                            }
-                        }
-                        std::sort(coordinateCandidates[pos].begin(), coordinateCandidates[pos].end(), [&](const CardDetail* a, const CardDetail* b) {
-                            auto aScore = replacementScore(a);
-                            auto bScore = replacementScore(b);
-                            if (std::abs(aScore - bScore) > 1e-9) {
-                                return aScore > bScore;
-                            }
-                            return std::make_tuple(a->skill.max, a->power.max, a->cardId)
-                                > std::make_tuple(b->skill.max, b->power.max, b->cardId);
-                        });
-                        auto originalIt = std::find_if(
-                            coordinateCandidates[pos].begin(),
-                            coordinateCandidates[pos].end(),
-                            [&](const CardDetail* card) {
-                                return card != nullptr && card->cardId == deck[pos]->cardId;
-                            }
-                        );
-                        constexpr int coordinateMaxWidth = 12;
-                        if (originalIt != coordinateCandidates[pos].end()
-                            && std::distance(coordinateCandidates[pos].begin(), originalIt) >= coordinateMaxWidth) {
-                            const auto* originalCard = *originalIt;
-                            coordinateCandidates[pos].erase(originalIt);
-                            coordinateCandidates[pos].insert(
-                                coordinateCandidates[pos].begin() + std::min(coordinateMaxWidth - 1, int(coordinateCandidates[pos].size())),
-                                originalCard
-                            );
-                        }
-                    }
-
-                    std::vector<const CardDetail*> coordinateDeck(deck.size(), nullptr);
-                    std::array<int, 3> stagedCoordinateWidths{4, 8, 12};
-                    for (const auto width : stagedCoordinateWidths) {
-                        std::unordered_set<int> usedCoordinateCardIds{};
-                        std::unordered_set<int> usedCoordinateCharacterIds{};
-                        auto scanCoordinateDecks = [&](auto&& self, int pos) -> void {
-                            if (refineInfo.isTimeout()) {
-                                return;
-                            }
-                            if (pos >= int(deck.size())) {
-                                tryEvaluate(coordinateDeck);
-                                return;
-                            }
-                            int limit = fixedCardIdSet.count(deck[pos]->cardId)
-                                ? 1
-                                : std::min(width, int(coordinateCandidates[pos].size()));
-                            for (int candidateIndex = 0; candidateIndex < limit && !refineInfo.isTimeout(); ++candidateIndex) {
-                                const auto* card = coordinateCandidates[pos][candidateIndex];
-                                if (card == nullptr || usedCoordinateCardIds.count(card->cardId)) {
-                                    continue;
-                                }
-                                if (!Enums::LiveType::isChallenge(liveType)
-                                    && usedCoordinateCharacterIds.count(card->characterId)) {
-                                    continue;
-                                }
-                                coordinateDeck[pos] = card;
-                                usedCoordinateCardIds.insert(card->cardId);
-                                usedCoordinateCharacterIds.insert(card->characterId);
-                                self(self, pos + 1);
-                                usedCoordinateCharacterIds.erase(card->characterId);
-                                usedCoordinateCardIds.erase(card->cardId);
-                            }
-                        };
-                        scanCoordinateDecks(scanCoordinateDecks, 0);
-                    }
-
-                    std::array<int, 3> stagedTripleWidths{6, 12, tripleWidth};
-                    for (int first = 0; first < int(deck.size()) && !refineInfo.isTimeout(); ++first) {
-                        if (fixedCardIdSet.count(deck[first]->cardId)) {
-                            continue;
-                        }
-                        for (int second = first + 1; second < int(deck.size()) && !refineInfo.isTimeout(); ++second) {
-                            if (fixedCardIdSet.count(deck[second]->cardId)) {
-                                continue;
-                            }
-                            for (int third = second + 1; third < int(deck.size()) && !refineInfo.isTimeout(); ++third) {
-                                if (fixedCardIdSet.count(deck[third]->cardId)) {
-                                    continue;
-                                }
-                                for (const auto width : stagedTripleWidths) {
-                                    int firstLimit = std::min(width, int(positionCandidates[first].size()));
-                                    int secondLimit = std::min(width, int(positionCandidates[second].size()));
-                                    int thirdLimit = std::min(width, int(positionCandidates[third].size()));
-                                    for (int firstIndex = 0; firstIndex < firstLimit && !refineInfo.isTimeout(); ++firstIndex) {
-                                        const auto* firstReplacement = positionCandidates[first][firstIndex];
-                                        for (int secondIndex = 0; secondIndex < secondLimit && !refineInfo.isTimeout(); ++secondIndex) {
-                                            const auto* secondReplacement = positionCandidates[second][secondIndex];
-                                            if (firstReplacement->cardId == secondReplacement->cardId) {
-                                                continue;
-                                            }
-                                            for (int thirdIndex = 0; thirdIndex < thirdLimit && !refineInfo.isTimeout(); ++thirdIndex) {
-                                                const auto* thirdReplacement = positionCandidates[third][thirdIndex];
-                                                if (firstReplacement->cardId == thirdReplacement->cardId
-                                                    || secondReplacement->cardId == thirdReplacement->cardId) {
-                                                    continue;
-                                                }
-                                                if (!Enums::LiveType::isChallenge(liveType)) {
-                                                    std::unordered_set<int> chars{};
-                                                    bool duplicate = false;
-                                                    for (int pos = 0; pos < int(deck.size()); ++pos) {
-                                                        const CardDetail* card = pos == first
-                                                            ? firstReplacement
-                                                            : (pos == second
-                                                                ? secondReplacement
-                                                                : (pos == third ? thirdReplacement : deck[pos]));
-                                                        if (!chars.insert(card->characterId).second) {
-                                                            duplicate = true;
-                                                            break;
-                                                        }
-                                                    }
-                                                    if (duplicate) {
-                                                        continue;
-                                                    }
-                                                }
-                                                auto candidate = deck;
-                                                candidate[first] = firstReplacement;
-                                                candidate[second] = secondReplacement;
-                                                candidate[third] = thirdReplacement;
-                                                tryEvaluate(candidate);
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
             }
 
             mergeCalcInfo(baseInfo, refineInfo);
@@ -3170,14 +2897,11 @@ std::vector<RecommendDeck> BaseDeckRecommend::recommendHighScoreDeck(
                 ? (config.filterOtherUnit ? 10 : 8)
                 : 4);
         int policyEpisodes = 0;
-        bool shouldRunUnseededBeam = warmStartDeck.empty()
-            || warmStartSource != RlWarmStartSource::Exact;
-        if (shouldRunUnseededBeam) {
-            runPolicyBeam(beamWidth, branchWidth);
-        }
-        if (!warmStartDeck.empty() && !policyInfo.isTimeout()) {
-            runPolicyBeam(beamWidth, branchWidth, &warmStartDeck);
-        }
+        runPolicyBeam(
+            beamWidth,
+            branchWidth,
+            !warmStartDeck.empty() ? &warmStartDeck : nullptr
+        );
         if (!warmStartDeck.empty() && !policyInfo.isTimeout()) {
             policyEpisodes++;
             runPolicyEpisode(true, true, &warmStartDeck);
@@ -3199,6 +2923,44 @@ std::vector<RecommendDeck> BaseDeckRecommend::recommendHighScoreDeck(
 
         mergeCalcInfo(totalInfo, policyInfo);
         runLocalRefine(totalInfo);
+        if (config.target == RecommendTarget::Score && !totalInfo.isTimeout()) {
+            int refineLimit = std::min(config.limit, 6);
+            auto gaSeedDecks = collectSeedDecks(totalInfo, fullSorted, std::max(refineLimit * 5, 20));
+            auto storedSeedDecks = loadStoredSeedDecks(seedBucket, fullSorted);
+            int storedSeedLimit = std::min(int(storedSeedDecks.size()), std::max(refineLimit * 2, 8));
+            for (int i = 0; i < storedSeedLimit; ++i) {
+                gaSeedDecks.push_back(storedSeedDecks[i]);
+            }
+
+            int gaRefineBudgetMs = std::min(
+                config.timeout_ms,
+                resolveBudgetMs(
+                    config.timeout_ms,
+                    config.filterOtherUnit ? 0.08 : 0.08,
+                    config.filterOtherUnit ? 45 : 40,
+                    config.filterOtherUnit ? 170 : 160
+                )
+            );
+            auto gaRefineInfo = makeCalcInfo(gaRefineBudgetMs);
+            auto gaRefineCards = buildSeededRefineCards(
+                fullSorted,
+                totalInfo,
+                gaSeedDecks.empty() ? nullptr : &gaSeedDecks
+            );
+            auto gaRefineConfig = tuneGaConfig(config, gaRefineCards.size(), true, !gaSeedDecks.empty());
+            gaRefineConfig.gaSeed = static_cast<int>((stableRlSeed ^ 0x6a09e667f3bcc909ULL) & 0x7fffffffULL);
+            gaRefineConfig.gaPopSize = std::min(
+                gaRefineConfig.gaPopSize,
+                config.filterOtherUnit ? 1100 : 1000
+            );
+            gaRefineConfig.gaParentSize = std::min(gaRefineConfig.gaParentSize, std::max(80, gaRefineConfig.gaPopSize / 5));
+            gaRefineConfig.gaEliteSize = std::min(gaRefineConfig.gaEliteSize, std::max(12, gaRefineConfig.gaPopSize / 25));
+            gaRefineConfig.gaMaxIter = std::min(gaRefineConfig.gaMaxIter, config.filterOtherUnit ? 44 : 44);
+            gaRefineConfig.gaMaxIterNoImprove = std::min(gaRefineConfig.gaMaxIterNoImprove, 3);
+            runGaSearch(gaRefineConfig, gaRefineCards, gaRefineInfo, gaSeedDecks.empty() ? nullptr : &gaSeedDecks);
+            mergeCalcInfo(totalInfo, gaRefineInfo);
+            runLocalRefine(totalInfo);
+        }
 
         bool skillOrScoreTarget = config.target == RecommendTarget::Score
             || config.target == RecommendTarget::Skill;
