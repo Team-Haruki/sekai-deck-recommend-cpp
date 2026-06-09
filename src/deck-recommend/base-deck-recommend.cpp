@@ -2011,6 +2011,964 @@ std::vector<RecommendDeck> BaseDeckRecommend::recommendHighScoreDeck(
             });
         }
 
+        auto buildStructuredSeedDecks = [&](const std::vector<CardDetail>& sourceCards, int maxSeedCount) {
+            std::vector<std::vector<const CardDetail*>> seeds{};
+            if (maxSeedCount <= 0
+                || sourceCards.empty()
+                || Enums::LiveType::isChallenge(liveType)
+                || (config.target != RecommendTarget::Score && config.target != RecommendTarget::Mysekai)) {
+                return seeds;
+            }
+
+            bool worldBloom = eventConfig.eventType == Enums::EventType::world_bloom;
+            if (!worldBloom && config.target != RecommendTarget::Mysekai) {
+                return seeds;
+            }
+
+            std::unordered_map<int, const CardDetail*> cardById{};
+            cardById.reserve(sourceCards.size() + fixedCards.size());
+            for (const auto& card : sourceCards) {
+                cardById.emplace(card.cardId, &card);
+            }
+
+            std::vector<const CardDetail*> fixedDeck{};
+            fixedDeck.reserve(fixedCards.size());
+            for (const auto& fixedCard : fixedCards) {
+                auto it = cardById.find(fixedCard.cardId);
+                fixedDeck.push_back(it != cardById.end() ? it->second : &fixedCard);
+            }
+
+            std::unordered_set<int> requiredCharacterIds(
+                requiredCharacters.begin(),
+                requiredCharacters.end()
+            );
+            auto structuredCardScore = [&](const CardDetail& card) {
+                double powerNorm = std::max(0.0, double(card.power.max) / rlMaxPower);
+                double skillNorm = std::max(0.0, double(card.skill.max) / rlMaxSkill);
+                double eventNorm = std::max(0.0, cardEventBonus(card) / 70.0);
+                double supportNorm = std::max(0.0, card.supportDeckBonus.value_or(0.0) / 50.0);
+                if (config.target == RecommendTarget::Mysekai) {
+                    return 0.95 * powerNorm
+                        + 1.40 * eventNorm
+                        + 0.28 * supportNorm
+                        + 0.04 * skillNorm;
+                }
+                return 0.70 * powerNorm
+                    + 0.95 * skillNorm
+                    + 0.20 * eventNorm
+                    + 0.10 * supportNorm;
+            };
+            auto cardHasUnit = [](const CardDetail& card, int unit) {
+                return std::find(card.units.begin(), card.units.end(), unit) != card.units.end();
+            };
+            auto sortCards = [&](std::vector<const CardDetail*>& rankedCards) {
+                std::sort(rankedCards.begin(), rankedCards.end(), [&](const CardDetail* a, const CardDetail* b) {
+                    double aScore = structuredCardScore(*a);
+                    double bScore = structuredCardScore(*b);
+                    if (std::abs(aScore - bScore) > 1e-9) {
+                        return aScore > bScore;
+                    }
+                    return std::make_tuple(cardEventBonus(*a), a->skill.max, a->power.max, a->cardId)
+                        > std::make_tuple(cardEventBonus(*b), b->skill.max, b->power.max, b->cardId);
+                });
+            };
+
+            std::vector<const CardDetail*> allRanked{};
+            allRanked.reserve(sourceCards.size());
+            std::unordered_map<int, std::vector<const CardDetail*>> unitBuckets{};
+            std::unordered_set<int> attrSet{};
+            for (const auto& card : sourceCards) {
+                allRanked.push_back(&card);
+                attrSet.insert(card.attr);
+                for (const auto unit : card.units) {
+                    unitBuckets[unit].push_back(&card);
+                }
+            }
+            sortCards(allRanked);
+            for (auto& [unit, bucket] : unitBuckets) {
+                sortCards(bucket);
+            }
+
+            std::vector<int> allAttrs(attrSet.begin(), attrSet.end());
+            std::sort(allAttrs.begin(), allAttrs.end());
+            bool requireDistinctAttrs = config.target == RecommendTarget::Score
+                && worldBloom
+                && config.member == 5
+                && allAttrs.size() >= 5;
+
+            std::vector<std::pair<double, int>> unitScores{};
+            unitScores.reserve(unitBuckets.size() + 1);
+            for (const auto& [unit, bucket] : unitBuckets) {
+                bool fixedCompatible = true;
+                for (const auto* fixedCard : fixedDeck) {
+                    if (!cardHasUnit(*fixedCard, unit)) {
+                        fixedCompatible = false;
+                        break;
+                    }
+                }
+                if (!fixedCompatible) {
+                    continue;
+                }
+
+                std::unordered_set<int> unitCharacters{};
+                std::unordered_set<int> unitAttrs{};
+                double unitScore = 0.0;
+                int usedCards = 0;
+                for (const auto* card : bucket) {
+                    unitCharacters.insert(card->characterId);
+                    unitAttrs.insert(card->attr);
+                    if (usedCards++ < config.member) {
+                        unitScore += structuredCardScore(*card);
+                    }
+                }
+                if (int(unitCharacters.size()) < config.member) {
+                    continue;
+                }
+                if (requireDistinctAttrs && unitAttrs.size() < 5) {
+                    continue;
+                }
+                if (eventConfig.worldBloomSupportUnit == unit) {
+                    unitScore += 3.0;
+                }
+                if (eventConfig.eventUnit == unit) {
+                    unitScore += 1.5;
+                }
+                unitScore += 0.001 * double(bucket.size());
+                unitScores.emplace_back(unitScore, unit);
+            }
+            std::sort(unitScores.begin(), unitScores.end(), [](const auto& a, const auto& b) {
+                if (std::abs(a.first - b.first) > 1e-9) {
+                    return a.first > b.first;
+                }
+                return a.second < b.second;
+            });
+            if (config.target == RecommendTarget::Mysekai || unitScores.empty()) {
+                unitScores.emplace_back(0.0, 0);
+            }
+
+            struct StructuredSeedState {
+                std::vector<const CardDetail*> deck{};
+                std::unordered_set<int> usedCardIds{};
+                std::unordered_set<int> usedCharacterIds{};
+                std::unordered_set<int> usedAttrs{};
+                double score = 0.0;
+            };
+
+            std::unordered_set<uint64_t> seedHashes{};
+            int seedBuildLimit = config.target == RecommendTarget::Score && worldBloom
+                ? std::max(maxSeedCount * 6, 96)
+                : maxSeedCount;
+            auto appendSeed = [&](const std::vector<const CardDetail*>& deck) {
+                if (int(seeds.size()) >= seedBuildLimit) {
+                    return;
+                }
+                auto normalized = normalizeDeckForLeader(deck);
+                if (normalized.empty() || !deckMatchesFixedConstraints(normalized)) {
+                    return;
+                }
+                auto hash = this->calcDeckHash(normalized);
+                if (seedHashes.insert(hash).second) {
+                    seeds.push_back(std::move(normalized));
+                }
+            };
+            auto missingRequiredCount = [&](const StructuredSeedState& state) {
+                int missing = 0;
+                for (const auto characterId : requiredCharacters) {
+                    if (!state.usedCharacterIds.count(characterId)) {
+                        missing++;
+                    }
+                }
+                return missing;
+            };
+            auto canStillSatisfyRequired = [&](const StructuredSeedState& state) {
+                return missingRequiredCount(state) <= config.member - int(state.deck.size());
+            };
+            auto initializeState = [&]() {
+                StructuredSeedState initial{};
+                initial.deck.reserve(config.member);
+                bool valid = true;
+                for (const auto* fixedCard : fixedDeck) {
+                    if (fixedCard == nullptr
+                        || !initial.usedCardIds.insert(fixedCard->cardId).second
+                        || !initial.usedCharacterIds.insert(fixedCard->characterId).second) {
+                        valid = false;
+                        break;
+                    }
+                    if (requireDistinctAttrs && initial.usedAttrs.count(fixedCard->attr)) {
+                        valid = false;
+                        break;
+                    }
+                    initial.usedAttrs.insert(fixedCard->attr);
+                    initial.deck.push_back(fixedCard);
+                    initial.score += structuredCardScore(*fixedCard);
+                }
+                if (!valid || !canStillSatisfyRequired(initial)) {
+                    initial.deck.clear();
+                }
+                return initial;
+            };
+
+            auto runBeamForRankedCards = [&](const std::vector<const CardDetail*>& rankedCards, bool distinctAttrs) {
+                if (int(seeds.size()) >= seedBuildLimit || rankedCards.empty()) {
+                    return;
+                }
+
+                auto initial = initializeState();
+                if (initial.deck.empty() && !fixedDeck.empty()) {
+                    return;
+                }
+
+                std::vector<int> attrOrder{};
+                if (distinctAttrs) {
+                    for (const auto attr : allAttrs) {
+                        if (!initial.usedAttrs.count(attr)) {
+                            attrOrder.push_back(attr);
+                        }
+                    }
+                    if (int(attrOrder.size()) != config.member - int(initial.deck.size())) {
+                        return;
+                    }
+                    std::sort(attrOrder.begin(), attrOrder.end(), [&](int a, int b) {
+                        int aCount = 0;
+                        int bCount = 0;
+                        double aBest = -1e18;
+                        double bBest = -1e18;
+                        for (const auto* card : rankedCards) {
+                            if (card->attr == a) {
+                                aCount++;
+                                aBest = std::max(aBest, structuredCardScore(*card));
+                            } else if (card->attr == b) {
+                                bCount++;
+                                bBest = std::max(bBest, structuredCardScore(*card));
+                            }
+                        }
+                        if (aCount != bCount) {
+                            return aCount < bCount;
+                        }
+                        return aBest > bBest;
+                    });
+                }
+
+                std::vector<StructuredSeedState> beams{std::move(initial)};
+                int beamWidth = config.target == RecommendTarget::Mysekai ? 36 : 48;
+                int optionLimit = distinctAttrs ? 16 : (config.target == RecommendTarget::Mysekai ? 26 : 22);
+                while (!beams.empty() && int(beams.front().deck.size()) < config.member) {
+                    std::vector<StructuredSeedState> nextBeams{};
+                    for (const auto& beam : beams) {
+                        int nextAttr = 0;
+                        if (distinctAttrs) {
+                            auto attrIndex = int(beam.deck.size()) - int(fixedDeck.size());
+                            if (attrIndex < 0 || attrIndex >= int(attrOrder.size())) {
+                                continue;
+                            }
+                            nextAttr = attrOrder[attrIndex];
+                        }
+
+                        std::vector<const CardDetail*> options{};
+                        std::unordered_set<int> optionIds{};
+                        auto addOption = [&](const CardDetail* card) {
+                            if (card == nullptr || optionIds.count(card->cardId)) {
+                                return;
+                            }
+                            if (beam.usedCardIds.count(card->cardId)
+                                || beam.usedCharacterIds.count(card->characterId)) {
+                                return;
+                            }
+                            if (distinctAttrs && card->attr != nextAttr) {
+                                return;
+                            }
+                            optionIds.insert(card->cardId);
+                            options.push_back(card);
+                        };
+
+                        for (const auto* card : rankedCards) {
+                            if (int(options.size()) >= optionLimit) {
+                                break;
+                            }
+                            addOption(card);
+                        }
+                        if (int(options.size()) < optionLimit) {
+                            for (const auto* card : rankedCards) {
+                                if (int(options.size()) >= optionLimit + 6) {
+                                    break;
+                                }
+                                if (requiredCharacterIds.count(card->characterId)) {
+                                    addOption(card);
+                                }
+                            }
+                        }
+
+                        for (const auto* card : options) {
+                            auto next = beam;
+                            next.deck.push_back(card);
+                            next.usedCardIds.insert(card->cardId);
+                            next.usedCharacterIds.insert(card->characterId);
+                            next.usedAttrs.insert(card->attr);
+                            next.score += structuredCardScore(*card);
+                            if (requiredCharacterIds.count(card->characterId)) {
+                                next.score += 0.75;
+                            }
+                            if (!canStillSatisfyRequired(next)) {
+                                continue;
+                            }
+                            nextBeams.push_back(std::move(next));
+                        }
+                    }
+                    std::sort(nextBeams.begin(), nextBeams.end(), [](const StructuredSeedState& a, const StructuredSeedState& b) {
+                        if (std::abs(a.score - b.score) > 1e-9) {
+                            return a.score > b.score;
+                        }
+                        auto aLast = a.deck.empty() ? 0 : a.deck.back()->cardId;
+                        auto bLast = b.deck.empty() ? 0 : b.deck.back()->cardId;
+                        return aLast < bLast;
+                    });
+                    if (int(nextBeams.size()) > beamWidth) {
+                        nextBeams.resize(beamWidth);
+                    }
+                    beams = std::move(nextBeams);
+                }
+
+                for (const auto& beam : beams) {
+                    if (int(seeds.size()) >= seedBuildLimit) {
+                        break;
+                    }
+                    if (int(beam.deck.size()) == config.member) {
+                        appendSeed(beam.deck);
+                    }
+                }
+            };
+
+            auto runMysekaiMixedSeeds = [&]() {
+                if (config.target != RecommendTarget::Mysekai || int(seeds.size()) >= maxSeedCount) {
+                    return;
+                }
+
+                auto initial = initializeState();
+                if (initial.deck.empty() && !fixedDeck.empty()) {
+                    return;
+                }
+
+                bool preferDistinctAttrs = worldBloom && config.member == 5 && allAttrs.size() >= 5;
+                auto mysekaiFillRanked = allRanked;
+                std::sort(mysekaiFillRanked.begin(), mysekaiFillRanked.end(), [&](const CardDetail* a, const CardDetail* b) {
+                    double aScore = 3.20 * (cardEventBonus(*a) / 70.0)
+                        + 0.55 * (double(a->power.max) / rlMaxPower)
+                        + 0.05 * (double(a->skill.max) / rlMaxSkill);
+                    double bScore = 3.20 * (cardEventBonus(*b) / 70.0)
+                        + 0.55 * (double(b->power.max) / rlMaxPower)
+                        + 0.05 * (double(b->skill.max) / rlMaxSkill);
+                    if (std::abs(aScore - bScore) > 1e-9) {
+                        return aScore > bScore;
+                    }
+                    return std::make_tuple(cardEventBonus(*a), a->power.max, a->cardId)
+                        > std::make_tuple(cardEventBonus(*b), b->power.max, b->cardId);
+                });
+                double estimatedSupportBonus = 0.0;
+                if (!supportCards.empty()) {
+                    const auto& supportList = supportCards.begin()->second;
+                    int supportCount = deckCalculator.getWorldBloomSupportDeckCount(eventConfig.eventId);
+                    int usedSupport = 0;
+                    for (const auto& supportCard : supportList) {
+                        estimatedSupportBonus += supportCard.bonus;
+                        if (++usedSupport >= supportCount) {
+                            break;
+                        }
+                    }
+                }
+                auto worldBloomDiffAttrBonus = [&](int attrCount) {
+                    if (!worldBloom) {
+                        return 0.0;
+                    }
+                    double best = 0.0;
+                    for (const auto& bonus : this->dataProvider.masterData->worldBloomDifferentAttributeBonuses) {
+                        if (bonus.attributeCount == attrCount) {
+                            return bonus.bonusRate;
+                        }
+                        if (bonus.attributeCount <= attrCount) {
+                            best = std::max(best, bonus.bonusRate);
+                        }
+                    }
+                    return best;
+                };
+                auto mysekaiPartialScore = [&](const StructuredSeedState& state) {
+                    double power = double(honorBonus);
+                    double eventBonus = 0.0;
+                    double linearScore = 0.0;
+                    std::unordered_set<int> usedCardIds = state.usedCardIds;
+                    std::unordered_set<int> usedCharacterIds = state.usedCharacterIds;
+                    std::unordered_set<int> usedAttrs = state.usedAttrs;
+                    for (const auto* card : state.deck) {
+                        power += double(card->power.max);
+                        eventBonus += cardEventBonus(*card);
+                        linearScore += structuredCardScore(*card);
+                    }
+
+                    int remainingSlots = config.member - int(state.deck.size());
+                    int filledSlots = 0;
+                    for (const auto* card : mysekaiFillRanked) {
+                        if (filledSlots >= remainingSlots) {
+                            break;
+                        }
+                        if (usedCardIds.count(card->cardId)
+                            || usedCharacterIds.count(card->characterId)) {
+                            continue;
+                        }
+                        int slotsLeftAfterThis = remainingSlots - filledSlots - 1;
+                        int targetAttrCount = std::min(config.member, int(allAttrs.size()));
+                        bool mustAddNewAttr = preferDistinctAttrs
+                            && targetAttrCount - int(usedAttrs.size()) > slotsLeftAfterThis;
+                        if (mustAddNewAttr && usedAttrs.count(card->attr)) {
+                            continue;
+                        }
+                        usedCardIds.insert(card->cardId);
+                        usedCharacterIds.insert(card->characterId);
+                        usedAttrs.insert(card->attr);
+                        power += double(card->power.max);
+                        eventBonus += cardEventBonus(*card);
+                        linearScore += structuredCardScore(*card);
+                        filledSlots++;
+                    }
+
+                    if (preferDistinctAttrs) {
+                        eventBonus += worldBloomDiffAttrBonus(int(usedAttrs.size()));
+                    }
+                    double powerBonus = std::floor((1.0 + power / 450000.0) * 10.0 + 1e-6) / 10.0;
+                    double eventRate = std::floor(eventBonus + estimatedSupportBonus + 1e-6) / 100.0;
+                    double internalPoint = powerBonus * (1.0 + eventRate) * 500.0;
+                    double steppedPoint = std::floor(powerBonus * (1.0 + eventRate) + 1e-6) * 500.0;
+                    return 4.0 * steppedPoint
+                        + internalPoint
+                        + 8.0 * linearScore
+                        + 0.010 * power
+                        + 0.35 * eventBonus
+                        + (preferDistinctAttrs ? 55.0 * double(usedAttrs.size()) : 0.0);
+                };
+                auto mysekaiExactScore = [&](const std::vector<const CardDetail*>& deck) {
+                    auto normalized = normalizeDeckForLeader(deck);
+                    if (normalized.empty() || !deckMatchesFixedConstraints(normalized)) {
+                        return -1e18;
+                    }
+                    auto ret = getBestPermutation(
+                        this->deckCalculator, normalized, supportCards, sf,
+                        honorBonus, eventConfig.eventType, eventConfig.eventId, liveType, config
+                    );
+                    if (!ret.bestDeck.has_value()) {
+                        return -1e18;
+                    }
+                    return ret.bestDeck.value().targetValue;
+                };
+                auto makeRankedVariant = [&](auto scoreFunc) {
+                    auto ranked = allRanked;
+                    std::sort(ranked.begin(), ranked.end(), [&](const CardDetail* a, const CardDetail* b) {
+                        double aScore = scoreFunc(*a);
+                        double bScore = scoreFunc(*b);
+                        if (std::abs(aScore - bScore) > 1e-9) {
+                            return aScore > bScore;
+                        }
+                        return std::make_tuple(cardEventBonus(*a), a->power.max, a->skill.max, a->cardId)
+                            > std::make_tuple(cardEventBonus(*b), b->power.max, b->skill.max, b->cardId);
+                    });
+                    return ranked;
+                };
+
+                std::vector<std::vector<const CardDetail*>> rankedVariants{};
+                rankedVariants.push_back(allRanked);
+                rankedVariants.push_back(makeRankedVariant([&](const CardDetail& card) {
+                    return 1.80 * (cardEventBonus(card) / 70.0)
+                        + 0.65 * (double(card.power.max) / rlMaxPower)
+                        + 0.05 * (double(card.skill.max) / rlMaxSkill);
+                }));
+                rankedVariants.push_back(makeRankedVariant([&](const CardDetail& card) {
+                    return 1.25 * (double(card.power.max) / rlMaxPower)
+                        + 0.95 * (cardEventBonus(card) / 70.0)
+                        + 0.04 * (double(card.skill.max) / rlMaxSkill);
+                }));
+                rankedVariants.push_back(makeRankedVariant([&](const CardDetail& card) {
+                    double power = double(card.power.max);
+                    double eventBonus = cardEventBonus(card);
+                    double powerBonus = std::floor((1.0 + power / 450000.0) * 10.0 + 1e-6) / 10.0;
+                    double eventRate = std::floor(eventBonus + 1e-6) / 100.0;
+                    return powerBonus * (1.0 + eventRate) * 500.0
+                        + 0.018 * power
+                        + 1.10 * eventBonus;
+                }));
+
+                std::vector<std::tuple<double, uint64_t, std::vector<const CardDetail*>>> candidates{};
+                std::unordered_set<uint64_t> candidateHashes{};
+                auto rememberCandidate = [&](const std::vector<const CardDetail*>& deck) {
+                    if (int(candidates.size()) >= std::max(maxSeedCount * 8, 72)) {
+                        return;
+                    }
+                    auto normalized = normalizeDeckForLeader(deck);
+                    if (normalized.empty() || !deckMatchesFixedConstraints(normalized)) {
+                        return;
+                    }
+                    auto hash = this->calcDeckHash(normalized);
+                    if (!candidateHashes.insert(hash).second) {
+                        return;
+                    }
+                    double score = mysekaiExactScore(normalized);
+                    if (score <= -1e17) {
+                        return;
+                    }
+                    candidates.emplace_back(score, hash, std::move(normalized));
+                };
+
+                int beamWidth = 72;
+                int optionLimit = 34;
+                for (const auto& rankedCards : rankedVariants) {
+                    if (int(candidates.size()) >= std::max(maxSeedCount * 8, 72)) {
+                        break;
+                    }
+                    std::vector<StructuredSeedState> beams{initial};
+                    if (!beams.empty()) {
+                        beams.front().score = mysekaiPartialScore(beams.front());
+                    }
+
+                    while (!beams.empty() && int(beams.front().deck.size()) < config.member) {
+                        std::vector<StructuredSeedState> nextBeams{};
+                        for (const auto& beam : beams) {
+                            std::vector<const CardDetail*> options{};
+                            std::unordered_set<int> optionIds{};
+                            int remainingSlots = config.member - int(beam.deck.size());
+                            int missingAttrSlots = std::min(config.member, int(allAttrs.size())) - int(beam.usedAttrs.size());
+                            bool forceNewAttr = preferDistinctAttrs && missingAttrSlots >= remainingSlots;
+                            auto addOption = [&](const CardDetail* card, bool requireNewAttr) {
+                                if (card == nullptr || optionIds.count(card->cardId)) {
+                                    return;
+                                }
+                                if (beam.usedCardIds.count(card->cardId)
+                                    || beam.usedCharacterIds.count(card->characterId)) {
+                                    return;
+                                }
+                                if (requireNewAttr && beam.usedAttrs.count(card->attr)) {
+                                    return;
+                                }
+                                optionIds.insert(card->cardId);
+                                options.push_back(card);
+                            };
+
+                            auto collectOptions = [&](bool requireNewAttr) {
+                                for (const auto* card : rankedCards) {
+                                    if (int(options.size()) >= optionLimit) {
+                                        break;
+                                    }
+                                    addOption(card, requireNewAttr);
+                                }
+                                if (int(options.size()) < optionLimit + 8) {
+                                    for (const auto* card : rankedCards) {
+                                        if (int(options.size()) >= optionLimit + 8) {
+                                            break;
+                                        }
+                                        if (requiredCharacterIds.count(card->characterId)) {
+                                            addOption(card, requireNewAttr);
+                                        }
+                                    }
+                                }
+                            };
+                            collectOptions(forceNewAttr);
+                            if (options.empty() && forceNewAttr) {
+                                collectOptions(false);
+                            }
+
+                            for (const auto* card : options) {
+                                auto next = beam;
+                                next.deck.push_back(card);
+                                next.usedCardIds.insert(card->cardId);
+                                next.usedCharacterIds.insert(card->characterId);
+                                next.usedAttrs.insert(card->attr);
+                                next.score += structuredCardScore(*card);
+                                if (requiredCharacterIds.count(card->characterId)) {
+                                    next.score += 0.75;
+                                }
+                                if (!canStillSatisfyRequired(next)) {
+                                    continue;
+                                }
+                                next.score = mysekaiPartialScore(next);
+                                nextBeams.push_back(std::move(next));
+                            }
+                        }
+                        std::sort(nextBeams.begin(), nextBeams.end(), [](const StructuredSeedState& a, const StructuredSeedState& b) {
+                            if (std::abs(a.score - b.score) > 1e-9) {
+                                return a.score > b.score;
+                            }
+                            auto aLast = a.deck.empty() ? 0 : a.deck.back()->cardId;
+                            auto bLast = b.deck.empty() ? 0 : b.deck.back()->cardId;
+                            return aLast < bLast;
+                        });
+                        if (int(nextBeams.size()) > beamWidth) {
+                            nextBeams.resize(beamWidth);
+                        }
+                        beams = std::move(nextBeams);
+                    }
+
+                    for (const auto& beam : beams) {
+                        if (int(beam.deck.size()) == config.member) {
+                            rememberCandidate(beam.deck);
+                        }
+                    }
+                }
+
+                std::sort(candidates.begin(), candidates.end(), [](const auto& a, const auto& b) {
+                    if (std::abs(std::get<0>(a) - std::get<0>(b)) > 1e-9) {
+                        return std::get<0>(a) > std::get<0>(b);
+                    }
+                    return std::get<1>(a) < std::get<1>(b);
+                });
+                for (const auto& [score, hash, deck] : candidates) {
+                    if (int(seeds.size()) >= maxSeedCount) {
+                        break;
+                    }
+                    appendSeed(deck);
+                }
+            };
+
+            auto runScoreMixedSeeds = [&]() {
+                if (config.target != RecommendTarget::Score
+                    || !worldBloom
+                    || int(seeds.size()) >= seedBuildLimit) {
+                    return;
+                }
+
+                auto initial = initializeState();
+                if (initial.deck.empty() && !fixedDeck.empty()) {
+                    return;
+                }
+
+                double estimatedSupportBonus = 0.0;
+                if (!supportCards.empty()) {
+                    const auto& supportList = supportCards.begin()->second;
+                    int supportCount = deckCalculator.getWorldBloomSupportDeckCount(eventConfig.eventId);
+                    int usedSupport = 0;
+                    for (const auto& supportCard : supportList) {
+                        estimatedSupportBonus += supportCard.bonus;
+                        if (++usedSupport >= supportCount) {
+                            break;
+                        }
+                    }
+                }
+                auto worldBloomDiffAttrBonus = [&](int attrCount) {
+                    double best = 0.0;
+                    for (const auto& bonus : this->dataProvider.masterData->worldBloomDifferentAttributeBonuses) {
+                        if (bonus.attributeCount == attrCount) {
+                            return bonus.bonusRate;
+                        }
+                        if (bonus.attributeCount <= attrCount) {
+                            best = std::max(best, bonus.bonusRate);
+                        }
+                    }
+                    return best;
+                };
+                auto makeRankedVariant = [&](auto scoreFunc) {
+                    auto ranked = allRanked;
+                    std::sort(ranked.begin(), ranked.end(), [&](const CardDetail* a, const CardDetail* b) {
+                        double aScore = scoreFunc(*a);
+                        double bScore = scoreFunc(*b);
+                        if (std::abs(aScore - bScore) > 1e-9) {
+                            return aScore > bScore;
+                        }
+                        return std::make_tuple(cardEventBonus(*a), a->skill.max, a->power.max, a->cardId)
+                            > std::make_tuple(cardEventBonus(*b), b->skill.max, b->power.max, b->cardId);
+                    });
+                    return ranked;
+                };
+
+                std::vector<std::vector<const CardDetail*>> rankedVariants{};
+                rankedVariants.push_back(allRanked);
+                rankedVariants.push_back(makeRankedVariant([&](const CardDetail& card) {
+                    return 1.65 * (cardEventBonus(card) / 70.0)
+                        + 0.55 * (double(card.skill.max) / rlMaxSkill)
+                        + 0.45 * (double(card.power.max) / rlMaxPower)
+                        + 0.15 * (card.supportDeckBonus.value_or(0.0) / 50.0);
+                }));
+                rankedVariants.push_back(makeRankedVariant([&](const CardDetail& card) {
+                    double eventBonus = cardEventBonus(card);
+                    double supportNorm = card.supportDeckBonus.value_or(0.0) / 50.0;
+                    return eventBonus
+                        + 0.0065 * double(card.power.max)
+                        + 0.95 * double(card.skill.max)
+                        + 6.0 * supportNorm;
+                }));
+                rankedVariants.push_back(makeRankedVariant([&](const CardDetail& card) {
+                    double power = double(card.power.max);
+                    double eventBonus = cardEventBonus(card);
+                    double skill = double(card.skill.max);
+                    return power * (1.0 + (eventBonus + estimatedSupportBonus) / 100.0)
+                        + 1120.0 * skill
+                        + 1500.0 * eventBonus;
+                }));
+
+                auto scoreFillRanked = rankedVariants.size() > 1 ? rankedVariants[1] : allRanked;
+                auto scorePartialScore = [&](const StructuredSeedState& state) {
+                    double power = double(honorBonus);
+                    double eventBonus = 0.0;
+                    double skillValue = 0.0;
+                    double linearScore = 0.0;
+                    std::unordered_set<int> usedCardIds = state.usedCardIds;
+                    std::unordered_set<int> usedCharacterIds = state.usedCharacterIds;
+                    std::unordered_set<int> usedAttrs = state.usedAttrs;
+                    for (const auto* card : state.deck) {
+                        power += double(card->power.max);
+                        eventBonus += cardEventBonus(*card);
+                        skillValue += double(card->skill.max);
+                        linearScore += structuredCardScore(*card);
+                    }
+
+                    int remainingSlots = config.member - int(state.deck.size());
+                    int filledSlots = 0;
+                    for (const auto* card : scoreFillRanked) {
+                        if (filledSlots >= remainingSlots) {
+                            break;
+                        }
+                        if (usedCardIds.count(card->cardId)
+                            || usedCharacterIds.count(card->characterId)) {
+                            continue;
+                        }
+                        int slotsLeftAfterThis = remainingSlots - filledSlots - 1;
+                        bool mustAddNewAttr = requireDistinctAttrs
+                            && config.member - int(usedAttrs.size()) > slotsLeftAfterThis;
+                        if (mustAddNewAttr && usedAttrs.count(card->attr)) {
+                            continue;
+                        }
+                        usedCardIds.insert(card->cardId);
+                        usedCharacterIds.insert(card->characterId);
+                        usedAttrs.insert(card->attr);
+                        power += double(card->power.max);
+                        eventBonus += cardEventBonus(*card);
+                        skillValue += double(card->skill.max);
+                        linearScore += structuredCardScore(*card);
+                        filledSlots++;
+                    }
+
+                    if (requireDistinctAttrs) {
+                        eventBonus += worldBloomDiffAttrBonus(int(usedAttrs.size()));
+                    }
+                    double eventRate = 1.0 + (eventBonus + estimatedSupportBonus) / 100.0;
+                    return power * eventRate
+                        + 1380.0 * skillValue
+                        + 2100.0 * eventBonus
+                        + 12000.0 * linearScore
+                        + (requireDistinctAttrs ? 18000.0 * double(usedAttrs.size()) : 0.0);
+                };
+                auto scoreExactValue = [&](const std::vector<const CardDetail*>& deck) {
+                    auto normalized = normalizeDeckForLeader(deck);
+                    if (normalized.empty() || !deckMatchesFixedConstraints(normalized)) {
+                        return -1e18;
+                    }
+                    auto ret = getBestPermutation(
+                        this->deckCalculator, normalized, supportCards, sf,
+                        honorBonus, eventConfig.eventType, eventConfig.eventId, liveType, config
+                    );
+                    if (!ret.bestDeck.has_value()) {
+                        return -1e18;
+                    }
+                    return ret.bestDeck.value().targetValue;
+                };
+
+                std::vector<std::tuple<double, uint64_t, std::vector<const CardDetail*>>> candidates{};
+                std::unordered_set<uint64_t> candidateHashes{};
+                auto rememberCandidate = [&](const std::vector<const CardDetail*>& deck) {
+                    if (int(candidates.size()) >= std::max(maxSeedCount * 6, 96)) {
+                        return;
+                    }
+                    auto normalized = normalizeDeckForLeader(deck);
+                    if (normalized.empty() || !deckMatchesFixedConstraints(normalized)) {
+                        return;
+                    }
+                    auto hash = this->calcDeckHash(normalized);
+                    if (!candidateHashes.insert(hash).second) {
+                        return;
+                    }
+                    double score = scoreExactValue(normalized);
+                    if (score <= -1e17) {
+                        return;
+                    }
+                    candidates.emplace_back(score, hash, std::move(normalized));
+                };
+
+                int beamWidth = requireDistinctAttrs ? 96 : 80;
+                int optionLimit = requireDistinctAttrs ? 32 : 34;
+                for (const auto& rankedCards : rankedVariants) {
+                    if (int(candidates.size()) >= std::max(maxSeedCount * 6, 96)) {
+                        break;
+                    }
+                    std::vector<StructuredSeedState> beams{initial};
+                    if (!beams.empty()) {
+                        beams.front().score = scorePartialScore(beams.front());
+                    }
+
+                    while (!beams.empty() && int(beams.front().deck.size()) < config.member) {
+                        std::vector<StructuredSeedState> nextBeams{};
+                        for (const auto& beam : beams) {
+                            std::vector<const CardDetail*> options{};
+                            std::unordered_set<int> optionIds{};
+                            int remainingSlots = config.member - int(beam.deck.size());
+                            int missingAttrSlots = config.member - int(beam.usedAttrs.size());
+                            bool forceNewAttr = requireDistinctAttrs && missingAttrSlots >= remainingSlots;
+                            auto addOption = [&](const CardDetail* card, bool requireNewAttr) {
+                                if (card == nullptr || optionIds.count(card->cardId)) {
+                                    return;
+                                }
+                                if (beam.usedCardIds.count(card->cardId)
+                                    || beam.usedCharacterIds.count(card->characterId)) {
+                                    return;
+                                }
+                                if (requireNewAttr && beam.usedAttrs.count(card->attr)) {
+                                    return;
+                                }
+                                optionIds.insert(card->cardId);
+                                options.push_back(card);
+                            };
+
+                            auto collectOptions = [&](bool requireNewAttr) {
+                                for (const auto* card : rankedCards) {
+                                    if (int(options.size()) >= optionLimit) {
+                                        break;
+                                    }
+                                    addOption(card, requireNewAttr);
+                                }
+                                if (int(options.size()) < optionLimit + 8) {
+                                    for (const auto* card : rankedCards) {
+                                        if (int(options.size()) >= optionLimit + 8) {
+                                            break;
+                                        }
+                                        if (requiredCharacterIds.count(card->characterId)
+                                            || cardEventBonus(*card) >= 35.0) {
+                                            addOption(card, requireNewAttr);
+                                        }
+                                    }
+                                }
+                            };
+                            collectOptions(forceNewAttr);
+                            if (options.empty() && forceNewAttr) {
+                                collectOptions(false);
+                            }
+
+                            for (const auto* card : options) {
+                                auto next = beam;
+                                next.deck.push_back(card);
+                                next.usedCardIds.insert(card->cardId);
+                                next.usedCharacterIds.insert(card->characterId);
+                                next.usedAttrs.insert(card->attr);
+                                if (requiredCharacterIds.count(card->characterId)) {
+                                    next.score += 0.75;
+                                }
+                                if (!canStillSatisfyRequired(next)) {
+                                    continue;
+                                }
+                                next.score = scorePartialScore(next);
+                                nextBeams.push_back(std::move(next));
+                            }
+                        }
+                        std::sort(nextBeams.begin(), nextBeams.end(), [](const StructuredSeedState& a, const StructuredSeedState& b) {
+                            if (std::abs(a.score - b.score) > 1e-9) {
+                                return a.score > b.score;
+                            }
+                            auto aLast = a.deck.empty() ? 0 : a.deck.back()->cardId;
+                            auto bLast = b.deck.empty() ? 0 : b.deck.back()->cardId;
+                            return aLast < bLast;
+                        });
+                        if (int(nextBeams.size()) > beamWidth) {
+                            nextBeams.resize(beamWidth);
+                        }
+                        beams = std::move(nextBeams);
+                    }
+
+                    for (const auto& beam : beams) {
+                        if (int(beam.deck.size()) == config.member) {
+                            rememberCandidate(beam.deck);
+                        }
+                    }
+                }
+
+                std::sort(candidates.begin(), candidates.end(), [](const auto& a, const auto& b) {
+                    if (std::abs(std::get<0>(a) - std::get<0>(b)) > 1e-9) {
+                        return std::get<0>(a) > std::get<0>(b);
+                    }
+                    return std::get<1>(a) < std::get<1>(b);
+                });
+                int added = 0;
+                int addLimit = std::max(maxSeedCount * 2, 32);
+                for (const auto& [score, hash, deck] : candidates) {
+                    if (int(seeds.size()) >= seedBuildLimit || added++ >= addLimit) {
+                        break;
+                    }
+                    appendSeed(deck);
+                }
+            };
+
+            if (config.target == RecommendTarget::Mysekai) {
+                runMysekaiMixedSeeds();
+                return seeds;
+            }
+
+            if (config.target == RecommendTarget::Score && worldBloom) {
+                runBeamForRankedCards(allRanked, requireDistinctAttrs);
+            }
+
+            int usedUnits = 0;
+            int maxUnits = requireDistinctAttrs ? 8 : 5;
+            for (const auto& [unitScore, unit] : unitScores) {
+                if (int(seeds.size()) >= seedBuildLimit || usedUnits++ >= maxUnits) {
+                    break;
+                }
+                if (unit == 0) {
+                    runBeamForRankedCards(allRanked, false);
+                    continue;
+                }
+                auto bucketIt = unitBuckets.find(unit);
+                if (bucketIt == unitBuckets.end()) {
+                    continue;
+                }
+                runBeamForRankedCards(bucketIt->second, requireDistinctAttrs);
+            }
+
+            runScoreMixedSeeds();
+
+            if (config.target == RecommendTarget::Score && worldBloom && !seeds.empty()) {
+                std::vector<std::tuple<double, uint64_t, std::vector<const CardDetail*>>> rankedSeeds{};
+                rankedSeeds.reserve(seeds.size());
+                std::unordered_set<uint64_t> rankedHashes{};
+                for (const auto& deck : seeds) {
+                    auto normalized = normalizeDeckForLeader(deck);
+                    if (normalized.empty() || !deckMatchesFixedConstraints(normalized)) {
+                        continue;
+                    }
+                    auto hash = this->calcDeckHash(normalized);
+                    if (!rankedHashes.insert(hash).second) {
+                        continue;
+                    }
+                    auto ret = getBestPermutation(
+                        this->deckCalculator, normalized, supportCards, sf,
+                        honorBonus, eventConfig.eventType, eventConfig.eventId, liveType, config
+                    );
+                    if (!ret.bestDeck.has_value()) {
+                        continue;
+                    }
+                    rankedSeeds.emplace_back(ret.bestDeck.value().targetValue, hash, std::move(normalized));
+                }
+                std::sort(rankedSeeds.begin(), rankedSeeds.end(), [](const auto& a, const auto& b) {
+                    if (std::abs(std::get<0>(a) - std::get<0>(b)) > 1e-9) {
+                        return std::get<0>(a) > std::get<0>(b);
+                    }
+                    return std::get<1>(a) < std::get<1>(b);
+                });
+
+                seeds.clear();
+                seedHashes.clear();
+                for (const auto& [score, hash, deck] : rankedSeeds) {
+                    if (int(seeds.size()) >= maxSeedCount) {
+                        break;
+                    }
+                    if (seedHashes.insert(hash).second) {
+                        seeds.push_back(deck);
+                    }
+                }
+            }
+
+            return seeds;
+        };
+
         auto loadStoredSeedDecks = [&](const RlSeedBucket& sourceBucket, const std::vector<CardDetail>& sourceCards) {
             std::unordered_map<int, const CardDetail*> cardById{};
             for (const auto& card : sourceCards) {
@@ -2287,12 +3245,18 @@ std::vector<RecommendDeck> BaseDeckRecommend::recommendHighScoreDeck(
             fullSorted,
             std::max(config.limit * 4, 12)
         );
+        auto structuredSeedDecks = buildStructuredSeedDecks(
+            fullSorted,
+            std::max(config.limit * (eventConfig.eventType == Enums::EventType::world_bloom ? 5 : 3), 16)
+        );
         auto monoAttrSeedDecks = collectChallengeMonoAttrSeedDecks(config, &totalInfo, std::max(config.limit, 2));
         std::vector<const CardDetail*> warmStartDeck{};
         if (!rememberedSeedDecks.empty()) {
             warmStartDeck = rememberedSeedDecks.front();
         } else if (!transferSeedDecks.empty()) {
             warmStartDeck = transferSeedDecks.front();
+        } else if (!structuredSeedDecks.empty()) {
+            warmStartDeck = structuredSeedDecks.front();
         } else if (!rankSeedDecks.empty()) {
             warmStartDeck = rankSeedDecks.front();
         }
@@ -2310,6 +3274,17 @@ std::vector<RecommendDeck> BaseDeckRecommend::recommendHighScoreDeck(
             int replayLimit = warmStartDeck.empty() ? 1 : std::min(int(transferSeedDecks.size()), 2);
             for (int i = 0; i < replayLimit && !policyInfo.isTimeout(); ++i) {
                 evaluateDeckByCards(config, transferSeedDecks[i], policyInfo);
+            }
+        }
+        if (!structuredSeedDecks.empty()) {
+            int replayLimit = std::min(
+                int(structuredSeedDecks.size()),
+                eventConfig.eventType == Enums::EventType::world_bloom
+                    ? std::max(config.limit * 2, 12)
+                    : std::max(config.limit, 6)
+            );
+            for (int i = 0; i < replayLimit && !policyInfo.isTimeout(); ++i) {
+                evaluateDeckByCards(config, structuredSeedDecks[i], policyInfo);
             }
         }
         if (!rankSeedDecks.empty()) {
@@ -2755,6 +3730,7 @@ std::vector<RecommendDeck> BaseDeckRecommend::recommendHighScoreDeck(
             appendSeeds(storedDecks, std::max(refineLimit * 2, 8));
             appendSeeds(transferDecks, std::max(refineLimit * 2, 8));
             appendSeeds(rankDecks, std::max(refineLimit * 2, 8));
+            appendSeeds(structuredSeedDecks, std::max(refineLimit * 3, 12));
 
             std::unordered_set<uint64_t> visitedDecks{};
             auto tryEvaluate = [&](const std::vector<const CardDetail*>& deck) {
@@ -2930,6 +3906,10 @@ std::vector<RecommendDeck> BaseDeckRecommend::recommendHighScoreDeck(
             int storedSeedLimit = std::min(int(storedSeedDecks.size()), std::max(refineLimit * 2, 8));
             for (int i = 0; i < storedSeedLimit; ++i) {
                 gaSeedDecks.push_back(storedSeedDecks[i]);
+            }
+            int structuredSeedLimit = std::min(int(structuredSeedDecks.size()), std::max(refineLimit * 3, 12));
+            for (int i = 0; i < structuredSeedLimit; ++i) {
+                gaSeedDecks.push_back(structuredSeedDecks[i]);
             }
 
             int gaRefineBudgetMs = std::min(
