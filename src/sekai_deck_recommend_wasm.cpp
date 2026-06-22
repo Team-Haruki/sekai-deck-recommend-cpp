@@ -25,7 +25,19 @@
 #include "common/enum-maps.h"
 
 #include <emscripten/bind.h>
+#include <emscripten/emscripten.h>
 #include <emscripten/val.h>
+
+// 把 C++ 错误消息作为真正的 JS Error 抛到 JS 侧，
+// 这样 worker 的 catch(error) 能读到 error.message（而非落到兜底文案）。
+EM_JS(void, throwJsError, (const char* message), {
+    throw new Error(UTF8ToString(message));
+});
+
+[[noreturn]] static void rethrowAsJsError(const std::exception& e) {
+    throwJsError(e.what());
+    abort();  // 不可达，仅用于满足 [[noreturn]]
+}
 
 #include <algorithm>
 #include <cstdlib>
@@ -854,6 +866,7 @@ public:
     // emscripten::val accepts plain JS objects; we serialize them through JSON
     // to keep type handling identical to the recommend() entry.
     void updateMasterdataFromObject(emscripten::val data, const std::string& region) {
+      try {
         auto it = REGION_ENUM_MAP.find(region);
         if (it == REGION_ENUM_MAP.end())
             throw std::invalid_argument("Invalid region: " + region);
@@ -873,17 +886,21 @@ public:
         }
         region_masterdata[it->second] = std::make_shared<MasterData>();
         region_masterdata[it->second]->loadFromStrings(m);
+      } catch (const std::exception& e) { rethrowAsJsError(e); }
     }
 
     void updateMusicmetasFromString(const std::string& s, const std::string& region) {
+      try {
         auto it = REGION_ENUM_MAP.find(region);
         if (it == REGION_ENUM_MAP.end())
             throw std::invalid_argument("Invalid region: " + region);
         region_musicmetas[it->second] = std::make_shared<MusicMetas>();
         region_musicmetas[it->second]->loadFromString(s);
+      } catch (const std::exception& e) { rethrowAsJsError(e); }
     }
 
     std::string recommend(const std::string& optionsJson) {
+      try {
         auto optsDoc = json_doc::parse(optionsJson, "wasm recommend options");
         json_view opts = optsDoc.root();
         auto prepared = buildOptions(opts, region_masterdata, region_musicmetas);
@@ -908,9 +925,11 @@ public:
         for (const auto& d : result) jsonArrayAppend(decks, deckToJson(outDoc.get(), d));
         jsonAddValue(outDoc.get(), out, "decks", decks);
         return dumpMutableJson(out);
+      } catch (const std::exception& e) { rethrowAsJsError(e); return {}; }
     }
 
     std::string recommendAreaItems(const std::string& optionsJson) {
+      try {
         auto optsDoc = json_doc::parse(optionsJson, "wasm area item recommend options");
         json_view opts = optsDoc.root();
 
@@ -954,9 +973,11 @@ public:
             jsonArrayAppend(out, areaItemToJson(outDoc.get(), item));
         }
         return dumpMutableJson(out);
+      } catch (const std::exception& e) { rethrowAsJsError(e); return {}; }
     }
 
     std::string recommendMusic(const std::string& optionsJson) {
+      try {
         auto optsDoc = json_doc::parse(optionsJson, "wasm music recommend options");
         json_view opts = optsDoc.root();
 
@@ -1014,9 +1035,11 @@ public:
             jsonArrayAppend(out, recommendMusicToJson(outDoc.get(), music));
         }
         return dumpMutableJson(out);
+      } catch (const std::exception& e) { rethrowAsJsError(e); return {}; }
     }
 
     std::string calculateExactLive(const std::string& optionsJson) {
+      try {
         auto optsDoc = json_doc::parse(optionsJson, "wasm exact live options");
         json_view opts = optsDoc.root();
 
@@ -1065,9 +1088,11 @@ public:
         );
         MutableJsonDoc outDoc;
         return dumpMutableJson(liveExactDetailToJson(outDoc.get(), detail));
+      } catch (const std::exception& e) { rethrowAsJsError(e); return {}; }
     }
 
     std::string getWorldBloomSupportCards(const std::string& optionsJson) {
+      try {
         auto optsDoc = json_doc::parse(optionsJson, "wasm world bloom support options");
         json_view opts = optsDoc.root();
 
@@ -1162,6 +1187,7 @@ public:
             jsonArrayAppend(out, card);
         }
         return dumpMutableJson(out);
+      } catch (const std::exception& e) { rethrowAsJsError(e); return {}; }
     }
 };
 
