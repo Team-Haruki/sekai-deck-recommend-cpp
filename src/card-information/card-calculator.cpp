@@ -15,17 +15,12 @@ std::optional<CardDetail> CardCalculator::getCardDetail(
     const std::optional<std::unordered_map<int, int>>& customBonusSupportUnits
 )
 {
-    auto& cards = this->dataProvider.masterData->cards;
-
-    Card card{};
-    try {
-        card = findOrThrow(cards, [&](const auto &it) { 
-            return it.id == userCard.cardId; 
-        });
-    } catch (const ElementNoFoundError& e) {
+    const Card* cardPtr = this->dataProvider.masterData->findCardById(userCard.cardId);
+    if (!cardPtr) {
         std::cerr << "[warning] card id " << userCard.cardId << " appears in user data but not in master data." << std::endl;
         return std::nullopt;
     }
+    const Card& card = *cardPtr;
 
     CardConfig cfg{};
     // 单独卡配置覆盖稀有度卡配置
@@ -43,6 +38,8 @@ std::optional<CardDetail> CardCalculator::getCardDetail(
 
     auto userCard0 = this->cardService.applyCardConfig(userCard, card, cfg);
     auto units = this->cardService.getCardUnits(card);
+    unsigned int unitMask = 0;
+    for (int u : units) unitMask |= (1u << u);
     auto skill = this->skillCalculator.getCardSkill(userCard0, card, scoreUpLimit);
     auto power = this->powerCalculator.getCardPower(
         userCard0, card, units, userAreaItemLevels, hasCanvasBonus, userGateBonuses,
@@ -79,6 +76,7 @@ std::optional<CardDetail> CardCalculator::getCardDetail(
         .cardRarityType = card.cardRarityType,
         .characterId = card.characterId,
         .units = units,
+        .unitMask = unitMask,
         .attr = card.attr,
         .power = power,
         .skill = skill,
@@ -160,10 +158,10 @@ SupportDeckCard CardCalculator::getSupportDeckCard(
 {
     UserCard supportCard = card;
     if (masterMax || skillMax) {
-        auto& cards = this->dataProvider.masterData->cards;
-        auto cardData = findOrThrow(cards, [&](const Card& it) {
-            return it.id == card.cardId;
-        }, [&]() { return "Support Deck Card not found for cardId=" + std::to_string(card.cardId); });
+        const Card* cardDataPtr = this->dataProvider.masterData->findCardById(card.cardId);
+        if (!cardDataPtr)
+            throw ElementNoFoundError("Support Deck Card not found for cardId=" + std::to_string(card.cardId));
+        const Card& cardData = *cardDataPtr;
         CardConfig cfg{};
         cfg.masterMax = masterMax;
         cfg.skillMax = skillMax;

@@ -18,7 +18,7 @@ double LiveCalculator::getBaseScore(const MusicMeta &musicMeta, int liveType)
     return musicMeta.base_score;
 }
 
-std::vector<double> LiveCalculator::getSkillScore(const MusicMeta &musicMeta, int liveType)
+const std::vector<double>& LiveCalculator::getSkillScore(const MusicMeta &musicMeta, int liveType)
 {
     if (Enums::LiveType::isAuto(liveType))
         return musicMeta.skill_score_auto;
@@ -150,9 +150,16 @@ LiveDetail LiveCalculator::getLiveDetailByDeck(
     // 与技能无关的分数比例
     auto baseRate = this->getBaseScore(musicMeta, liveType);
     // 技能分数比例，如果是最佳/最差技能计算则按加成排序
-    auto skillScores = this->getSkillScore(musicMeta, liveType);
-    this->sortSkillRate(skills.sorted, deckDetail.cards.size(), skillScores);
-    auto& skillRate = skillScores;
+    // 默认不排序时直接复用 musicMeta 中的向量，仅在需要排序时才拷贝
+    const auto& baseSkillScores = this->getSkillScore(musicMeta, liveType);
+    std::vector<double> sortedSkillScores;
+    const std::vector<double>* skillRatePtr = &baseSkillScores;
+    if (skills.sorted) {
+        sortedSkillScores = baseSkillScores;
+        this->sortSkillRate(true, deckDetail.cards.size(), sortedSkillScores);
+        skillRatePtr = &sortedSkillScores;
+    }
+    const auto& skillRate = *skillRatePtr;
     // 计算总的分数比例
     double rate = baseRate;
     for (size_t i = 0; i < skills.details.size(); ++i) {

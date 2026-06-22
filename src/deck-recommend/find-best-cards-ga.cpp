@@ -120,6 +120,38 @@ std::vector<double> calcRandomSelectWeights(
     return weights;
 }
 
+// 指针重载：避免在按角色分组时拷贝整个 CardDetail
+std::vector<double> calcRandomSelectWeights(
+    const std::vector<const CardDetail*>& cards,
+    RecommendTarget target,
+    const std::vector<CardDetail>& excluded
+) {
+    std::vector<double> weights{};
+    for (const auto* card : cards) {
+        bool skip = false;
+        for (const auto& ex : excluded) {
+            if (card->cardId == ex.cardId) {
+                skip = true;
+                break;
+            }
+        }
+        if (skip) {
+            weights.push_back(0.0);
+            continue;
+        }
+
+        auto value = calcSearchWeightValue(*card, target);
+        weights.push_back(value * value);
+    }
+    double sum = std::accumulate(weights.begin(), weights.end(), 0.0);
+    if (sum > 0)
+        for (auto& weight : weights)
+            weight /= sum;
+    for (int i = 1; i < (int)weights.size(); ++i)
+        weights[i] += weights[i - 1];
+    return weights;
+}
+
 
 // 根据权重随机选择一个index
 int randomSelectIndexByWeight(Rng& rng, const std::vector<double>& weights) {
@@ -192,8 +224,8 @@ void BaseDeckRecommend::findBestCardsGA(
         // 检查是否已经计算过这个组合
         auto deckHash = individual.calcDeckHash();
         double targetValue = 0.0;
-        if (gaInfo.deckTargetValueMap.count(deckHash)) {
-            targetValue = gaInfo.deckTargetValueMap[deckHash];
+        if (auto it = gaInfo.deckTargetValueMap.find(deckHash); it != gaInfo.deckTargetValueMap.end()) {
+            targetValue = it->second;
         } else {
             // 计算当前综合力
             std::vector<const CardDetail*> deck{};
@@ -226,10 +258,10 @@ void BaseDeckRecommend::findBestCardsGA(
     auto allCardWeights = calcRandomSelectWeights(cardDetails, cfg.target, fixedCards);
 
     // 根据卡的角色map参与组队的卡牌
-    std::vector<CardDetail> charaCardDetails[MAX_CID] = {};
+    std::vector<const CardDetail*> charaCardDetails[MAX_CID] = {};
     std::vector<double> charaCardWeights[MAX_CID] = {};
-    for (const auto& card : cardDetails) 
-        charaCardDetails[card.characterId].push_back(card);
+    for (const auto& card : cardDetails)
+        charaCardDetails[card.characterId].push_back(&card);
     for (int i = 0; i < MAX_CID; ++i) 
         charaCardWeights[i] = calcRandomSelectWeights(charaCardDetails[i], cfg.target, fixedCards);
 
@@ -328,7 +360,7 @@ void BaseDeckRecommend::findBestCardsGA(
             // 每个角色随机1张
             for (const auto& chara : valid_charas) {
                 auto idx = randomSelectIndexByWeight(rng, charaCardWeights[chara]);
-                individual.addCard(&charaCardDetails[chara][idx]);
+                individual.addCard(charaCardDetails[chara][idx]);
             }
         } 
         else {
@@ -433,7 +465,7 @@ void BaseDeckRecommend::findBestCardsGA(
                 if (isFixedChara) {
                     // 如果是固定角色，则只能从该角色的卡随机
                     index = randomSelectIndexByWeight(rng, charaCardWeights[a.deck[pos]->characterId]);
-                    newCard = &charaCardDetails[a.deck[pos]->characterId][index];
+                    newCard = charaCardDetails[a.deck[pos]->characterId][index];
                 }
                 else {
                     // 否则从所有卡随机

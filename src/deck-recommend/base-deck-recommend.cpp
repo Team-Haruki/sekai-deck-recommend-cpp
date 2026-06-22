@@ -1,6 +1,7 @@
 #include "deck-recommend/base-deck-recommend.h"
 #include "card-priority/card-priority-filter.h"
 #include "common/timer.h"
+#include <array>
 #include <chrono>
 #include <cmath>
 #include <cstdio>
@@ -70,63 +71,82 @@ BestPermutationResult BaseDeckRecommend::getBestPermutation(
     int liveType,
     const DeckRecommendConfig& config
 ) const {
-    auto orderedDeckCards = deckCards;
     bool isWorldBloomFinale = eventId.has_value() && this->dataProvider.masterData->isWorldBloomFinale(eventId.value());
     int specialCharacterId = 0;
     if (isWorldBloomFinale && !deckCards.empty()) {
         specialCharacterId = deckCards.front()->characterId;
     }
+    bool challenge = Enums::LiveType::isChallenge(liveType);
     {
-        std::unordered_set<int> cardIds{};
-        std::unordered_set<int> characterIds{};
-        for (const auto* card : orderedDeckCards) {
+        // deck size is bounded by member (<=5); linear-scan dedup avoids per-leaf hash-set allocation
+        std::array<int, 5> cardIds{};
+        std::array<int, 5> characterIds{};
+        int nCardIds = 0, nCharacterIds = 0;
+        for (const auto* card : deckCards) {
             if (!card) {
                 return {};
             }
-            if (!cardIds.insert(card->cardId).second) {
-                return {};
-            }
-            if (!Enums::LiveType::isChallenge(liveType)) {
-                if (!characterIds.insert(card->characterId).second) {
-                    return {};
-                }
+            for (int i = 0; i < nCardIds; ++i)
+                if (cardIds[i] == card->cardId) return {};
+            cardIds[nCardIds++] = card->cardId;
+            bool seenChar = false;
+            for (int i = 0; i < nCharacterIds; ++i)
+                if (characterIds[i] == card->characterId) { seenChar = true; break; }
+            if (seenChar) {
+                if (!challenge) return {};
             } else {
-                characterIds.insert(card->characterId);
+                characterIds[nCharacterIds++] = card->characterId;
             }
         }
 
         for (const auto& fixedCardId : config.fixedCards) {
-            if (!cardIds.count(fixedCardId)) {
-                return {};
-            }
+            bool found = false;
+            for (int i = 0; i < nCardIds; ++i)
+                if (cardIds[i] == fixedCardId) { found = true; break; }
+            if (!found) return {};
         }
         for (const auto& characterId : resolveRequiredCharacters(config, isWorldBloomFinale, specialCharacterId)) {
-            if (!characterIds.count(characterId)) {
-                return {};
-            }
+            bool found = false;
+            for (int i = 0; i < nCharacterIds; ++i)
+                if (characterIds[i] == characterId) { found = true; break; }
+            if (!found) return {};
         }
     }
 
-    if (!config.fixedCards.empty() && !applyFixedCardOrder(orderedDeckCards, config.fixedCards)) {
+    // Only materialize a reordered copy when fixed-card order or leader rotation is required;
+    // the common path passes deckCards through by reference with no per-leaf allocation.
+    const std::vector<const CardDetail*>* orderedPtr = &deckCards;
+    std::vector<const CardDetail*> orderedStorage;
+    auto materialize = [&]() -> std::vector<const CardDetail*>& {
+        if (orderedPtr != &orderedStorage) {
+            orderedStorage = deckCards;
+            orderedPtr = &orderedStorage;
+        }
+        return orderedStorage;
+    };
+
+    if (!config.fixedCards.empty() && !applyFixedCardOrder(materialize(), config.fixedCards)) {
         return {};
     }
 
     auto leaderCharacterId = resolveLeaderCharacterId(config, isWorldBloomFinale, specialCharacterId);
     if (leaderCharacterId.has_value()) {
+        auto& ordered = materialize();
         auto leaderIt = std::find_if(
-            orderedDeckCards.begin(),
-            orderedDeckCards.end(),
+            ordered.begin(),
+            ordered.end(),
             [&](const CardDetail* card) {
                 return card->characterId == leaderCharacterId.value();
             }
         );
-        if (leaderIt == orderedDeckCards.end()) {
+        if (leaderIt == ordered.end()) {
             return {};
         }
-        if (leaderIt != orderedDeckCards.begin()) {
-            std::rotate(orderedDeckCards.begin(), leaderIt, leaderIt + 1);
+        if (leaderIt != ordered.begin()) {
+            std::rotate(ordered.begin(), leaderIt, leaderIt + 1);
         }
     }
+    const std::vector<const CardDetail*>& orderedDeckCards = *orderedPtr;
 
     bool bestSkillAsLeader = config.bestSkillAsLeader;
     // 存在固定队长角色则不允许把技能最强的换到队长
@@ -1594,8 +1614,8 @@ std::vector<RecommendDeck> BaseDeckRecommend::recommendHighScoreDeck(
                 return -1e18;
             }
             auto deckHash = this->calcDeckHash(normalizedDeck);
-            if (info.deckTargetValueMap.count(deckHash)) {
-                return info.deckTargetValueMap[deckHash];
+            if (auto it = info.deckTargetValueMap.find(deckHash); it != info.deckTargetValueMap.end()) {
+                return it->second;
             }
             auto ret = getBestPermutation(
                 this->deckCalculator, normalizedDeck, supportCards, sf,

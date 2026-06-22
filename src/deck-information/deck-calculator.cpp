@@ -15,17 +15,15 @@ DeckBonusInfo DeckCalculator::getDeckBonus(
 {
     DeckBonusInfo ret{};
 
-    // 如果没有预处理好活动加成，则返回空
-    for (const auto &card : deckCards) 
+    // 如果没有预处理好活动加成，则返回空（array 默认全 0）
+    for (const auto &card : deckCards)
         if (!card->maxEventBonus.has_value()) {
-            ret.cardBonus = std::vector<double>(deckCards.size(), 0.0);
             return ret;
         }
 
     // 正常加成
-    ret.cardBonus.reserve(deckCards.size());
-    for (const auto &card : deckCards) {
-        ret.cardBonus.push_back(card->maxEventBonus.value());
+    for (int i = 0; i < (int)deckCards.size(); ++i) {
+        ret.cardBonus[i] = deckCards[i]->maxEventBonus.value();
     }
 
     if (eventId.has_value() && this->dataProvider.masterData->isWorldBloomFinale(eventId.value())) {
@@ -258,9 +256,9 @@ std::vector<DeckDetail> DeckCalculator::getDeckDetailByCards(
     // 枚举技能状态，计算当前卡组的实际技能效果（包括选择花前/花后技能），并归纳卡牌在队伍中的详情信息
     std::array<DeckCardSkillDetail, 5> skills{};
     std::array<int, 5> order{};
-    std::vector<double> memberSkillMaxs{};
-    std::vector<std::pair<double, double>> scoreUps{};
-    scoreUps.reserve(1 << needEnumerateCount);
+    // scoreUps 的上界为 2^needEnumerateCount，needEnumerateCount <= card_num <= 5，故 <= 32
+    std::array<std::pair<double, double>, 32> scoreUps{};
+    int scoreUpsCount = 0;
     std::vector<DeckDetail> ret{};
     for (int mask = needEnumerateStatusMask; mask >= 0; mask = mask ? (mask - 1) & needEnumerateStatusMask : -1) {
         // 根据mask枚举花前/花后技能状态，计算实际技能
@@ -279,23 +277,26 @@ std::vector<DeckDetail> DeckCalculator::getDeckDetailByCards(
             // 吸分
             if (s.hasScoreUpReference) {
                 s.scoreUp -= s.scoreUpReferenceMax; // 从max回到还没吸的基础值
-                memberSkillMaxs.clear();
+                std::array<double, 5> memberSkillMaxs{};
+                int memberSkillMaxsCount = 0;
                 // 收集其他成员的技能最大值
                 for (int j = 0; j < card_num; ++j) if (i != j) {
                     double m = skills[j].scoreUpToReference;
                     m = std::min(std::floor(m * s.scoreUpReferenceRate / 100.), s.scoreUpReferenceMax);
-                    memberSkillMaxs.push_back(m);
+                    memberSkillMaxs[memberSkillMaxsCount++] = m;
                 }
+                auto begin = memberSkillMaxs.begin();
+                auto end = begin + memberSkillMaxsCount;
                 // 不同选择策略
                 double chosenSkillMax = 0;
-                if (skillReferenceChooseStrategy == SkillReferenceChooseStrategy::Max) 
-                    chosenSkillMax = *std::max_element(memberSkillMaxs.begin(), memberSkillMaxs.end());
+                if (skillReferenceChooseStrategy == SkillReferenceChooseStrategy::Max)
+                    chosenSkillMax = *std::max_element(begin, end);
                 else if (skillReferenceChooseStrategy == SkillReferenceChooseStrategy::Min)
-                    chosenSkillMax = *std::min_element(memberSkillMaxs.begin(), memberSkillMaxs.end());
+                    chosenSkillMax = *std::min_element(begin, end);
                 else if (skillReferenceChooseStrategy == SkillReferenceChooseStrategy::Average)
-                    chosenSkillMax = std::accumulate(memberSkillMaxs.begin(), memberSkillMaxs.end(), 0.0) / memberSkillMaxs.size();
-                s.scoreUp += chosenSkillMax; 
-            } 
+                    chosenSkillMax = std::accumulate(begin, end, 0.0) / memberSkillMaxsCount;
+                s.scoreUp += chosenSkillMax;
+            }
         }
 
         std::iota(order.begin(), order.begin() + card_num, 0);
@@ -321,14 +322,14 @@ std::vector<DeckDetail> DeckCalculator::getDeckDetailByCards(
             else otherScoreUpSum += skills[i].scoreUp;
         }
         bool skip = false;
-        for (const auto& scoreUp : scoreUps) {
-            if (scoreUp.first >= leaderScoreUp && scoreUp.second >= otherScoreUpSum) {
+        for (int k = 0; k < scoreUpsCount; ++k) {
+            if (scoreUps[k].first >= leaderScoreUp && scoreUps[k].second >= otherScoreUpSum) {
                 skip = true;
                 break;
             }
         }
         if (skip) continue;
-        scoreUps.push_back({ leaderScoreUp, otherScoreUpSum });
+        scoreUps[scoreUpsCount++] = { leaderScoreUp, otherScoreUpSum };
 
         // 归纳卡牌在队伍中的详情信息
         std::vector<DeckCardDetail> cards{};

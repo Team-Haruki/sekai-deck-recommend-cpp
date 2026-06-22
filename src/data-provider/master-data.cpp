@@ -296,6 +296,60 @@ void MasterData::loadFromJsons(std::map<std::string, json_doc>& jsons) {
     addFakeEvent(Enums::EventType::marathon);
     addFakeEvent(Enums::EventType::cheerful);
     addLegacyWorldBloom2FinaleIfNeeded(*this);
+
+    // 构建 id 索引（addFakeEvent / legacy 不改动这些 vector，此处已稳定）
+    cardIdToIndex.clear();
+    cardIdToIndex.reserve(cards.size() * 2);
+    for (int i = 0; i < int(cards.size()); ++i)
+        cardIdToIndex[cards[i].id] = i;
+
+    skillIdToIndex.clear();
+    skillIdToIndex.reserve(skills.size() * 2);
+    for (int i = 0; i < int(skills.size()); ++i)
+        skillIdToIndex[skills[i].id] = i;
+
+    cardEpisodeIdToIndex.clear();
+    cardEpisodeIdToIndex.reserve(cardEpisodes.size() * 2);
+    for (int i = 0; i < int(cardEpisodes.size()); ++i)
+        cardEpisodeIdToIndex[cardEpisodes[i].id] = i;
+
+    characterRankToIndex.clear();
+    characterRankToIndex.reserve(characterRanks.size() * 2);
+    for (int i = 0; i < int(characterRanks.size()); ++i)
+        characterRankToIndex[characterRanks[i].characterId * 1000 + characterRanks[i].characterRank] = i;
+
+    worldBloomFinaleEventIds.clear();
+    for (const auto& worldBloom : worldBlooms)
+        if (worldBloom.worldBloomChapterType == "finale")
+            worldBloomFinaleEventIds.insert(worldBloom.eventId);
+}
+
+const Card* MasterData::findCardById(int id) const {
+    auto it = cardIdToIndex.find(id);
+    if (it == cardIdToIndex.end())
+        return nullptr;
+    return &cards[it->second];
+}
+
+const Skill* MasterData::findSkillById(int id) const {
+    auto it = skillIdToIndex.find(id);
+    if (it == skillIdToIndex.end())
+        return nullptr;
+    return &skills[it->second];
+}
+
+const CardEpisode* MasterData::findCardEpisodeById(int id) const {
+    auto it = cardEpisodeIdToIndex.find(id);
+    if (it == cardEpisodeIdToIndex.end())
+        return nullptr;
+    return &cardEpisodes[it->second];
+}
+
+const CharacterRank* MasterData::findCharacterRank(int characterId, int characterRank) const {
+    auto it = characterRankToIndex.find(characterId * 1000 + characterRank);
+    if (it == characterRankToIndex.end())
+        return nullptr;
+    return &characterRanks[it->second];
 }
 
 void MasterData::loadFromFiles(const std::string& baseDir) {
@@ -476,12 +530,7 @@ int MasterData::getWorldBloomEventTurn(int eventId) const
 
 bool MasterData::isWorldBloomFinale(int eventId) const
 {
-    for (const auto& worldBloom : worldBlooms) {
-        if (worldBloom.eventId == eventId && worldBloom.worldBloomChapterType == "finale") {
-            return true;
-        }
-    }
-    return false;
+    return worldBloomFinaleEventIds.count(eventId) > 0;
 }
 
 int MasterData::getEventCardBonusCountLimit(int eventId) const

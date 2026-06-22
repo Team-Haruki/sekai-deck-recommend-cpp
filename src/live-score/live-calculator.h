@@ -74,7 +74,7 @@ public:
      * @param liveType Live类型
      * @private
      */
-    std::vector<double> getSkillScore(const MusicMeta &musicMeta, int liveType);
+    const std::vector<double>& getSkillScore(const MusicMeta &musicMeta, int liveType);
 
     /**
      * 根据情况排序技能数据

@@ -53,7 +53,11 @@ static int calcPowerUpperBound(
         return std::numeric_limits<int>::max();
     }
 
-    std::sort(remainingPowers.begin(), remainingPowers.end(), std::greater<>());
+    // 只需要最大的 needed (<=5) 个，nth_element 即可，避免对整个剩余卡池全排序
+    if (needed > 0 && needed < int(remainingPowers.size())) {
+        std::nth_element(remainingPowers.begin(), remainingPowers.begin() + needed,
+                         remainingPowers.end(), std::greater<>());
+    }
 
     int powerUpperBound = honorBonus + selectedPowerSum;
     for (int i = 0; i < needed; ++i) {
@@ -112,12 +116,17 @@ static double calcScoreUpperBound(
         remainingSkills.push_back(card.skill.max);
     }
 
-    std::sort(remainingSkills.begin(), remainingSkills.end(), std::greater<>());
-    for (const auto skill : remainingSkills) {
-        if (int(skills.size()) >= member) {
-            break;
+    // 只需要补足到 member 张，取剩余卡池中技能最大的若干张即可（nth_element 避免全排序）
+    int neededSkills = member - int(skills.size());
+    if (neededSkills > 0) {
+        int k = std::min(neededSkills, int(remainingSkills.size()));
+        if (k < int(remainingSkills.size())) {
+            std::nth_element(remainingSkills.begin(), remainingSkills.begin() + k,
+                             remainingSkills.end(), std::greater<>());
         }
-        skills.push_back(skill);
+        for (int i = 0; i < k; ++i) {
+            skills.push_back(remainingSkills[i]);
+        }
     }
 
     if (int(skills.size()) < member) {
@@ -199,12 +208,17 @@ static double calcSkillTargetUpperBound(
         remainingSkills.push_back(card.skill.max);
     }
 
-    std::sort(remainingSkills.begin(), remainingSkills.end(), std::greater<>());
-    for (const auto skill : remainingSkills) {
-        if (int(skills.size()) >= member) {
-            break;
+    // 只需要补足到 member 张，取剩余卡池中技能最大的若干张即可（nth_element 避免全排序）
+    int neededSkills = member - int(skills.size());
+    if (neededSkills > 0) {
+        int k = std::min(neededSkills, int(remainingSkills.size()));
+        if (k < int(remainingSkills.size())) {
+            std::nth_element(remainingSkills.begin(), remainingSkills.begin() + k,
+                             remainingSkills.end(), std::greater<>());
         }
-        skills.push_back(skill);
+        for (int i = 0; i < k; ++i) {
+            skills.push_back(remainingSkills[i]);
+        }
     }
 
     if (int(skills.size()) < member) {
@@ -344,7 +358,7 @@ void BaseDeckRecommend::findBestCardsDFS(
             // C位一定是技能最好的卡牌，跳过技能比C位还好的
             if (deckCards.size() >= cIndex + 1 && deckCards[cIndex]->skill.isCertainlyLessThan(card.skill)) continue;
             // 为了优化性能，必须和C位同色或同组
-            if (deckCards.size() >= cIndex + 1 && card.attr != deckCards[cIndex]->attr && !containsAny(deckCards[cIndex]->units, card.units)) {
+            if (deckCards.size() >= cIndex + 1 && card.attr != deckCards[cIndex]->attr && !(deckCards[cIndex]->unitMask & card.unitMask)) {
                 continue;
             }
         }

@@ -24,6 +24,7 @@ struct CardDetail {
     int cardRarityType;
     int characterId;
     std::vector<int> units;
+    unsigned int unitMask = 0;   // units 的位掩码，加速 DFS 中的同单位重叠判断
     int attr;
     CardDetailMap<DeckCardPowerDetail> power;
     CardDetailMap<DeckCardSkillDetail> skill;

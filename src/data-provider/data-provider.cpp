@@ -6,7 +6,7 @@ void DataProvider::init()
 {
     if (inited) return;
 
-    std::map<std::string, std::set<int>> unitCharacters = {
+    static const std::map<std::string, std::set<int>> unitCharacters = {
         { "lightsound", {1, 2, 3, 4} },
         { "idol", {5, 6, 7, 8} },
         { "street", {9, 10, 11, 12} },

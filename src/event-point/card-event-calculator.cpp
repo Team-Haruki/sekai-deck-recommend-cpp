@@ -87,12 +87,10 @@ CardEventBonusInfo CardEventCalculator::getCardEventBonus(
     const std::optional<std::unordered_map<int, int>>& customBonusSupportUnits
 )
 {
-    auto& cards = this->dataProvider.masterData->cards;
-    auto card = findOrThrow(
-        cards,
-        [&](const Card& it) { return it.id == userCard.cardId; },
-        [&]() { return "Card not found for cardId=" + std::to_string(userCard.cardId); }
-    );
+    const Card* cardPtr = this->dataProvider.masterData->findCardById(userCard.cardId);
+    if (!cardPtr)
+        throw ElementNoFoundError("Card not found for cardId=" + std::to_string(userCard.cardId));
+    const Card& card = *cardPtr;
     auto& eventCards = this->dataProvider.masterData->eventCards;
     auto& eventRarityBonusRates = this->dataProvider.masterData->eventRarityBonusRates;
 

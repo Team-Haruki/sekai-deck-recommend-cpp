@@ -6,6 +6,8 @@
 #include "event-point/event-service.h"
 #include "card-information/card-calculator.h"
 
+#include <array>
+
 enum class SkillReferenceChooseStrategy {
     Max,
     Min,
@@ -13,7 +15,7 @@ enum class SkillReferenceChooseStrategy {
 };
 
 struct DeckBonusInfo {
-    std::vector<double> cardBonus{};
+    std::array<double, 5> cardBonus{};   // 按卡下标的活动加成（deck <=5），未用项保持 0
     double diffAttrBonus = 0.;
     double totalBonus = 0.;
 };

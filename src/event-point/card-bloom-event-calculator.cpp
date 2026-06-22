@@ -8,10 +8,10 @@ std::optional<double> CardBloomEventCalculator::getCardSupportDeckBonus(
 )
 {
     if (specialCharacterId <= 0) return std::nullopt;
-    auto& cards = dataProvider.masterData->cards;
-    auto card = findOrThrow(cards, [&](const Card& it) { 
-        return it.id == userCard.cardId; 
-    }, [&]() { return "Support Deck Card not found for cardId=" + std::to_string(userCard.cardId); });
+    const Card* cardPtr = dataProvider.masterData->findCardById(userCard.cardId);
+    if (!cardPtr)
+        throw ElementNoFoundError("Support Deck Card not found for cardId=" + std::to_string(userCard.cardId));
+    const Card& card = *cardPtr;
 
     if (requireSpecialUnitMatch) {
         // 需要先判断一张卡牌是否是指定组合，如果不是的话不使用支援加成

@@ -3,6 +3,9 @@
 
 #include "data-provider/master-data-types.h"
 
+#include <unordered_map>
+#include <unordered_set>
+
 
 constexpr int legacyWorldBloom2FinaleEventId = 180;
 constexpr int legacyWorldBloom2FinaleCardBonusCountLimit = 4;
@@ -59,6 +62,20 @@ public:
     std::vector<WorldBloomSupportDeckBonus> worldBloomSupportDeckBonusesWL1;
     std::vector<WorldBloomSupportDeckBonus> worldBloomSupportDeckBonusesWL2;
     std::vector<WorldBloomSupportDeckBonus> worldBloomSupportDeckBonusesWL3;
+
+    // id -> 在对应 vector 中的下标索引，避免热路径上的 O(n) 线性查找。
+    // 在 loadFromJsons 末尾构建；对应 vector 之后不再变动。
+    std::unordered_map<int, int> cardIdToIndex;
+    std::unordered_map<int, int> skillIdToIndex;
+    std::unordered_map<int, int> cardEpisodeIdToIndex;
+    std::unordered_map<int, int> characterRankToIndex;   // key = characterId * 1000 + characterRank
+    std::unordered_set<int> worldBloomFinaleEventIds;    // 预计算的终章活动 id 集合
+
+    // 按 id 查，找不到返回 nullptr（O(1)）。
+    const Card* findCardById(int id) const;
+    const Skill* findSkillById(int id) const;
+    const CardEpisode* findCardEpisodeById(int id) const;
+    const CharacterRank* findCharacterRank(int characterId, int characterRank) const;
 
     void loadFromJsons(std::map<std::string, json_doc>& jsons);
 
