@@ -3899,7 +3899,11 @@ std::vector<RecommendDeck> BaseDeckRecommend::recommendHighScoreDeck(
 
         mergeCalcInfo(totalInfo, policyInfo);
         runLocalRefine(totalInfo);
-        if (config.target == RecommendTarget::Score && !totalInfo.isTimeout()) {
+        // Seeded full-pool GA refine for ALL targets (previously Score-only). The
+        // linear-policy beam probabilistically misses non-flat optima for bonus/
+        // skill/mysekai; a short GA over the full pool seeded from RL's best decks
+        // lets RL inherit GA's basin coverage and reliably reach the optimum.
+        if (!totalInfo.isTimeout()) {
             int refineLimit = std::min(config.limit, 6);
             auto gaSeedDecks = collectSeedDecks(totalInfo, fullSorted, std::max(refineLimit * 5, 20));
             auto storedSeedDecks = loadStoredSeedDecks(seedBucket, fullSorted);
