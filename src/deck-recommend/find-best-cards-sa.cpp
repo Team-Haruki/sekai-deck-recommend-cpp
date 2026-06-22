@@ -285,10 +285,16 @@ void BaseDeckRecommend::findBestCardsSA(
             no_improve_iter_num = 0;
         }
 
-        auto current_time = std::chrono::high_resolution_clock::now();
-        auto elapsed_time = std::chrono::duration_cast<std::chrono::milliseconds>(current_time - start_time).count();
-        if (elapsed_time > cfg.saMaxTimeMs) {
-            break;
+        // 时间检查每 256 次迭代做一次（与 RecommendCalcInfo::isTimeout 的节流一致），
+        // 避免每次迭代都调用昂贵的 clock::now()（profiling 显示其占 SA ~20% 时间）。
+        // 迭代/无改进次数达上限时本检查不触发，结果与逐次检查一致；仅当 saMaxTimeMs
+        // 是绑定约束时，终止可能延后至多 256 次迭代。
+        if ((iter_num & 255) == 0) {
+            auto current_time = std::chrono::high_resolution_clock::now();
+            auto elapsed_time = std::chrono::duration_cast<std::chrono::milliseconds>(current_time - start_time).count();
+            if (elapsed_time > cfg.saMaxTimeMs) {
+                break;
+            }
         }
         temperature *= cfg.saCoolingRate;
     }
