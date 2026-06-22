@@ -164,7 +164,58 @@ path that computes the target value without materializing the per-card detail �
 deferring full `DeckDetail` construction to the winning deck — would cut the
 dominant cost. This is a larger, higher-risk refactor across
 `getDeckDetailByCards` / `getBestPermutation` (both flagged high-risk in
-CLAUDE.md) and is the recommended next step if a measurable speedup is required.
+CLAUDE.md). It was investigated and **empirically rejected** — see batch 6.
+
+---
+
+## Batch 6 — profiling-driven (the one real win) and the negative results
+
+A symbol build (`SKBUILD_CMAKE_BUILD_TYPE=RelWithDebInfo`) profiled with macOS
+`sample` against real JP data, per algorithm. Findings:
+
+### SA: unthrottled per-iteration `clock::now()` — the real win (shipped)
+
+`std::chrono::now` was **~2108 / ~10368 samples (~20% of `findBestCardsSA`
+self-time)**: the per-run `saMaxTimeMs` check called `high_resolution_clock::now()`
+on every iteration, while the adjacent `RecommendCalcInfo::isTimeout()` already
+throttles to every 256 calls. Throttling the per-run check to every 256
+iterations drops `clock::now` to **8 samples** (re-profiled). Byte-identical for
+iteration/no-improve-bound runs (verified on the 31-case matrix *and* default
+time-bound SA, which converges before the limit binds). GA/DFS use the throttled
+`isTimeout()` and were never affected.
+
+### The score-only fast path (batch 5's "recommended next step"): rejected
+
+A spike that skips the per-card display build under a `scoreOnly` flag measured
+**neutral** (within noise). The per-card display materialization is not the
+bottleneck; the deck build's arithmetic (`CardDetailMap::get` probing,
+`getDeckBonus`, the skill-state enumeration) is, and that is shared by the
+fast and full paths. `CardDetailMap::get` returning by value vs by-ref
+(`getPtr`) was also tried — neutral in a clean back-to-back A/B (an earlier
+"+6%" was load drift). Do not pursue these for a wall-clock win.
+
+### RL / GA / DFS_GA: eval-bound, no clean byte-identical single-request win
+
+Per-recommend wall times (real JP data, default options): RL 76 ms, GA 113 ms,
+DFS_GA 248 ms, SA 793 ms. Profiles:
+- **GA**: per-deck eval + live/event score + population `std::sort<Individual>`
+  (~1300 samples, parity-stuck — `partial_sort` reorders equal-fitness ties and
+  changes results) + `Individual::calcDeckHash` `std::sort` of ≤5 ids (~347).
+- **RL**: ~44% per-request *setup* (string-key construction, card precompute,
+  pool fingerprint) — inherent, no redundancy found (checked double-precompute,
+  fingerprint, the int hash-table) — plus the same eval. `savePersistentSeedBuckets`
+  runs every request but only matters for cross-process persistence under
+  concurrency (a global-mutex + disk write); throttling it is parity-safe
+  in-process but is a scale/throughput fix, not a single-request speedup, so it
+  was left out.
+- The shared per-deck evaluation is the floor for all four and is irreducible
+  for byte-identical output (three independent spikes confirmed neutral).
+
+**Conclusion:** byte-identical single-request optimization is exhausted. Further
+gains require an explicit trade-off: GA `partial_sort` (~6%, non-byte-identical /
+makes GA deterministic), the RL save throttle (concurrency/scale), parallelizing
+the GA population / SA runs (threading + shared-cache work), or cross-request
+precompute caching.
 
 ---
 
