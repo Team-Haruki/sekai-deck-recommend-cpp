@@ -73,6 +73,15 @@ else()
         )
     endif()
 
+    # Release构建启用跨编译单元优化（实测低个位数百分比收益，构建耗时增加可接受）
+    if (CMAKE_BUILD_TYPE STREQUAL "Release")
+        include(CheckIPOSupported)
+        check_ipo_supported(RESULT ipo_supported OUTPUT ipo_check_output)
+        if (ipo_supported)
+            set_property(TARGET sekai_deck_recommend PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)
+        endif()
+    endif()
+
     set(INSTALL_DIR "sekai_deck_recommend_cpp")
 
     install(TARGETS sekai_deck_recommend DESTINATION ${INSTALL_DIR})

@@ -4,10 +4,12 @@
 #include <algorithm>
 #include <array>
 #include <cassert>
+#include <cstdint>
 #include <limits>
 #include <optional>
 #include <string>
 #include <map>
+#include <vector>
 
 #include "common/collection-utils.h"
 
@@ -21,22 +23,30 @@ constexpr int ATTR_MEMBER_MAX = 2;
 template <typename T>
 class CardDetailMap {
 
-    inline const std::optional<T> getValue(int unit, int unitMember, int attrMember) const {
+    // 槽位表只存紧凑存储的下标：绝大多数键位为空，
+    // 相比每键直接存optional<T>，结构体体积缩一个数量级，拷贝/缓存开销随之下降
+    static constexpr uint8_t EMPTY_SLOT = 0xFF;
+
+    std::array<uint8_t, UNIT_MAX * UNIT_MEMBER_MAX * ATTR_MEMBER_MAX> slots{};
+    std::vector<T> storage{};
+
+    inline const T* getValue(int unit, int unitMember, int attrMember) const {
         int key = getKey(unit, unitMember, attrMember);
-        if (this->values[key].has_value())
-            return this->values[key];
-        return std::nullopt;
+        return slots[key] == EMPTY_SLOT ? nullptr : &storage[slots[key]];
     }
 
 public:
-    std::array<std::optional<T>, UNIT_MAX * UNIT_MEMBER_MAX * ATTR_MEMBER_MAX> values = {};
     int min = std::numeric_limits<int>::max();
     int max = std::numeric_limits<int>::min();
-    
+
+    CardDetailMap() {
+        slots.fill(EMPTY_SLOT);
+    }
+
     /**
      * 设定给定情况下的值
      * 为了减少内存消耗，人数并非在所有情况下均为实际值，可能会用1代表混组或无影响
-     * @param unit 该map的类别; 组合不影响实际值的情况:any 组分:对应组合(vs可能有2种) vsbf花前:diff ocbf花前:ref 
+     * @param unit 该map的类别; 组合不影响实际值的情况:any 组分:对应组合(vs可能有2种) vsbf花前:diff ocbf花前:ref
      * @param unitMember 组合对应的人数（组分技能代表相同组数1-5; vsbf花前代表为不同组数0-2; 其他情况5为同组1为混组或无影响）
      * @param attrMember 卡牌属性对应的人数（5人为同色、1人为混色或无影响）
      * @param cmpValue 设置最小值、最大值的用于剪枝的可比较值
@@ -45,7 +55,13 @@ public:
     inline void set(int unit, int unitMember, int attrMember, int cmpValue, const T& value) {
         this->min = std::min(this->min, cmpValue);
         this->max = std::max(this->max, cmpValue);
-        this->values[getKey(unit, unitMember, attrMember)] = value;
+        int key = getKey(unit, unitMember, attrMember);
+        if (slots[key] == EMPTY_SLOT) {
+            slots[key] = uint8_t(storage.size());
+            storage.push_back(value);
+        } else {
+            storage[slots[key]] = value;
+        }
     }
 
     /**
@@ -58,31 +74,31 @@ public:
     inline T get(int unit, int unitMember, int attrMember) const {
         // 所有情况下，属性实际只有混不混的区别
         attrMember = (attrMember == 5 ? 5 : 1);
-        std::optional<T> best{};
+        const T* best = nullptr;
 
         // (vsbf花前) 不同组数只能是0-2
         if (unit == Enums::Unit::diff) {
             best = this->getValue(Enums::Unit::diff, std::min(2, unitMember), 1);
-            if (best.has_value()) return best.value();
+            if (best) return *best;
         }
 
         // (ocbf花前) 这边unit其实是当作技能tag用
         if (unit == Enums::Unit::ref) {
             best = this->getValue(Enums::Unit::ref, 1, 1);
-            if (best.has_value()) return best.value();
+            if (best) return *best;
         }
 
-        // (组分) 受指定组合人数影响的情况 
-        best = this->getValue(unit, unitMember, attrMember);  
-        if (best.has_value()) return best.value();
+        // (组分) 受指定组合人数影响的情况
+        best = this->getValue(unit, unitMember, attrMember);
+        if (best) return *best;
 
         // (综合力计算) 只考虑混不混组的情况
         best = this->getValue(unit, unitMember == 5 ? 5 : 1, attrMember);
-        if (best.has_value()) return best.value();
+        if (best) return *best;
 
         // 技能为固定数值的情况（能够变化但取到保底固定数值的也会落到这里）
         best = this->getValue(Enums::Unit::any, 1, 1);
-        if (best.has_value()) return best.value();
+        if (best) return *best;
 
         // 如果这还找不到，说明给的情况就不对
         throw std::runtime_error("case not found");
