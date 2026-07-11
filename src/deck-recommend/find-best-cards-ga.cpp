@@ -3,7 +3,10 @@
 #include <algorithm>
 #include <any>
 #include <array>
+#include <atomic>
 #include <cstdint>
+#include <cstdlib>
+#include <exception>
 #include <functional>
 #include <iterator>
 #include <map>
@@ -12,8 +15,29 @@
 #include <random>
 #include <stdexcept>
 #include <string>
+#include <thread>
 #include <unordered_set>
 #include <vector>
+
+// 引擎内并行度：默认1（完全串行，行为与历史一致），由部署方按核数预算显式开启。
+// wasm无线程环境强制串行。
+static int engineThreadCount() {
+#ifdef __EMSCRIPTEN__
+    return 1;
+#else
+    static const int cached = [] {
+        const char* env = std::getenv("DECK_ENGINE_THREADS");
+        if (env == nullptr || *env == '\0') {
+            return 1;
+        }
+        int requested = std::atoi(env);
+        unsigned hardware = std::thread::hardware_concurrency();
+        int cap = hardware > 0 ? int(hardware) : 1;
+        return std::max(1, std::min(requested, cap));
+    }();
+    return cached;
+#endif
+}
 
 
 struct Individual {
@@ -189,37 +213,104 @@ void BaseDeckRecommend::findBestCardsGA(
         member = std::min(member, int(cardDetails.size()));
     }
 
-    // 计算个体的分数并更新答案
-    std::vector<const CardDetail*> evalDeckScratch{};
-    evalDeckScratch.reserve(5);
-    auto updateIndividualScore = [&](Individual& individual) {
-        // 检查是否已经计算过这个组合
-        auto deckHash = individual.calcDeckHash();
-        double targetValue = 0.0;
-        auto cached = gaInfo.deckTargetValueMap.find(deckHash);
-        if (cached != gaInfo.deckTargetValueMap.end()) {
-            targetValue = cached->second;
-        } else {
-            // 计算当前综合力
-            auto& deck = evalDeckScratch;
-            deck.clear();
-            for (int i = 0; i < individual.cardNum; ++i)
-                deck.push_back(individual.deck[i]);
-            auto ret = getBestPermutation(
+    // 批量评估个体并更新答案。生成阶段消耗RNG而评估不消耗，因此“先生成一批、
+    // 再批量评估”与逐个评估的结果逐位一致；getBestPermutation之间互不依赖，
+    // 可以并行计算，fitness缓存与结果队列只在按首次出现顺序的串行合并阶段写入
+    //（评估路径的临时缓冲全部为thread_local，支援卡组表为预填充只读）。
+    auto evaluateIndividuals = [&](Individual** batch, int batchSize) {
+        struct EvalTask {
+            uint64_t hash = 0;
+            Individual* individual = nullptr;
+            BestPermutationResult ret{};
+        };
+        std::vector<EvalTask> tasks{};
+        std::unordered_set<uint64_t> pendingHashes{};
+        for (int i = 0; i < batchSize; ++i) {
+            auto* individual = batch[i];
+            individual->deckHash = individual->calcDeckHash();
+            if (gaInfo.deckTargetValueMap.count(individual->deckHash)) {
+                continue;
+            }
+            if (pendingHashes.insert(individual->deckHash).second) {
+                tasks.push_back(EvalTask{individual->deckHash, individual, {}});
+            }
+        }
+
+        auto runTask = [&](EvalTask& task) {
+            std::vector<const CardDetail*> deck{};
+            deck.reserve(task.individual->cardNum);
+            for (int i = 0; i < task.individual->cardNum; ++i)
+                deck.push_back(task.individual->deck[i]);
+            task.ret = getBestPermutation(
                 this->deckCalculator, deck, supportCards, scoreFunc,
                 honorBonus, eventType, eventId, liveType, cfg
             );
-            if (ret.bestDeck.has_value()) {
-                targetValue = ret.bestDeck.value().targetValue;
-                gaInfo.update(ret.bestDeck.value(), limit);
-                gaInfo.deckTargetValueMap.emplace(deckHash, targetValue);
-            } else {
-                // 目前只会由于最低实效限制导致无法组出卡组，这种情况适应度主要考虑实效
-                targetValue = -1e9 + ret.maxMultiLiveScoreUp;
+        };
+
+        int threadCount = engineThreadCount();
+        if (threadCount > 1 && int(tasks.size()) >= threadCount * 16) {
+            std::atomic<std::size_t> nextTask{0};
+            std::vector<std::exception_ptr> workerErrors(threadCount);
+            std::vector<std::thread> workers{};
+            workers.reserve(threadCount);
+            for (int t = 0; t < threadCount; ++t) {
+                workers.emplace_back([&, t] {
+                    try {
+                        while (true) {
+                            auto index = nextTask.fetch_add(1);
+                            if (index >= tasks.size()) {
+                                break;
+                            }
+                            runTask(tasks[index]);
+                        }
+                    } catch (...) {
+                        workerErrors[t] = std::current_exception();
+                    }
+                });
+            }
+            for (auto& worker : workers) {
+                worker.join();
+            }
+            for (auto& error : workerErrors) {
+                if (error) {
+                    std::rethrow_exception(error);
+                }
+            }
+        } else {
+            for (auto& task : tasks) {
+                runTask(task);
             }
         }
-        individual.fitness = targetValue; // 分数直接作为适应度
-        individual.deckHash = deckHash;
+
+        // 串行合并：与逐个评估相同的首次出现顺序写缓存/结果队列；
+        // 无法组出卡组的情况与既有行为一致不进缓存
+        std::unordered_map<uint64_t, double> failedValues{};
+        for (auto& task : tasks) {
+            if (task.ret.bestDeck.has_value()) {
+                gaInfo.update(task.ret.bestDeck.value(), limit);
+                gaInfo.deckTargetValueMap.emplace(task.hash, task.ret.bestDeck.value().targetValue);
+            } else {
+                // 目前只会由于最低实效限制导致无法组出卡组，这种情况适应度主要考虑实效
+                failedValues[task.hash] = -1e9 + task.ret.maxMultiLiveScoreUp;
+            }
+        }
+        for (int i = 0; i < batchSize; ++i) {
+            auto* individual = batch[i];
+            auto cached = gaInfo.deckTargetValueMap.find(individual->deckHash);
+            individual->fitness = cached != gaInfo.deckTargetValueMap.end()
+                ? cached->second
+                : failedValues.at(individual->deckHash);
+        }
+    };
+    auto evaluateRange = [&](std::vector<Individual>& individuals, int begin) {
+        std::vector<Individual*> batch{};
+        batch.reserve(individuals.size() - begin);
+        for (int i = begin; i < int(individuals.size()); ++i) {
+            batch.push_back(&individuals[i]);
+        }
+        if (!batch.empty()) {
+            evaluateIndividuals(batch.data(), int(batch.size()));
+        }
     };
 
     // 计算用于随机选择的卡牌权重，fixedCards不参与选择
@@ -307,7 +398,6 @@ void BaseDeckRecommend::findBestCardsGA(
             if (!seededHashes.insert(deckHash).second) {
                 continue;
             }
-            updateIndividualScore(individual);
             population.push_back(individual);
         }
     }
@@ -348,11 +438,12 @@ void BaseDeckRecommend::findBestCardsGA(
                 individual.addCard(&cardDetails[idx]);
         }
         // 添加固定卡牌（整个流程固定在最后）
-        for (const auto& card : fixedCards) 
+        for (const auto& card : fixedCards)
             individual.addCard(&card);
-        updateIndividualScore(individual);
         population.push_back(individual);
-    }   
+    }
+    // 初始种群（含种子）批量评估
+    evaluateRange(population, 0);
 
     // 如果全部固定，不需要进化
     if(member == fixedSize) 
@@ -493,15 +584,19 @@ void BaseDeckRecommend::findBestCardsGA(
 
         // 繁殖
         int parentSize = std::min(cfg.gaParentSize, (int)population.size());
+        // 先串行生成全部子代（保持RNG消耗顺序），再批量（可并行）评估
+        int childBegin = int(newPopulation.size());
         while ((int)newPopulation.size() < cfg.gaPopSize) {
             // 随机选择两个父代
             int idx1 = std::uniform_int_distribution<int>(0, parentSize - 1)(rng);
             int idx2 = std::uniform_int_distribution<int>(0, parentSize - 1)(rng);
             Individual child = crossover(population[idx1], population[idx2]);
             mutate(child);
-            updateIndividualScore(child);
             newPopulation.push_back(child);
-            cur_max_fitness = std::max(cur_max_fitness, child.fitness);
+        }
+        evaluateRange(newPopulation, childBegin);
+        for (int i = childBegin; i < int(newPopulation.size()); ++i) {
+            cur_max_fitness = std::max(cur_max_fitness, newPopulation[i].fitness);
         }
 
         // 去重
