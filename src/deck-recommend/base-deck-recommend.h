@@ -140,6 +140,13 @@ struct DfsSearchContext {
     std::array<int, 32> charPowerVals{};
     std::array<int, 32> charSkillOrder{};    // 角色ID，按该角色最大技能降序
     std::array<double, 32> charSkillVals{};
+    // 活动加成上界数据：让上界直接过scoreFunc换算到活动PT量级后与targetValue比较
+    //（live分数量级的上界对活动卡组永远高于PT量级的阈值，剪枝不会生效）
+    bool useEventPointBound = false;
+    std::array<int, 32> charBonusOrder{};    // 角色ID，按该角色最大活动加成降序
+    std::array<double, 32> charBonusVals{};
+    double supportDeckBonusUpperBound = 0.0;
+    double diffAttrBonusUpperBound = 0.0;
 };
 
 inline std::vector<int> resolveRequiredCharacters(

@@ -139,19 +139,17 @@ static bool collectOptimisticSkills(
     return true;
 }
 
-static int calcOptimisticScore(
-    LiveCalculator& liveCalculator,
-    const DfsScoreUpperBoundContext& scoreUpperBoundContext,
-    int liveType,
-    const DeckRecommendConfig& cfg,
+// 构建乐观卡组（每个结点都会构建，复用thread_local缓冲区）
+static DeckDetail& buildOptimisticDeck(
     const std::array<double, 5>& skills,
     int member,
     int powerUpperBound
 ) {
-    // 乐观卡组每个结点都会构建，复用thread_local缓冲区
     static thread_local DeckDetail optimisticDeck{};
     optimisticDeck.power = {};
     optimisticDeck.power.total = powerUpperBound;
+    optimisticDeck.eventBonus = std::nullopt;
+    optimisticDeck.supportDeckBonus = std::nullopt;
     optimisticDeck.cards.clear();
     optimisticDeck.cards.reserve(member);
     for (int i = 0; i < member; ++i) {
@@ -172,7 +170,19 @@ static int calcOptimisticScore(
             .hasCanvasBonus = false,
         });
     }
+    return optimisticDeck;
+}
 
+static int calcOptimisticScore(
+    LiveCalculator& liveCalculator,
+    const DfsScoreUpperBoundContext& scoreUpperBoundContext,
+    int liveType,
+    const DeckRecommendConfig& cfg,
+    const std::array<double, 5>& skills,
+    int member,
+    int powerUpperBound
+) {
+    auto& optimisticDeck = buildOptimisticDeck(skills, member, powerUpperBound);
     return liveCalculator.getLiveScoreByDeck(
         optimisticDeck,
         scoreUpperBoundContext.musicMeta,
@@ -184,11 +194,37 @@ static int calcOptimisticScore(
     );
 }
 
+// 活动加成上界：卡组内已选卡的加成 + 未用角色的最大加成前needed个 + 支援/异色加成上界
+static double calcBonusUpperBound(
+    const std::vector<const CardDetail*>& deckCards,
+    const std::bitset<32>& deckCharacters,
+    const DfsSearchContext& searchContext,
+    int member
+) {
+    double bonusUpperBound = searchContext.diffAttrBonusUpperBound;
+    int selectedCount = 0;
+    for (const auto* deckCard : deckCards) {
+        bonusUpperBound += deckCard->maxEventBonus.value_or(0.0);
+        selectedCount++;
+    }
+    int needed = member - selectedCount;
+    int got = 0;
+    for (int i = 0; i < searchContext.characterCount && got < needed; ++i) {
+        if (deckCharacters.test(searchContext.charBonusOrder[i])) {
+            continue;
+        }
+        bonusUpperBound += searchContext.charBonusVals[i];
+        got++;
+    }
+    return bonusUpperBound;
+}
+
 static double calcScoreUpperBound(
     LiveCalculator& liveCalculator,
     const DfsScoreUpperBoundContext& scoreUpperBoundContext,
     int liveType,
     const DeckRecommendConfig& cfg,
+    const std::function<Score(const DeckDetail &)>& scoreFunc,
     const std::vector<const CardDetail*>& deckCards,
     const std::bitset<32>& deckCharacters,
     const DfsSearchContext& searchContext,
@@ -211,6 +247,16 @@ static double calcScoreUpperBound(
     std::array<double, 5> skills{};
     if (!collectOptimisticSkills(deckCards, deckCharacters, searchContext, member, isChallengeLive, skills)) {
         return std::numeric_limits<double>::infinity();
+    }
+
+    if (searchContext.useEventPointBound) {
+        // 活动卡组：乐观卡组带上加成上界直接过scoreFunc，得到活动PT量级的上界，
+        // 与deckQueue中的targetValue同量级比较（活动点数公式对各输入单调，上界成立）
+        auto& optimisticDeck = buildOptimisticDeck(skills, member, powerUpperBound);
+        optimisticDeck.eventBonus = calcBonusUpperBound(deckCards, deckCharacters, searchContext, member);
+        optimisticDeck.supportDeckBonus = searchContext.supportDeckBonusUpperBound;
+        auto score = scoreFunc(optimisticDeck);
+        return score.score + double(score.liveScore) / SCORE_MAX;
     }
 
     auto optimisticScore = calcOptimisticScore(
@@ -409,6 +455,47 @@ void BaseDeckRecommend::findBestCardsDFS(
             for (int i = 0; i < searchContext.characterCount; ++i) {
                 searchContext.charPowerVals[i] = charMaxPower[searchContext.charPowerOrder[i]];
                 searchContext.charSkillVals[i] = charMaxSkill[searchContext.charSkillOrder[i]];
+            }
+
+            // 活动卡组的上界必须换算到活动PT量级才能与targetValue比较，
+            // 这里预计算加成上界所需数据（活动加成按角色取最大、支援/异色加成取全局上界）
+            if (cfg.target == RecommendTarget::Score && eventType.has_value()) {
+                searchContext.useEventPointBound = true;
+                std::array<double, 32> charMaxBonus{};
+                for (const auto& card : pool) {
+                    charMaxBonus[card.characterId] = std::max(
+                        charMaxBonus[card.characterId],
+                        card.maxEventBonus.value_or(0.0)
+                    );
+                }
+                searchContext.charBonusOrder = searchContext.charPowerOrder;
+                auto bonusBegin = searchContext.charBonusOrder.begin();
+                std::sort(bonusBegin, bonusBegin + searchContext.characterCount, [&](int a, int b) {
+                    return charMaxBonus[a] > charMaxBonus[b];
+                });
+                for (int i = 0; i < searchContext.characterCount; ++i) {
+                    searchContext.charBonusVals[i] = charMaxBonus[searchContext.charBonusOrder[i]];
+                }
+
+                if (eventType == Enums::EventType::world_bloom) {
+                    // 支援卡组加成上界：不考虑主队互斥，直接取加成最高的前N张之和
+                    int supportCount = this->deckCalculator.getWorldBloomSupportDeckCount(eventId.value_or(0));
+                    for (const auto& [characterId, supportList] : supportCards) {
+                        double sum = 0.0;
+                        int used = 0;
+                        for (const auto& supportCard : supportList) {
+                            sum += supportCard.bonus;
+                            if (++used >= supportCount) {
+                                break;
+                            }
+                        }
+                        searchContext.supportDeckBonusUpperBound = std::max(searchContext.supportDeckBonusUpperBound, sum);
+                    }
+                    // WL异色加成上界
+                    for (const auto& bonus : this->dataProvider.masterData->worldBloomDifferentAttributeBonuses) {
+                        searchContext.diffAttrBonusUpperBound = std::max(searchContext.diffAttrBonusUpperBound, bonus.bonusRate);
+                    }
+                }
             }
         } else {
             // 挑战live角色可重复上场，仍按卡降序取top-k
@@ -680,6 +767,7 @@ void BaseDeckRecommend::findBestCardsDFSImpl(
                     *scoreUpperBoundContext,
                     liveType,
                     cfg,
+                    scoreFunc,
                     deckCards,
                     deckCharacters,
                     searchContext,
