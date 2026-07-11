@@ -1,12 +1,11 @@
 #include "deck-recommend/base-deck-recommend.h"
 
+#include "common/parallel-utils.h"
+
 #include <algorithm>
 #include <any>
 #include <array>
-#include <atomic>
 #include <cstdint>
-#include <cstdlib>
-#include <exception>
 #include <functional>
 #include <iterator>
 #include <map>
@@ -15,29 +14,8 @@
 #include <random>
 #include <stdexcept>
 #include <string>
-#include <thread>
 #include <unordered_set>
 #include <vector>
-
-// 引擎内并行度：默认1（完全串行，行为与历史一致），由部署方按核数预算显式开启。
-// wasm无线程环境强制串行。
-static int engineThreadCount() {
-#ifdef __EMSCRIPTEN__
-    return 1;
-#else
-    static const int cached = [] {
-        const char* env = std::getenv("DECK_ENGINE_THREADS");
-        if (env == nullptr || *env == '\0') {
-            return 1;
-        }
-        int requested = std::atoi(env);
-        unsigned hardware = std::thread::hardware_concurrency();
-        int cap = hardware > 0 ? int(hardware) : 1;
-        return std::max(1, std::min(requested, cap));
-    }();
-    return cached;
-#endif
-}
 
 
 struct Individual {
@@ -247,40 +225,9 @@ void BaseDeckRecommend::findBestCardsGA(
             );
         };
 
-        int threadCount = engineThreadCount();
-        if (threadCount > 1 && int(tasks.size()) >= threadCount * 16) {
-            std::atomic<std::size_t> nextTask{0};
-            std::vector<std::exception_ptr> workerErrors(threadCount);
-            std::vector<std::thread> workers{};
-            workers.reserve(threadCount);
-            for (int t = 0; t < threadCount; ++t) {
-                workers.emplace_back([&, t] {
-                    try {
-                        while (true) {
-                            auto index = nextTask.fetch_add(1);
-                            if (index >= tasks.size()) {
-                                break;
-                            }
-                            runTask(tasks[index]);
-                        }
-                    } catch (...) {
-                        workerErrors[t] = std::current_exception();
-                    }
-                });
-            }
-            for (auto& worker : workers) {
-                worker.join();
-            }
-            for (auto& error : workerErrors) {
-                if (error) {
-                    std::rethrow_exception(error);
-                }
-            }
-        } else {
-            for (auto& task : tasks) {
-                runTask(task);
-            }
-        }
+        parallelFor(tasks.size(), [&](std::size_t index) {
+            runTask(tasks[index]);
+        });
 
         // 串行合并：与逐个评估相同的首次出现顺序写缓存/结果队列；
         // 无法组出卡组的情况与既有行为一致不进缓存

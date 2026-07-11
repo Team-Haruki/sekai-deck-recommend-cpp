@@ -1,6 +1,8 @@
 #include "card-information/card-calculator.h"
 #include "card-calculator.h"
 
+#include "common/parallel-utils.h"
+
 std::optional<CardDetail> CardCalculator::getCardDetail(
     const UserCard& userCard,
     const std::vector<AreaItemLevel>& userAreaItemLevels,
@@ -114,13 +116,17 @@ std::vector<CardDetail> CardCalculator::batchGetCardDetail(
     // 自定义世界专项加成
     auto userCanvasBonusCards = this->mysekaiService.getMysekaiCanvasBonusCards();
     auto userGateBonuses = this->mysekaiService.getMysekaiGateBonuses();
-    // 每张卡单独计算
-    for (const auto &userCard : userCards) {
-        auto cardDetail = this->getCardDetail(
-            userCard, areaItemLevels0, config, singleCardConfig, eventConfig,
-            userCanvasBonusCards.find(userCard.cardId) != userCanvasBonusCards.end(),
+    // 每张卡的计算相互独立（各计算器无状态、masterdata只读），
+    // 结果写入按下标预分配的槽位后顺序收集，与串行结果逐位一致
+    std::vector<std::optional<CardDetail>> details(userCards.size());
+    parallelFor(userCards.size(), [&](std::size_t i) {
+        details[i] = this->getCardDetail(
+            userCards[i], areaItemLevels0, config, singleCardConfig, eventConfig,
+            userCanvasBonusCards.find(userCards[i].cardId) != userCanvasBonusCards.end(),
             userGateBonuses, scoreUpLimit, customBonusCharacterIds, customBonusAttr, customBonusSupportUnits
         );
+    });
+    for (auto& cardDetail : details) {
         if (cardDetail.has_value()) {
             // CardDetail结构体很大，移动而不是拷贝
             ret.push_back(std::move(cardDetail.value()));

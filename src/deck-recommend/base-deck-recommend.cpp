@@ -1,5 +1,6 @@
 #include "deck-recommend/base-deck-recommend.h"
 #include "card-priority/card-priority-filter.h"
+#include "common/parallel-utils.h"
 #include "common/timer.h"
 #include <bit>
 #include <chrono>
@@ -238,19 +239,25 @@ std::vector<RecommendDeck> BaseDeckRecommend::recommendHighScoreDeck(
     bool requireSupportSpecialUnitMatch = !config.filterOtherUnit;
     if (eventConfig.isWorldBloomFinale) {
         // Finale scores a support deck for every possible leader character.
-        for (int i = 1; i <= 26; i++) {
-            std::vector<SupportDeckCard> sc{};
-            for (const auto& card : userCards) 
+        // 26个角色桶相互独立（计算器无状态），可并行构建后串行装入map
+        std::array<std::vector<SupportDeckCard>, 27> finaleBuckets{};
+        parallelFor(26, [&](std::size_t index) {
+            int characterId = int(index) + 1;
+            auto& sc = finaleBuckets[characterId];
+            sc.reserve(userCards.size());
+            for (const auto& card : userCards)
                 sc.push_back(this->cardCalculator.getSupportDeckCard(
                     card,
                     eventConfig.eventId,
-                    i,
+                    characterId,
                     config.supportMasterMax,
                     config.supportSkillMax,
                     requireSupportSpecialUnitMatch
                 ));
             std::sort(sc.begin(), sc.end(), [](const SupportDeckCard& a, const SupportDeckCard& b) { return a.bonus > b.bonus; });
-            supportCards[i] = sc;
+        }, 1);
+        for (int i = 1; i <= 26; i++) {
+            supportCards[i] = std::move(finaleBuckets[i]);
         }
     } else if(eventConfig.eventType == Enums::EventType::world_bloom) {
         // 普通wl只算一个支援卡组排序
@@ -3913,6 +3920,37 @@ std::vector<RecommendDeck> BaseDeckRecommend::recommendHighScoreDeck(
             appendSeeds(structuredSeedDecks, std::max(refineLimit * 3, 12));
 
             std::unordered_set<uint64_t> visitedDecks{};
+            // 候选按枚举顺序攒批，getBestPermutation并行计算后按原顺序串行合并——
+            // 与逐个评估等价（枚举顺序与合并顺序一致；该阶段本就是时间预算截断语义）
+            struct PendingRefineEval {
+                std::vector<const CardDetail*> deck{};
+                uint64_t hash = 0;
+                BestPermutationResult ret{};
+            };
+            std::vector<PendingRefineEval> pendingEvals{};
+            const std::size_t refineChunk = std::max<std::size_t>(64, std::size_t(engineThreadCount()) * 16);
+            auto flushPendingEvals = [&]() {
+                if (pendingEvals.empty()) {
+                    return;
+                }
+                parallelFor(pendingEvals.size(), [&](std::size_t i) {
+                    pendingEvals[i].ret = getBestPermutation(
+                        this->deckCalculator, pendingEvals[i].deck, supportCards, sf,
+                        honorBonus, eventConfig.eventType, eventConfig.eventId, liveType, config
+                    );
+                });
+                for (auto& pendingEval : pendingEvals) {
+                    double targetValue = -1e18;
+                    if (pendingEval.ret.bestDeck.has_value()) {
+                        targetValue = pendingEval.ret.bestDeck.value().targetValue;
+                        refineInfo.update(pendingEval.ret.bestDeck.value(), config.limit);
+                    } else {
+                        targetValue = -1e9 + pendingEval.ret.maxMultiLiveScoreUp;
+                    }
+                    refineInfo.deckTargetValueMap.emplace(pendingEval.hash, targetValue);
+                }
+                pendingEvals.clear();
+            };
             auto tryEvaluate = [&](const std::vector<const CardDetail*>& deck) {
                 if (refineInfo.isTimeout() || !deckMatchesFixedConstraints(deck)) {
                     return;
@@ -3925,7 +3963,13 @@ std::vector<RecommendDeck> BaseDeckRecommend::recommendHighScoreDeck(
                 if (!visitedDecks.insert(hash).second) {
                     return;
                 }
-                evaluateDeckByCards(config, normalized, refineInfo);
+                if (refineInfo.deckTargetValueMap.count(hash)) {
+                    return;
+                }
+                pendingEvals.push_back(PendingRefineEval{normalized, hash, {}});
+                if (pendingEvals.size() >= refineChunk) {
+                    flushPendingEvals();
+                }
             };
 
             std::unordered_set<int> fixedCardIdSet{};
@@ -4026,6 +4070,7 @@ std::vector<RecommendDeck> BaseDeckRecommend::recommendHighScoreDeck(
                 }
             }
 
+            flushPendingEvals();
             mergeCalcInfo(baseInfo, refineInfo);
         };
 
