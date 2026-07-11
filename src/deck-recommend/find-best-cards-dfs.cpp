@@ -2,6 +2,24 @@
 
 #include <limits>
 #include <tuple>
+#include <unordered_map>
+
+// 支配裁剪的判定（做法来自allium-deck）：
+// A支配B ⇒ 任何含B的卡组把B换成A都不会变差，因此B可以先从搜索池剔除，
+// 搜索完成后再通过替代展开把被裁卡代回结果卡组补全Top-N。
+// 只有同角色（保证A/B不能同队）、同属性、同组合（保证换卡不影响其他卡的加成上下文）
+// 且各维度区间严格更差时才成立；含期间限定/队长加成的卡与加成上限交互复杂，不参与。
+static bool sameUnitSet(const CardDetail& a, const CardDetail& b) {
+    if (a.units.size() != b.units.size()) {
+        return false;
+    }
+    for (const auto unit : a.units) {
+        if (std::find(b.units.begin(), b.units.end(), unit) == b.units.end()) {
+            return false;
+        }
+    }
+    return true;
+}
 
 template<typename T>
 bool containsAny(const std::vector<T>& collection, const std::vector<T>& contains) {
@@ -274,6 +292,92 @@ void BaseDeckRecommend::findBestCardsDFS(
         isWorldBloomFinale
     );
 
+    // 逐角色支配裁剪（做法来自allium-deck）：先从搜索池剔除被同角色卡全面支配的卡，
+    // 搜索后再把被裁卡代回结果卡组补全Top-N。
+    // 限定在Score目标、非挑战（挑战同角色可同队，换卡论证不成立）、
+    // 非WL（主队卡会从支援卡组中排除，纯主队维度的支配不完备）。
+    std::vector<CardDetail> prunedPool{};
+    std::unordered_map<int, std::vector<const CardDetail*>> alternativesByRootCardId{};
+    const std::vector<CardDetail>* searchPool = &cardDetails;
+    if (!isChallengeLive
+        && cfg.target == RecommendTarget::Score
+        && eventType != Enums::EventType::world_bloom
+        && !isWorldBloomFinale) {
+        int cardCount = int(cardDetails.size());
+        std::vector<int> dominatedBy(cardCount, -1);
+        std::array<std::vector<int>, 32> indicesByCharacter{};
+        for (int i = 0; i < cardCount; ++i) {
+            indicesByCharacter[cardDetails[i].characterId].push_back(i);
+        }
+
+        auto isFixedCard = [&](const CardDetail& card) {
+            for (const auto& fixedCard : fixedCards) {
+                if (fixedCard.cardId == card.cardId) {
+                    return true;
+                }
+            }
+            return false;
+        };
+        // A支配B：同属性、同组合（换卡不改变其他卡的加成上下文），
+        // 且综合力/技能/活动加成的区间严格全面更优；
+        // 期间限定加成与生效数量上限交互、终章队长加成与队长位交互，含这些加成的卡不参与
+        auto dominates = [&](const CardDetail& a, const CardDetail& b) {
+            if (a.attr != b.attr || !sameUnitSet(a, b)) {
+                return false;
+            }
+            if (a.limitedEventBonus.value_or(0.0) > 0.0 || b.limitedEventBonus.value_or(0.0) > 0.0) {
+                return false;
+            }
+            if (a.leaderHonorEventBonus.value_or(0.0) > 0.0 || b.leaderHonorEventBonus.value_or(0.0) > 0.0
+                || a.leaderLimitEventBonus.value_or(0.0) > 0.0 || b.leaderLimitEventBonus.value_or(0.0) > 0.0) {
+                return false;
+            }
+            return this->cardCalculator.isCertainlyLessThan(b, a);
+        };
+
+        for (const auto& group : indicesByCharacter) {
+            for (const auto bi : group) {
+                if (isFixedCard(cardDetails[bi])) {
+                    continue;
+                }
+                for (const auto ai : group) {
+                    if (ai == bi) {
+                        continue;
+                    }
+                    if (dominates(cardDetails[ai], cardDetails[bi])) {
+                        dominatedBy[bi] = ai;
+                        break;
+                    }
+                }
+            }
+        }
+
+        bool anyDominated = false;
+        for (int i = 0; i < cardCount; ++i) {
+            if (dominatedBy[i] >= 0) {
+                anyDominated = true;
+                break;
+            }
+        }
+        if (anyDominated) {
+            prunedPool.reserve(cardCount);
+            for (int i = 0; i < cardCount; ++i) {
+                if (dominatedBy[i] < 0) {
+                    prunedPool.push_back(cardDetails[i]);
+                } else {
+                    // 支配关系严格且可传递：沿链找到存活根，被裁卡登记为根的替代
+                    int root = dominatedBy[i];
+                    while (dominatedBy[root] >= 0) {
+                        root = dominatedBy[root];
+                    }
+                    alternativesByRootCardId[cardDetails[root].cardId].push_back(&cardDetails[i]);
+                }
+            }
+            searchPool = &prunedPool;
+        }
+    }
+    const auto& pool = *searchPool;
+
     if (scoreUpperBoundContext) {
         if (!isChallengeLive) {
             // 非挑战每角色最多1张：按角色最大值估上界，比逐卡top-k更紧
@@ -281,7 +385,7 @@ void BaseDeckRecommend::findBestCardsDFS(
             std::array<int, 32> charMaxPower{};
             std::array<double, 32> charMaxSkill{};
             std::array<bool, 32> hasCard{};
-            for (const auto& card : cardDetails) {
+            for (const auto& card : pool) {
                 auto ch = card.characterId;
                 hasCard[ch] = true;
                 charMaxPower[ch] = std::max(charMaxPower[ch], card.power.max);
@@ -308,8 +412,8 @@ void BaseDeckRecommend::findBestCardsDFS(
             }
         } else {
             // 挑战live角色可重复上场，仍按卡降序取top-k
-            searchContext.byPowerDesc.reserve(cardDetails.size());
-            for (const auto& card : cardDetails) {
+            searchContext.byPowerDesc.reserve(pool.size());
+            for (const auto& card : pool) {
                 searchContext.byPowerDesc.push_back(&card);
             }
             searchContext.bySkillDesc = searchContext.byPowerDesc;
@@ -323,10 +427,94 @@ void BaseDeckRecommend::findBestCardsDFS(
     }
 
     findBestCardsDFSImpl(
-        liveType, cfg, cardDetails, supportCards, scoreFunc, dfsInfo,
+        liveType, cfg, pool, supportCards, scoreFunc, dfsInfo,
         limit, isChallengeLive, member, honorBonus, eventType, eventId, fixedCards,
         scoreUpperBoundContext, searchContext
     );
+
+    // 替代展开：把被支配裁掉的卡代回Top-K结果卡组重新评估，补全同分/次优名次。
+    // 替代卡与根卡同角色，代入不会产生新的角色/卡牌冲突。
+    if (!alternativesByRootCardId.empty()) {
+        std::unordered_map<int, const CardDetail*> cardById{};
+        cardById.reserve(cardDetails.size());
+        for (const auto& card : cardDetails) {
+            cardById.emplace(card.cardId, &card);
+        }
+
+        std::vector<RecommendDeck> rootDecks{};
+        {
+            auto queueCopy = dfsInfo.deckQueue;
+            while (!queueCopy.empty()) {
+                rootDecks.push_back(queueCopy.top());
+                queueCopy.pop();
+            }
+        }
+
+        for (const auto& rootDeck : rootDecks) {
+            // member<5的结果会用队长卡补位，按唯一卡ID还原卡组
+            std::vector<const CardDetail*> baseDeck{};
+            std::vector<const std::vector<const CardDetail*>*> alternativeLists{};
+            bool valid = true;
+            bool hasAlternative = false;
+            for (const auto& deckCard : rootDeck.cards) {
+                bool duplicated = false;
+                for (const auto* existing : baseDeck) {
+                    if (existing->cardId == deckCard.cardId) {
+                        duplicated = true;
+                        break;
+                    }
+                }
+                if (duplicated) {
+                    continue;
+                }
+                auto it = cardById.find(deckCard.cardId);
+                if (it == cardById.end()) {
+                    valid = false;
+                    break;
+                }
+                baseDeck.push_back(it->second);
+                auto altIt = alternativesByRootCardId.find(deckCard.cardId);
+                alternativeLists.push_back(altIt != alternativesByRootCardId.end() ? &altIt->second : nullptr);
+                hasAlternative |= alternativeLists.back() != nullptr;
+            }
+            if (!valid || !hasAlternative) {
+                continue;
+            }
+
+            // 逐位置枚举替代（含多位置组合），设上限防爆
+            int evalBudget = 128;
+            std::vector<const CardDetail*> candidate = baseDeck;
+            auto expand = [&](auto&& self, std::size_t pos, bool substituted) -> void {
+                if (evalBudget <= 0 || dfsInfo.isTimeout()) {
+                    return;
+                }
+                if (pos == baseDeck.size()) {
+                    if (!substituted) {
+                        return;
+                    }
+                    evalBudget--;
+                    auto ret = getBestPermutation(
+                        this->deckCalculator, candidate, supportCards, scoreFunc,
+                        honorBonus, eventType, eventId, liveType, cfg
+                    );
+                    if (ret.bestDeck.has_value()) {
+                        dfsInfo.update(ret.bestDeck.value(), limit);
+                    }
+                    return;
+                }
+                candidate[pos] = baseDeck[pos];
+                self(self, pos + 1, substituted);
+                if (alternativeLists[pos] != nullptr) {
+                    for (const auto* alternative : *alternativeLists[pos]) {
+                        candidate[pos] = alternative;
+                        self(self, pos + 1, true);
+                    }
+                    candidate[pos] = baseDeck[pos];
+                }
+            };
+            expand(expand, 0, false);
+        }
+    }
 }
 
 void BaseDeckRecommend::findBestCardsDFSImpl(
