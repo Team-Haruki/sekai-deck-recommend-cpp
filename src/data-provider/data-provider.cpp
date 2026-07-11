@@ -19,9 +19,7 @@ void DataProvider::init()
     userData->userCharacterFinalChapterHonorEventBonusMap.clear();
     for (const auto& userHonor : userData->userHonors) {
         try {
-            auto& honor = findOrThrow(masterData->honors,  [&](const Honor& it) { 
-                return it.id == userHonor.honorId; 
-            });
+            auto& honor = masterData->getHonorById(userHonor.honorId);
             if (honor.honorRarity == Enums::HonorRarity::high
             || honor.honorRarity == Enums::HonorRarity::highest) {
                 auto start_idx = honor.assetbundleName.find("wl_2nd");

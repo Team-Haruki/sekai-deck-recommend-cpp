@@ -314,6 +314,30 @@ void MasterData::buildDerivedCaches() {
     for (int i = 0; i < (int)honors.size(); ++i) {
         this->honorIndexById.emplace(honors[i].id, i);
     }
+    this->eventDeckBonusIndicesByEventId.clear();
+    for (int i = 0; i < (int)eventDeckBonuses.size(); ++i) {
+        this->eventDeckBonusIndicesByEventId[eventDeckBonuses[i].eventId].push_back(i);
+    }
+    this->gameCharacterUnitIndexById.clear();
+    for (int i = 0; i < (int)gameCharacterUnits.size(); ++i) {
+        this->gameCharacterUnitIndexById.emplace(gameCharacterUnits[i].id, i);
+    }
+}
+
+const std::vector<int>& MasterData::getEventDeckBonusIndices(int eventId) const
+{
+    static const std::vector<int> empty{};
+    auto it = eventDeckBonusIndicesByEventId.find(eventId);
+    return it != eventDeckBonusIndicesByEventId.end() ? it->second : empty;
+}
+
+const GameCharacterUnit& MasterData::getGameCharacterUnitById(int gameCharacterUnitId) const
+{
+    auto it = gameCharacterUnitIndexById.find(gameCharacterUnitId);
+    if (it == gameCharacterUnitIndexById.end()) {
+        throw ElementNoFoundError("Game character unit not found for gameCharacterUnitId=" + std::to_string(gameCharacterUnitId));
+    }
+    return gameCharacterUnits[it->second];
 }
 
 const Honor& MasterData::getHonorById(int honorId) const

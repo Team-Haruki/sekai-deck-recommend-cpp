@@ -2398,9 +2398,16 @@ std::vector<RecommendDeck> BaseDeckRecommend::recommendHighScoreDeck(
                         }
 
                         std::vector<const CardDetail*> options{};
-                        std::unordered_set<int> optionIds{};
+                        auto optionExists = [&](int cardId) {
+                            for (const auto* existing : options) {
+                                if (existing->cardId == cardId) {
+                                    return true;
+                                }
+                            }
+                            return false;
+                        };
                         auto addOption = [&](const CardDetail* card) {
-                            if (card == nullptr || optionIds.count(card->cardId)) {
+                            if (card == nullptr || optionExists(card->cardId)) {
                                 return;
                             }
                             if (beam.hasCard(card->cardId)
@@ -2410,7 +2417,6 @@ std::vector<RecommendDeck> BaseDeckRecommend::recommendHighScoreDeck(
                             if (distinctAttrs && card->attr != nextAttr) {
                                 return;
                             }
-                            optionIds.insert(card->cardId);
                             options.push_back(card);
                         };
 
@@ -2663,12 +2669,19 @@ std::vector<RecommendDeck> BaseDeckRecommend::recommendHighScoreDeck(
                         std::vector<StructuredSeedState> nextBeams{};
                         for (const auto& beam : beams) {
                             std::vector<const CardDetail*> options{};
-                            std::unordered_set<int> optionIds{};
+                            auto optionExists = [&](int cardId) {
+                                for (const auto* existing : options) {
+                                    if (existing->cardId == cardId) {
+                                        return true;
+                                    }
+                                }
+                                return false;
+                            };
                             int remainingSlots = config.member - int(beam.deck.size());
                             int missingAttrSlots = std::min(config.member, int(allAttrs.size())) - beam.attrCount();
                             bool forceNewAttr = preferDistinctAttrs && missingAttrSlots >= remainingSlots;
                             auto addOption = [&](const CardDetail* card, bool requireNewAttr) {
-                                if (card == nullptr || optionIds.count(card->cardId)) {
+                                if (card == nullptr || optionExists(card->cardId)) {
                                     return;
                                 }
                                 if (beam.hasCard(card->cardId)
@@ -2678,7 +2691,6 @@ std::vector<RecommendDeck> BaseDeckRecommend::recommendHighScoreDeck(
                                 if (requireNewAttr && beam.hasAttr(card->attr)) {
                                     return;
                                 }
-                                optionIds.insert(card->cardId);
                                 options.push_back(card);
                             };
 
@@ -2936,12 +2948,19 @@ std::vector<RecommendDeck> BaseDeckRecommend::recommendHighScoreDeck(
                         std::vector<StructuredSeedState> nextBeams{};
                         for (const auto& beam : beams) {
                             std::vector<const CardDetail*> options{};
-                            std::unordered_set<int> optionIds{};
+                            auto optionExists = [&](int cardId) {
+                                for (const auto* existing : options) {
+                                    if (existing->cardId == cardId) {
+                                        return true;
+                                    }
+                                }
+                                return false;
+                            };
                             int remainingSlots = config.member - int(beam.deck.size());
                             int missingAttrSlots = config.member - beam.attrCount();
                             bool forceNewAttr = requireDistinctAttrs && missingAttrSlots >= remainingSlots;
                             auto addOption = [&](const CardDetail* card, bool requireNewAttr) {
-                                if (card == nullptr || optionIds.count(card->cardId)) {
+                                if (card == nullptr || optionExists(card->cardId)) {
                                     return;
                                 }
                                 if (beam.hasCard(card->cardId)
@@ -2951,7 +2970,6 @@ std::vector<RecommendDeck> BaseDeckRecommend::recommendHighScoreDeck(
                                 if (requireNewAttr && beam.hasAttr(card->attr)) {
                                     return;
                                 }
-                                optionIds.insert(card->cardId);
                                 options.push_back(card);
                             };
 

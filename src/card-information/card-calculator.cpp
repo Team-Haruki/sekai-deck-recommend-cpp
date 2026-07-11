@@ -109,6 +109,7 @@ std::vector<CardDetail> CardCalculator::batchGetCardDetail(
 )
 {
     std::vector<CardDetail> ret{};
+    ret.reserve(userCards.size());
     auto areaItemLevels0 = areaItemLevels.empty() ? this->areaItemService.getAreaItemLevels() : areaItemLevels;
     // 自定义世界专项加成
     auto userCanvasBonusCards = this->mysekaiService.getMysekaiCanvasBonusCards();
@@ -116,12 +117,13 @@ std::vector<CardDetail> CardCalculator::batchGetCardDetail(
     // 每张卡单独计算
     for (const auto &userCard : userCards) {
         auto cardDetail = this->getCardDetail(
-            userCard, areaItemLevels0, config, singleCardConfig, eventConfig, 
+            userCard, areaItemLevels0, config, singleCardConfig, eventConfig,
             userCanvasBonusCards.find(userCard.cardId) != userCanvasBonusCards.end(),
             userGateBonuses, scoreUpLimit, customBonusCharacterIds, customBonusAttr, customBonusSupportUnits
         );
         if (cardDetail.has_value()) {
-            ret.push_back(cardDetail.value());
+            // CardDetail结构体很大，移动而不是拷贝
+            ret.push_back(std::move(cardDetail.value()));
         }
     }
     return ret;

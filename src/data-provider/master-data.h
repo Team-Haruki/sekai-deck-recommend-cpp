@@ -26,6 +26,8 @@ private:
     std::unordered_set<int> worldBloomFinaleEventIds;
     std::unordered_map<int, int> eventCardBonusCountLimits;
     std::unordered_map<int, int> honorIndexById;
+    std::unordered_map<int, std::vector<int>> eventDeckBonusIndicesByEventId;
+    std::unordered_map<int, int> gameCharacterUnitIndexById;
 
 public:
     std::string baseDir;
@@ -92,6 +94,11 @@ public:
     int getEventCardBonusCountLimit(int eventId) const;
 
     const Honor& getHonorById(int honorId) const;
+
+    // 指定活动的eventDeckBonuses下标列表（无则返回空列表）
+    const std::vector<int>& getEventDeckBonusIndices(int eventId) const;
+
+    const GameCharacterUnit& getGameCharacterUnitById(int gameCharacterUnitId) const;
 
     std::optional<double> getEventSkillScoreUpLimit(int eventId) const;
 
