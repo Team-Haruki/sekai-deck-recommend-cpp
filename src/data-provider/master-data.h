@@ -3,6 +3,9 @@
 
 #include "data-provider/master-data-types.h"
 
+#include <unordered_map>
+#include <unordered_set>
+
 
 constexpr int legacyWorldBloom2FinaleEventId = 180;
 constexpr int legacyWorldBloom2FinaleCardBonusCountLimit = 4;
@@ -15,6 +18,14 @@ class MasterData {
 private:
 
     void addFakeEvent(int eventType);
+
+    // 加载后预构建的查询缓存；这些查询位于组卡评估的热路径上，
+    // 逐次线性扫描 worldBlooms/eventCardBonusLimits 的开销不可接受。
+    void buildDerivedCaches();
+
+    std::unordered_set<int> worldBloomFinaleEventIds;
+    std::unordered_map<int, int> eventCardBonusCountLimits;
+    std::unordered_map<int, int> honorIndexById;
 
 public:
     std::string baseDir;
@@ -79,6 +90,8 @@ public:
     bool isWorldBloomFinale(int eventId) const;
 
     int getEventCardBonusCountLimit(int eventId) const;
+
+    const Honor& getHonorById(int honorId) const;
 
     std::optional<double> getEventSkillScoreUpLimit(int eventId) const;
 

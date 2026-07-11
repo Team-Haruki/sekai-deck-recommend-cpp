@@ -18,7 +18,7 @@ double LiveCalculator::getBaseScore(const MusicMeta &musicMeta, int liveType)
     return musicMeta.base_score;
 }
 
-std::vector<double> LiveCalculator::getSkillScore(const MusicMeta &musicMeta, int liveType)
+const std::vector<double>& LiveCalculator::getSkillScore(const MusicMeta &musicMeta, int liveType)
 {
     if (Enums::LiveType::isAuto(liveType))
         return musicMeta.skill_score_auto;
@@ -27,22 +27,27 @@ std::vector<double> LiveCalculator::getSkillScore(const MusicMeta &musicMeta, in
     return musicMeta.skill_score_solo;
 }
 
-SortedSkillDetails LiveCalculator::getSortedSkillDetails(
-    const DeckDetail &deckDetail, 
-    int liveType, 
+void LiveCalculator::getSortedSkillDetails(
+    SortedSkillDetails& out,
+    const DeckDetail &deckDetail,
+    int liveType,
     LiveSkillOrder liveSkillOrder,
-    std::optional<std::vector<int>> specificSkillOrder,
+    const std::optional<std::vector<int>>& specificSkillOrder,
     const std::optional<std::vector<DeckCardSkillDetail>> &skillDetails,
     std::optional<int> multiTeammateScoreUp
 )
 {
     // 如果已经给定合法有效的技能数据，按给定的技能数据执行
     if (skillDetails.has_value() && skillDetails->size() == 6 && skillDetails->at(5).scoreUp > 0) {
-        return SortedSkillDetails{*skillDetails, false};
+        out.details = *skillDetails;
+        out.sorted = false;
+        return;
     }
 
     int cardNum = (int)deckDetail.cards.size();
-    std::vector<DeckCardSkillDetail> skills{};
+    auto& skills = out.details;
+    skills.clear();
+    skills.reserve(7);
 
     if (Enums::LiveType::isMulti(liveType)) {
         // 多人live
@@ -112,12 +117,10 @@ SortedSkillDetails LiveCalculator::getSortedSkillDetails(
 
     if (cardNum < 5) {
         // 如果卡牌数量不足5张，中间技能需要留空
-        DeckCardSkillDetail emptySkill{};
-        std::vector<DeckCardSkillDetail> emptySkills(5 - cardNum, emptySkill);
         // 将有效技能填充到前面、中间留空、第6个固定为C位
-        skills.insert(skills.end() - 1, emptySkills.begin(), emptySkills.end());
+        skills.insert(skills.end() - 1, 5 - cardNum, DeckCardSkillDetail{});
     }
-    return SortedSkillDetails{skills, skillSorted};
+    out.sorted = skillSorted;
 }
 
 
@@ -134,25 +137,35 @@ LiveDetail LiveCalculator::getLiveDetailByDeck(
     const MusicMeta &musicMeta, 
     int liveType, 
     LiveSkillOrder liveSkillOrder,
-    std::optional<std::vector<int>> specificSkillOrder,
+    const std::optional<std::vector<int>>& specificSkillOrder,
     const std::optional<std::vector<DeckCardSkillDetail>> &skillDetails, 
     int multiPowerSum,
     std::optional<int> multiTeammateScoreUp,
     std::optional<int> multiTeammatePower
 )
 {
+    // 该函数在组卡搜索中每个候选卡组都会调用，使用thread_local缓冲区避免反复堆分配
+    static thread_local SortedSkillDetails skills{};
+    static thread_local std::vector<double> sortedSkillScores{};
+
     // 确定技能发动顺序，未指定则直接按效果排序或多人重复当前技能
-    auto skills = this->getSortedSkillDetails(
-        deckDetail, liveType, 
-        liveSkillOrder, specificSkillOrder, 
+    this->getSortedSkillDetails(
+        skills,
+        deckDetail, liveType,
+        liveSkillOrder, specificSkillOrder,
         skillDetails, multiTeammateScoreUp
     );
     // 与技能无关的分数比例
     auto baseRate = this->getBaseScore(musicMeta, liveType);
-    // 技能分数比例，如果是最佳/最差技能计算则按加成排序
-    auto skillScores = this->getSkillScore(musicMeta, liveType);
-    this->sortSkillRate(skills.sorted, deckDetail.cards.size(), skillScores);
-    auto& skillRate = skillScores;
+    // 技能分数比例，如果是最佳/最差技能计算则按加成排序（排序需要可变副本）
+    const auto& skillScores = this->getSkillScore(musicMeta, liveType);
+    const std::vector<double>* skillRatePtr = &skillScores;
+    if (skills.sorted) {
+        sortedSkillScores = skillScores;
+        this->sortSkillRate(true, deckDetail.cards.size(), sortedSkillScores);
+        skillRatePtr = &sortedSkillScores;
+    }
+    auto& skillRate = *skillRatePtr;
     // 计算总的分数比例
     double rate = baseRate;
     for (size_t i = 0; i < skills.details.size(); ++i) {
@@ -219,7 +232,7 @@ int LiveCalculator::getLiveScoreByDeck(
     const MusicMeta &musicMeta, 
     int liveType,
     LiveSkillOrder liveSkillOrder,
-    std::optional<std::vector<int>> specificSkillOrder,
+    const std::optional<std::vector<int>>& specificSkillOrder,
     std::optional<int> multiTeammateScoreUp,
     std::optional<int> multiTeammatePower
 )
@@ -234,7 +247,7 @@ int LiveCalculator::getLiveScoreByDeck(
 ScoreFunction LiveCalculator::getLiveScoreFunction(
     int liveType,
     LiveSkillOrder liveSkillOrder,
-    std::optional<std::vector<int>> specificSkillOrder,
+    const std::optional<std::vector<int>>& specificSkillOrder,
     std::optional<int> multiTeammateScoreUp,
     std::optional<int> multiTeammatePower
 )

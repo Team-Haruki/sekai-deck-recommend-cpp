@@ -44,9 +44,10 @@ void BaseDeckRecommend::findBestCardsSA(
     }
 
     constexpr int MAX_CID = 27;
-    std::vector<CardDetail> charaCardDetails[MAX_CID] = {};
+    // CardDetail结构体很大，这里只按指针归类，避免整块拷贝
+    std::vector<const CardDetail*> charaCardDetails[MAX_CID] = {};
     for (const auto& card : cardDetails) {
-        charaCardDetails[card.characterId].push_back(card);
+        charaCardDetails[card.characterId].push_back(&card);
     }
     auto searchValue = [&](const CardDetail& card) {
         auto powerNorm = std::max(0.0, double(card.power.max) / POWER_MAX);
@@ -129,10 +130,10 @@ void BaseDeckRecommend::findBestCardsSA(
                 if (cards.empty()) {
                     return;
                 }
-                auto& max_card = *std::max_element(cards.begin(), cards.end(), [&](const CardDetail& a, const CardDetail& b) {
-                    return strongerCard(&b, &a);
+                auto* max_card = *std::max_element(cards.begin(), cards.end(), [&](const CardDetail* a, const CardDetail* b) {
+                    return strongerCard(b, a);
                 });
-                deck.push_back(&max_card);
+                deck.push_back(max_card);
             }
             for (int i = 0; i < MAX_CID; ++i) {
                 auto& cards = charaCardDetails[i];
@@ -147,10 +148,10 @@ void BaseDeckRecommend::findBestCardsSA(
                 if (remainingFixedCharacterSet.count(i)) {
                     continue;
                 }
-                auto& max_card = *std::max_element(cards.begin(), cards.end(), [&](const CardDetail& a, const CardDetail& b) {
-                    return strongerCard(&b, &a);
+                auto* max_card = *std::max_element(cards.begin(), cards.end(), [&](const CardDetail* a, const CardDetail* b) {
+                    return strongerCard(b, a);
                 });
-                deck.push_back(&max_card);
+                deck.push_back(max_card);
             }
         } else {
             for (const auto& card : cardDetails) {
@@ -226,8 +227,8 @@ void BaseDeckRecommend::findBestCardsSA(
             }
             for (int j = 0; j < int(charaCardDetails[i].size()); ++j) {
                 if (isChallengeLive
-                    && charaCardDetails[i][j].cardId != deck[pos]->cardId
-                    && deckCardIds.count(charaCardDetails[i][j].cardId)) {
+                    && charaCardDetails[i][j]->cardId != deck[pos]->cardId
+                    && deckCardIds.count(charaCardDetails[i][j]->cardId)) {
                     continue;
                 }
                 replacableCardIndices.push_back(i * 10000 + j);
@@ -241,7 +242,7 @@ void BaseDeckRecommend::findBestCardsSA(
         int chara_index = replacableCardIndices[index] / 10000;
         int card_index = replacableCardIndices[index] % 10000;
         auto* old_card = deck[pos];
-        auto* new_card = &charaCardDetails[chara_index][card_index];
+        auto* new_card = charaCardDetails[chara_index][card_index];
 
         deck[pos] = new_card;
         double new_score = evaluateDeck(deck);

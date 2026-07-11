@@ -74,19 +74,22 @@ public:
      * @param liveType Live类型
      * @private
      */
-    std::vector<double> getSkillScore(const MusicMeta &musicMeta, int liveType);
+    const std::vector<double>& getSkillScore(const MusicMeta &musicMeta, int liveType);
 
     /**
      * 根据情况排序技能数据
+     * 结果写入out参数以便调用侧复用缓冲区（该函数位于组卡评估热路径）
+     * @param out 输出的技能数据
      * @param deckDetail
      * @param liveType
      * @param skillDetails
      */
-    SortedSkillDetails getSortedSkillDetails(
-        const DeckDetail &deckDetail, 
-        int liveType, 
+    void getSortedSkillDetails(
+        SortedSkillDetails& out,
+        const DeckDetail &deckDetail,
+        int liveType,
         LiveSkillOrder liveSkillOrder,
-        std::optional<std::vector<int>> specificSkillOrder = std::nullopt,
+        const std::optional<std::vector<int>>& specificSkillOrder = std::nullopt,
         const std::optional<std::vector<DeckCardSkillDetail>>& skillDetails = std::nullopt,
         std::optional<int> multiTeammateScoreUp = std::nullopt
     );
@@ -116,7 +119,7 @@ public:
         const MusicMeta &musicMeta, 
         int liveType, 
         LiveSkillOrder liveSkillOrder,
-        std::optional<std::vector<int>> specificSkillOrder = std::nullopt,
+        const std::optional<std::vector<int>>& specificSkillOrder = std::nullopt,
         const std::optional<std::vector<DeckCardSkillDetail>>& skillDetails = std::nullopt,
         int multiPowerSum = 0,
         std::optional<int> multiTeammateScoreUp = std::nullopt,
@@ -150,7 +153,7 @@ public:
         const MusicMeta &musicMeta, 
         int liveType,
         LiveSkillOrder liveSkillOrder,
-        std::optional<std::vector<int>> specificSkillOrder = std::nullopt,
+        const std::optional<std::vector<int>>& specificSkillOrder = std::nullopt,
         std::optional<int> multiTeammateScoreUp = std::nullopt,
         std::optional<int> multiTeammatePower = std::nullopt
     );
@@ -162,7 +165,7 @@ public:
     ScoreFunction getLiveScoreFunction(
         int liveType,
         LiveSkillOrder liveSkillOrder,
-        std::optional<std::vector<int>> specificSkillOrder = std::nullopt,
+        const std::optional<std::vector<int>>& specificSkillOrder = std::nullopt,
         std::optional<int> multiTeammateScoreUp = std::nullopt,
         std::optional<int> multiTeammatePower = std::nullopt
     );

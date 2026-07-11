@@ -39,36 +39,42 @@ struct RecommendDeck : DeckDetail {
 
     RecommendDeck() = default;
 
+    // 目标值计算与构造分离，让评估热路径可以先算目标值、仅对胜出的卡组物化RecommendDeck
+    static double calcTargetValue(const DeckDetail &deckDetail, RecommendTarget target, Score s) {
+        if (target == RecommendTarget::Mysekai) {
+            // 烤森目标值
+            return s.mysekaiInternalPoint;
+        }
+        // 根据不同优化目标计算目标值
+        if (target == RecommendTarget::Power) {
+            return deckDetail.power.total + double(s.score) / SCORE_MAX;
+        }
+        if (target == RecommendTarget::Skill) {
+            // Keep skill score-up primary; use live score only as a tiny tie-breaker.
+            return deckDetail.multiLiveScoreUp + double(s.liveScore) / (SCORE_MAX * 1000.0);
+        }
+        if (target == RecommendTarget::Bonus) {
+            return deckDetail.eventBonus.value_or(0.0)
+                + deckDetail.supportDeckBonus.value_or(0.0)
+                + double(s.score) / SCORE_MAX;
+        }
+        return s.score + double(s.liveScore) / SCORE_MAX;
+    }
+
     RecommendDeck(const DeckDetail &deckDetail, RecommendTarget target, Score s)
         : DeckDetail(deckDetail) {
+            this->targetValue = calcTargetValue(deckDetail, target, s);
             if (target == RecommendTarget::Mysekai) {
-                // 烤森目标值
-                this->targetValue = s.mysekaiInternalPoint;
                 this->mysekaiEventPoint = s.mysekaiEventPoint;
                 this->score = 0;
                 this->liveScore = 0;
                 this->multiLiveScoreUp = 0;
-            } 
+            }
             else {
                 this->score = s.score;
                 this->liveScore = s.liveScore;
                 this->multiLiveScoreUp = deckDetail.multiLiveScoreUp;
                 this->mysekaiEventPoint = 0;
-
-                int power = deckDetail.power.total;
-                // 根据不同优化目标计算目标值
-                if (target == RecommendTarget::Power) {
-                    targetValue = power + double(score) / SCORE_MAX;
-                } else if (target == RecommendTarget::Skill) {
-                    // Keep skill score-up primary; use live score only as a tiny tie-breaker.
-                    targetValue = multiLiveScoreUp + double(liveScore) / (SCORE_MAX * 1000.0);
-                } else if (target == RecommendTarget::Bonus) {
-                    targetValue = deckDetail.eventBonus.value_or(0.0)
-                        + deckDetail.supportDeckBonus.value_or(0.0)
-                        + double(score) / SCORE_MAX;
-                } else {
-                    targetValue = score + double(liveScore) / SCORE_MAX;
-                }
             }
         }
 

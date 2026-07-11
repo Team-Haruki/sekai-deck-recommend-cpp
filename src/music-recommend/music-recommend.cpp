@@ -7,7 +7,7 @@ std::vector<RecommendMusic> MusicRecommend::recommendMusic(
     int liveType,
     int eventType,
     LiveSkillOrder liveSkillOrder,
-    std::optional<std::vector<int>> specificSkillOrder,
+    const std::optional<std::vector<int>>& specificSkillOrder,
     std::optional<int> multiTeammateScoreUp,
     std::optional<int> multiTeammatePower
 )

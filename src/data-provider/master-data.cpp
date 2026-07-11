@@ -296,6 +296,33 @@ void MasterData::loadFromJsons(std::map<std::string, json_doc>& jsons) {
     addFakeEvent(Enums::EventType::marathon);
     addFakeEvent(Enums::EventType::cheerful);
     addLegacyWorldBloom2FinaleIfNeeded(*this);
+    buildDerivedCaches();
+}
+
+void MasterData::buildDerivedCaches() {
+    this->worldBloomFinaleEventIds.clear();
+    for (const auto& worldBloom : worldBlooms) {
+        if (worldBloom.worldBloomChapterType == "finale") {
+            this->worldBloomFinaleEventIds.insert(worldBloom.eventId);
+        }
+    }
+    this->eventCardBonusCountLimits.clear();
+    for (const auto& limit : eventCardBonusLimits) {
+        this->eventCardBonusCountLimits.emplace(limit.eventId, limit.memberCountLimit);
+    }
+    this->honorIndexById.clear();
+    for (int i = 0; i < (int)honors.size(); ++i) {
+        this->honorIndexById.emplace(honors[i].id, i);
+    }
+}
+
+const Honor& MasterData::getHonorById(int honorId) const
+{
+    auto it = honorIndexById.find(honorId);
+    if (it == honorIndexById.end()) {
+        throw ElementNoFoundError("Honor not found for honorId=" + std::to_string(honorId));
+    }
+    return honors[it->second];
 }
 
 void MasterData::loadFromFiles(const std::string& baseDir) {
@@ -476,20 +503,14 @@ int MasterData::getWorldBloomEventTurn(int eventId) const
 
 bool MasterData::isWorldBloomFinale(int eventId) const
 {
-    for (const auto& worldBloom : worldBlooms) {
-        if (worldBloom.eventId == eventId && worldBloom.worldBloomChapterType == "finale") {
-            return true;
-        }
-    }
-    return false;
+    return worldBloomFinaleEventIds.count(eventId) > 0;
 }
 
 int MasterData::getEventCardBonusCountLimit(int eventId) const
 {
-    for (const auto& limit : eventCardBonusLimits) {
-        if (limit.eventId == eventId) {
-            return limit.memberCountLimit;
-        }
+    auto it = eventCardBonusCountLimits.find(eventId);
+    if (it != eventCardBonusCountLimits.end()) {
+        return it->second;
     }
     if (eventId == legacyWorldBloom2FinaleEventId) {
         return legacyWorldBloom2FinaleCardBonusCountLimit;

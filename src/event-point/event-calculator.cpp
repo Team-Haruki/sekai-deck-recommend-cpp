@@ -41,7 +41,7 @@ Score EventCalculator::getDeckScoreAndEventPoint(
     int liveType, 
     int eventType,
     LiveSkillOrder liveSkillOrder,
-    std::optional<std::vector<int>> specificSkillOrder,
+    const std::optional<std::vector<int>>& specificSkillOrder,
     std::optional<int> multiTeammateScoreUp,
     std::optional<int> multiTeammatePower
 )
@@ -72,7 +72,7 @@ ScoreFunction EventCalculator::getEventPointFunction(
     int liveType, 
     int eventType,
     LiveSkillOrder liveSkillOrder,
-    std::optional<std::vector<int>> specificSkillOrder,
+    const std::optional<std::vector<int>>& specificSkillOrder,
     std::optional<int> multiTeammateScoreUp,
     std::optional<int> multiTeammatePower
 )
