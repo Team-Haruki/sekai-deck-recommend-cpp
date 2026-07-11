@@ -999,7 +999,13 @@ std::vector<RecommendDeck> BaseDeckRecommend::recommendHighScoreDeck(
         auto hybridInfo = makeCalcInfo(baseConfig.timeout_ms);
         auto fullSorted = sortCardsByStrength(cards);
 
-        int dfsBudgetMs = std::min(baseConfig.timeout_ms, resolveBudgetMs(baseConfig.timeout_ms, 0.15, 20, 150));
+        // Score目标（非WL）的精确DFS剪枝有效，常能在预算内搜完全卡池，多给预算换取精确解；
+        // WL的支援加成上界松、剪枝弱，预算保持原状，主要依赖GA精修
+        bool exactSeedLikely = baseConfig.target == RecommendTarget::Score
+            && eventConfig.eventType != Enums::EventType::world_bloom;
+        int dfsBudgetMs = std::min(baseConfig.timeout_ms, exactSeedLikely
+            ? resolveBudgetMs(baseConfig.timeout_ms, 0.30, 20, 300)
+            : resolveBudgetMs(baseConfig.timeout_ms, 0.15, 20, 150));
         RecommendCalcInfo seedInfo{};
         seedInfo.start_ts = hybridInfo.start_ts;
         seedInfo.timeout = timeoutToNs(dfsBudgetMs);
@@ -1019,6 +1025,11 @@ std::vector<RecommendDeck> BaseDeckRecommend::recommendHighScoreDeck(
         }
         runDfsExact(baseConfig, seedCards, seedInfo);
         mergeCalcInfo(hybridInfo, seedInfo);
+
+        // 种子DFS未被截断且覆盖了全卡池时，其Top-K已是精确结果，GA精修不可能再改进，直接返回
+        if (!seedInfo.is_timeout && seedCards.size() == cards.size()) {
+            return ensureResults(collectResults(hybridInfo));
+        }
 
         auto seedDecks = collectSeedDecks(seedInfo, fullSorted, std::max(baseConfig.limit * 3, 8));
         auto gaConfig = tuneGaConfig(baseConfig, fullSorted.size(), false, true);
