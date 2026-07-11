@@ -2074,6 +2074,32 @@ std::vector<RecommendDeck> BaseDeckRecommend::recommendHighScoreDeck(
 
         auto policyInfo = makeCalcInfo(policyBudgetMs);
 
+        // 冷启动（无种子记忆）且剪枝有效的场景（Score目标非WL，含挑战）：
+        // 先跑一段预算内精确DFS垫入种子。跑完时种子即被证明的最优解，且会经
+        // 种子记忆持久化，后续warm请求直接从最优出发——把线性策略概率性错过
+        // 最优的问题类在这些场景上关死。WL上界松跑不完，维持原结构化种子路径。
+        // 该阶段只在冷启动追加，不削减任何既有阶段预算（预算是质量下限）。
+        if (coldStartRequest
+            && config.target == RecommendTarget::Score
+            && eventConfig.eventType != Enums::EventType::world_bloom) {
+            int exactSeedBudgetMs = std::min(config.timeout_ms, resolveBudgetMs(config.timeout_ms, 0.35, 60, 300));
+            RecommendCalcInfo exactSeedInfo{};
+            exactSeedInfo.start_ts = policyInfo.start_ts;
+            exactSeedInfo.timeout = timeoutToNs(exactSeedBudgetMs);
+            {
+                // GA预热垫满结果队列，让DFS上界剪枝从第一个结点生效
+                RecommendCalcInfo warmupInfo{};
+                warmupInfo.start_ts = exactSeedInfo.start_ts;
+                warmupInfo.timeout = timeoutToNs(std::max(1, exactSeedBudgetMs / 3));
+                auto gaWarmupConfig = tuneGaConfig(config, cards.size(), true, false);
+                runGaSearch(gaWarmupConfig, cards, warmupInfo);
+                mergeCalcInfo(exactSeedInfo, warmupInfo);
+            }
+            runDfsExact(config, cards, exactSeedInfo);
+            // 并入policyInfo：结果会随既有流程进入种子记忆并最终合入totalInfo
+            mergeCalcInfo(policyInfo, exactSeedInfo);
+        }
+
         auto sharesAnyUnit = [](const CardDetail& a, const CardDetail& b) {
             for (const auto& unit : a.units) {
                 if (std::find(b.units.begin(), b.units.end(), unit) != b.units.end()) {
