@@ -78,3 +78,8 @@ python tools/bench/bench_matrix.py all                                     # 新
 `regress.py compare` 验证。部署时注意与 deck-service EnginePool 的核数
 预算相乘不要超订。实测收益集中在大种群 GA（8 线程 best ~1.5×）；RL 生产
 路径不受影响。
+- `dfs` 路径的 GA 预热不可轻易替换：除垫入剪枝下界外，它还把 DFS 启发式
+  剪枝（C 位同色/同组规则等）枚举不到的卡组补进第 2-10 名——尾部名次的
+  语义是"剪枝枚举 ∪ 预热发现"。换用其他 warm start（如贪心+1-swap）会
+  改变尾名内容（实测 member2 第 3 名 492→490），top-1 不受影响；如需替换
+  须作为行为变更单独评审。
