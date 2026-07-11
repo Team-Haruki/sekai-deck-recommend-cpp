@@ -16,6 +16,7 @@
 #include "deck-recommend/event-deck-recommend.h"
 #include "deck-recommend/challenge-live-deck-recommend.h"
 #include "deck-recommend/mysekai-deck-recommend.h"
+#include "common/parallel-utils.h"
 #include "area-item-recommend/area-item-recommend.h"
 #include "data-provider/static-data.h"
 #include "live-score/live-exact-calculator.h"
@@ -912,6 +913,51 @@ public:
         return dumpMutableJson(out);
     }
 
+    // 批量推荐：JSON数组进（每项为一份完整options）、按序JSON数组出。
+    // 以-pthread构建（需站点开启COOP/COEP）并调用setEngineThreadCount后各项并行执行；
+    // 无线程构建自动退化为顺序执行，行为一致。
+    std::string recommendBatch(const std::string& optionsJsonArray) {
+        auto arrDoc = json_doc::parse(optionsJsonArray, "wasm recommendBatch options array");
+        json_view arr = arrDoc.root();
+        if (!arr.is_array())
+            throw std::invalid_argument("recommendBatch expects a JSON array of options");
+        std::vector<std::string> optionJsons{};
+        size_t count = arr.size();
+        optionJsons.reserve(count);
+        for (size_t i = 0; i < count; ++i) {
+            // 逐项重序列化后复用单次recommend的完整解析/校验路径
+            yyjson_val* item = yyjson_arr_get(arr.raw(), i);
+            char* text = item ? yyjson_val_write(item, 0, nullptr) : nullptr;
+            if (text == nullptr)
+                throw std::invalid_argument("recommendBatch item " + std::to_string(i) + " is not valid JSON");
+            optionJsons.emplace_back(text);
+            free(text);
+        }
+
+        std::vector<std::string> results(optionJsons.size());
+        std::vector<std::string> errors(optionJsons.size());
+        parallelFor(optionJsons.size(), [&](std::size_t i) {
+            try {
+                results[i] = recommend(optionJsons[i]);
+            } catch (const std::exception& e) {
+                errors[i] = e.what();
+            }
+        }, 1);
+        for (std::size_t i = 0; i < errors.size(); ++i) {
+            if (!errors[i].empty()) {
+                throw std::runtime_error("batch item " + std::to_string(i) + " failed: " + errors[i]);
+            }
+        }
+
+        std::string out = "[";
+        for (std::size_t i = 0; i < results.size(); ++i) {
+            if (i) out += ",";
+            out += results[i];
+        }
+        out += "]";
+        return out;
+    }
+
     std::string recommendAreaItems(const std::string& optionsJson) {
         auto optsDoc = json_doc::parse(optionsJson, "wasm area item recommend options");
         json_view opts = optsDoc.root();
@@ -1174,11 +1220,13 @@ void wasmInitDataPath(const std::string& path) {
 }  // namespace
 
 EMSCRIPTEN_BINDINGS(sekai_deck_recommend) {
+    emscripten::function("setEngineThreadCount", &setEngineThreadCount);
     emscripten::class_<WasmSekaiDeckRecommend>("SekaiDeckRecommend")
         .constructor<>()
         .function("updateMasterdataFromObject", &WasmSekaiDeckRecommend::updateMasterdataFromObject)
         .function("updateMusicmetasFromString", &WasmSekaiDeckRecommend::updateMusicmetasFromString)
         .function("recommend", &WasmSekaiDeckRecommend::recommend)
+        .function("recommendBatch", &WasmSekaiDeckRecommend::recommendBatch)
         .function("recommendAreaItems", &WasmSekaiDeckRecommend::recommendAreaItems)
         .function("recommendMusic", &WasmSekaiDeckRecommend::recommendMusic)
         .function("calculateExactLive", &WasmSekaiDeckRecommend::calculateExactLive)

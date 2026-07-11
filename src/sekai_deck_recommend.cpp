@@ -8,6 +8,9 @@
 
 #include <iostream>
 #include <algorithm>
+#include <shared_mutex>
+
+#include "common/parallel-utils.h"
 #include <chrono>
 #include <fstream>
 #include <tuple>
@@ -848,6 +851,9 @@ class SekaiDeckRecommend {
 
     mutable std::map<Region, std::shared_ptr<MasterData>> region_masterdata;
     mutable std::map<Region, std::shared_ptr<MusicMetas>> region_musicmetas;
+    // recommend系列在无GIL下并发执行，与update_*互斥（读写锁）；
+    // 用shared_ptr保持类可拷贝（pybind注册需要）
+    std::shared_ptr<std::shared_mutex> engine_mutex = std::make_shared<std::shared_mutex>();
 
     struct DeckRecommendOptions {
         int liveType = 0;
@@ -1503,6 +1509,7 @@ public:
 
     // 从指定目录更新区服masterdata数据
     void update_masterdata(const std::string& base_dir, const std::string& region) {
+        std::unique_lock<std::shared_mutex> lock(*engine_mutex);
         if (!REGION_ENUM_MAP.count(region)) 
             throw std::invalid_argument("Invalid region: " + region);
         region_masterdata[REGION_ENUM_MAP.at(region)] = std::make_shared<MasterData>();
@@ -1511,6 +1518,7 @@ public:
 
     // 从指定string的dict更新区服masterdata数据
     void update_masterdata_from_strings(const py::dict& dict, const std::string& region) {
+        std::unique_lock<std::shared_mutex> lock(*engine_mutex);
         if (!REGION_ENUM_MAP.count(region)) 
             throw std::invalid_argument("Invalid region: " + region);
         std::map<std::string, std::string> data;
@@ -1524,6 +1532,7 @@ public:
 
     // 从指定文件更新区服musicmetas数据
     void update_musicmetas(const std::string& file_path, const std::string& region) {
+        std::unique_lock<std::shared_mutex> lock(*engine_mutex);
         if (!REGION_ENUM_MAP.count(region)) 
             throw std::invalid_argument("Invalid region: " + region);
         region_musicmetas[REGION_ENUM_MAP.at(region)] = std::make_shared<MusicMetas>();
@@ -1532,6 +1541,7 @@ public:
 
     // 从指定string更新区服musicmetas数据
     void update_musicmetas_from_string(const std::string& s, const std::string& region) {
+        std::unique_lock<std::shared_mutex> lock(*engine_mutex);
         if (!REGION_ENUM_MAP.count(region)) 
             throw std::invalid_argument("Invalid region: " + region);
         region_musicmetas[REGION_ENUM_MAP.at(region)] = std::make_shared<MusicMetas>();
@@ -1725,12 +1735,10 @@ public:
         return live_exact_detail_to_py(detail);
     }
 
-    // 推荐卡组
-    PyDeckRecommendResult recommend(const PyDeckRecommendOptions& pyoptions) {
-        auto options = construct_options_from_py(pyoptions);
-
+    // 推荐核心（调用方需持有engine_mutex共享锁）
+    PyDeckRecommendResult run_recommend(DeckRecommendOptions& options) {
         std::vector<RecommendDeck> result;
-        
+
         if (options.config.target == RecommendTarget::Mysekai) {
             MysekaiDeckRecommend mysekaiDeckRecommend(options.dataProvider);
             result = mysekaiDeckRecommend.recommendMysekaiDeck(
@@ -1756,6 +1764,46 @@ public:
         }
 
         return construct_result_to_py(result);
+    }
+
+    // 推荐卡组
+    PyDeckRecommendResult recommend(const PyDeckRecommendOptions& pyoptions) {
+        std::shared_lock<std::shared_mutex> lock(*engine_mutex);
+        auto options = construct_options_from_py(pyoptions);
+        return run_recommend(options);
+    }
+
+    // 批量推荐：一次调用提交多个options（不同算法/歌曲/目标皆可），
+    // 引擎内部并行执行并按输入顺序返回。开启DECK_ENGINE_THREADS（或
+    // set_engine_thread_count）后各项真正并行；parallelFor的嵌套守卫
+    // 会让各项内部的并行阶段自动退化为串行，避免线程超订。
+    std::vector<PyDeckRecommendResult> recommend_batch(const std::vector<PyDeckRecommendOptions>& pyoptionsList) {
+        std::shared_lock<std::shared_mutex> lock(*engine_mutex);
+        std::vector<DeckRecommendOptions> optionsList{};
+        optionsList.reserve(pyoptionsList.size());
+        for (std::size_t i = 0; i < pyoptionsList.size(); ++i) {
+            try {
+                optionsList.push_back(construct_options_from_py(pyoptionsList[i]));
+            } catch (const std::exception& e) {
+                throw std::invalid_argument("batch item " + std::to_string(i) + ": " + e.what());
+            }
+        }
+
+        std::vector<PyDeckRecommendResult> results(optionsList.size());
+        std::vector<std::string> errors(optionsList.size());
+        parallelFor(optionsList.size(), [&](std::size_t i) {
+            try {
+                results[i] = run_recommend(optionsList[i]);
+            } catch (const std::exception& e) {
+                errors[i] = e.what();
+            }
+        }, 1);
+        for (std::size_t i = 0; i < errors.size(); ++i) {
+            if (!errors[i].empty()) {
+                throw std::runtime_error("batch item " + std::to_string(i) + " failed: " + errors[i]);
+            }
+        }
+        return results;
     }
 
 };
@@ -1968,5 +2016,9 @@ PYBIND11_MODULE(sekai_deck_recommend, m) {
             py::arg("multi_sum_power") = 0,
             py::arg("fever_music_score_json") = py::none()
         )
-        .def("recommend", &SekaiDeckRecommend::recommend);
+        .def("recommend", &SekaiDeckRecommend::recommend, py::call_guard<py::gil_scoped_release>())
+        .def("recommend_batch", &SekaiDeckRecommend::recommend_batch, py::call_guard<py::gil_scoped_release>());
+
+    m.def("set_engine_thread_count", &setEngineThreadCount,
+          "Set engine-internal parallelism (0 = use DECK_ENGINE_THREADS env, 1 = serial).");
 }
