@@ -416,7 +416,9 @@ PreparedOptions buildOptions(
     }
 
     // algorithm
-    std::string algorithm = jsonOpt<std::string>(opts, "algorithm").value_or(DEFAULT_ALGORITHM);
+    // 挑战live卡池小（单角色），精确DFS比启发式算法更快且带最优保证，
+    // 未显式指定算法时默认使用DFS；显式指定仍然生效
+    std::string algorithm = jsonOpt<std::string>(opts, "algorithm").value_or(is_challenge_live ? "dfs" : DEFAULT_ALGORITHM);
     if (!VALID_ALGORITHMS.count(algorithm))
         throw std::invalid_argument("Invalid algorithm: " + algorithm);
     if (algorithm == "sa") config.algorithm = RecommendAlgorithm::SA;

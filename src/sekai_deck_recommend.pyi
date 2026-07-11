@@ -156,7 +156,17 @@ class DeckRecommendOptions:
     Deck recommend options
     Attributes:
         target (str): Target of the recommendation in ["score", "power", "skill", "bonus"], default is "score"
-        algorithm (str): one of ["dfs", "ga", "dfs_ga", "rl", "sa"], default is "ga"
+        algorithm (str): one of ["dfs", "ga", "dfs_ga", "rl", "sa"].
+            Default is "ga" ("dfs" for challenge live types).
+            - "dfs": exact branch-and-bound search. For score target on marathon/banner
+              events and challenge live it typically completes the full card pool within
+              ~200ms and returns provably optimal decks; for world bloom / mysekai the
+              bound is loose, so give it a timeout_ms budget.
+            - "rl": lowest latency with learned warm starts; recommended for
+              high-throughput services.
+            - "dfs_ga": adaptive hybrid — exact DFS result when it completes in budget,
+              GA refinement otherwise (world bloom / mysekai).
+            - "ga": genetic algorithm baseline. "sa": legacy simulated annealing.
         region (str): Region in ["jp", "en", "tw", "kr", "cn"]
         user_data (DeckRecommendUserData): User suite data for deck recommendation
         user_data_file_path (str): File path of user suite data json
