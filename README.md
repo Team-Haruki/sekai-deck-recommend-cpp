@@ -75,8 +75,16 @@ options = DeckRecommendOptions()
 # optimizing target in ["score", "power", "skill", "bonus"], default is "score"
 options.target = "score"
 
-# "ga" for genetic algorithm, "dfs" for brute-force search
-# default is "ga"
+# one of ["dfs", "ga", "dfs_ga", "rl", "sa"], default is "ga"
+# ("dfs" for challenge live types).
+#   dfs    - exact branch-and-bound; for score target on marathon/banner events
+#            and challenge live it completes the full card pool in ~100ms with
+#            provably optimal results (give world bloom / mysekai a timeout_ms)
+#   rl     - lowest latency (~30ms) with learned cross-request warm starts;
+#            recommended for high-throughput services
+#   dfs_ga - adaptive: exact DFS result when it completes in budget,
+#            GA refinement otherwise
+#   ga     - genetic algorithm baseline; sa - legacy simulated annealing
 options.algorithm = "ga"   
 
 options.region = "jp"
@@ -124,3 +132,17 @@ npm pack
 - Some modifications based on [moe-sekai/sekai-deck-recommend-cpp](https://github.com/moe-sekai/sekai-deck-recommend-cpp)
 - JSON parsing and WebAssembly JSON payloads by [yyjson](https://github.com/ibireme/yyjson)
 - Python bindings powered by [pybind11](https://github.com/pybind/pybind11)
+
+## Performance & Concurrency
+
+- `recommend_batch(options_list)` (Python) / `recommendBatch(jsonArray)` (wasm)
+  runs multiple requests — different algorithms, musics or targets — in one
+  call and returns results in input order.
+- Engine-internal parallelism is opt-in via the `DECK_ENGINE_THREADS`
+  environment variable or `set_engine_thread_count()` (default is fully
+  serial and bit-identical to historical behavior). The Python `recommend`
+  releases the GIL, so calls can also run concurrently from Python threads.
+- A pthreads wasm variant can be built with `-DSEKAI_WASM_THREADS=ON`
+  (requires COOP/COEP headers for SharedArrayBuffer).
+- Local benchmark / regression tooling lives in `tools/bench/` (see its
+  README for the verification methodology used for performance changes).
