@@ -71,6 +71,15 @@ export class SekaiDeckRecommendWasm {
     return JSON.parse(json)
   }
 
+  recommendBatch(optionsList) {
+    this.#assertActive()
+    if (!Array.isArray(optionsList)) {
+      throw new TypeError("recommendBatch expects an array of options.")
+    }
+    const json = this.#engine.recommendBatch(JSON.stringify(optionsList.map(normalizeUserDataAliases)))
+    return JSON.parse(json)
+  }
+
   getWorldBloomSupportCards(options) {
     this.#assertActive()
     const json = this.#engine.getWorldBloomSupportCards(JSON.stringify(normalizeUserDataAliases(options)))

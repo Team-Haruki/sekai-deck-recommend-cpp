@@ -289,6 +289,7 @@ export interface RawSekaiDeckRecommendInstance {
   updateMasterdataFromObject(data: Record<string, unknown>, region: SekaiRegion): void
   updateMusicmetasFromString(data: string, region: SekaiRegion): void
   recommend(optionsJson: string): string
+  recommendBatch(optionsJsonArray: string): string
   recommendAreaItems(optionsJson: string): string
   recommendMusic(optionsJson: string): string
   calculateExactLive(optionsJson: string): string
@@ -299,6 +300,8 @@ export interface RawSekaiDeckRecommendInstance {
 export interface RawSekaiDeckRecommendModule {
   SekaiDeckRecommend: new () => RawSekaiDeckRecommendInstance
   initDataPath(path: string): void
+  /** Effective only in wasm builds compiled with SEKAI_WASM_THREADS; a no-op in the default single-threaded package. */
+  setEngineThreadCount(count: number): void
   [key: string]: unknown
 }
 
@@ -312,6 +315,8 @@ export class SekaiDeckRecommendWasm {
   loadMasterData(region: SekaiRegion, data: Record<string, unknown>): void
   loadMusicMetas(region: SekaiRegion, data: string | object): void
   recommend(options: RecommendOptions): RecommendResult
+  /** Runs each request through the full recommend pipeline; results are returned in input order. */
+  recommendBatch(optionsList: RecommendOptions[]): RecommendResult[]
   getWorldBloomSupportCards(options: WorldBloomSupportOptions): WorldBloomSupportCard[]
   recommendAreaItems(options: AreaItemRecommendOptions): RecommendAreaItem[]
   recommendMusic(options: MusicRecommendOptions, deck: RecommendDeck): RecommendMusic[]
