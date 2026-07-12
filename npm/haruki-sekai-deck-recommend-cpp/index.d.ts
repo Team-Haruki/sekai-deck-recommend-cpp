@@ -273,6 +273,8 @@ export interface RecommendDeck {
 
 export interface RecommendResult {
   decks: RecommendDeck[]
+  /** Wall-clock time of the search algorithm itself in milliseconds (excludes option/user-data parsing and result serialization). */
+  cost_ms: number
 }
 
 export interface WorldBloomSupportCard {

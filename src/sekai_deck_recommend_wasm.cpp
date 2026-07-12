@@ -18,6 +18,7 @@
 #include "deck-recommend/mysekai-deck-recommend.h"
 #include "common/parallel-utils.h"
 
+#include <chrono>
 #include <emscripten/emscripten.h>
 
 // 把C++错误消息作为真正的JS Error抛到JS侧，
@@ -904,6 +905,8 @@ public:
         json_view opts = optsDoc.root();
         auto prepared = buildOptions(opts, region_masterdata, region_musicmetas);
 
+        // cost_ms只计算法搜索本身，不含options/userdata解析与结果序列化
+        auto searchStart = std::chrono::steady_clock::now();
         std::vector<RecommendDeck> result;
         if (prepared.config.target == RecommendTarget::Mysekai) {
             MysekaiDeckRecommend r(prepared.dataProvider);
@@ -915,6 +918,8 @@ public:
             EventDeckRecommend r(prepared.dataProvider);
             result = r.recommendEventDeck(prepared.eventId, prepared.liveType, prepared.config, prepared.worldBloomCharacterId);
         }
+        double costMs = std::chrono::duration<double, std::milli>(
+            std::chrono::steady_clock::now() - searchStart).count();
 
         MutableJsonDoc outDoc;
         yyjson_mut_val* out = yyjson_mut_obj(outDoc.get());
@@ -923,6 +928,7 @@ public:
         if (!decks) throw std::runtime_error("Failed to allocate recommend decks JSON array.");
         for (const auto& d : result) jsonArrayAppend(decks, deckToJson(outDoc.get(), d));
         jsonAddValue(outDoc.get(), out, "decks", decks);
+        jsonAdd(outDoc.get(), out, "cost_ms", costMs);
         return dumpMutableJson(out);
     }
 

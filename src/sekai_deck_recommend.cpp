@@ -732,6 +732,8 @@ struct PyRecommendDeck {
 // 返回python的推荐结果
 struct PyDeckRecommendResult {
     std::vector<PyRecommendDeck> decks;
+    // 算法搜索耗时（毫秒），不含options/userdata解析与结果转换
+    double cost_ms = 0.0;
 
     py::dict to_dict() const {
         py::dict result;
@@ -740,6 +742,7 @@ struct PyDeckRecommendResult {
             deck_list.append(deck.to_dict());
         }
         result["decks"] = deck_list;
+        result["cost_ms"] = cost_ms;
         return result;
     }
     static PyDeckRecommendResult from_dict(const py::dict& dict) {
@@ -747,6 +750,9 @@ struct PyDeckRecommendResult {
         auto deck_list = dict["decks"].cast<py::list>();
         for (const auto& item : deck_list) {
             result.decks.push_back(PyRecommendDeck::from_dict(item.cast<py::dict>()));
+        }
+        if (dict.contains("cost_ms")) {
+            result.cost_ms = dict["cost_ms"].cast<double>();
         }
         return result;
     }
@@ -1737,6 +1743,8 @@ public:
 
     // 推荐核心（调用方需持有engine_mutex共享锁）
     PyDeckRecommendResult run_recommend(DeckRecommendOptions& options) {
+        // cost_ms只计算法搜索本身，不含options构建与结果转换
+        auto searchStart = std::chrono::steady_clock::now();
         std::vector<RecommendDeck> result;
 
         if (options.config.target == RecommendTarget::Mysekai) {
@@ -1763,7 +1771,12 @@ public:
             );
         }
 
-        return construct_result_to_py(result);
+        double costMs = std::chrono::duration<double, std::milli>(
+            std::chrono::steady_clock::now() - searchStart).count();
+
+        auto ret = construct_result_to_py(result);
+        ret.cost_ms = costMs;
+        return ret;
     }
 
     // 推荐卡组
@@ -1993,7 +2006,8 @@ PYBIND11_MODULE(sekai_deck_recommend, m) {
         .def(py::init<const PyDeckRecommendResult&>())
         .def("to_dict", &PyDeckRecommendResult::to_dict)
         .def_static("from_dict", &PyDeckRecommendResult::from_dict)
-        .def_readwrite("decks", &PyDeckRecommendResult::decks);
+        .def_readwrite("decks", &PyDeckRecommendResult::decks)
+        .def_readwrite("cost_ms", &PyDeckRecommendResult::cost_ms);
 
     py::class_<SekaiDeckRecommend>(m, "SekaiDeckRecommend")
         .def(py::init<>())

@@ -382,8 +382,11 @@ class DeckRecommendResult:
     Deck recommendation result
     Attributes:
         decks (List[RecommendDeck]): List of recommended decks
+        cost_ms (float): Wall-clock time of the search algorithm itself in
+            milliseconds (excludes option/user-data parsing and result conversion)
     """
     decks: List[RecommendDeck]
+    cost_ms: float
 
     def to_dict(self) -> Dict[str, Any]:
         ...
