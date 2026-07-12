@@ -17,6 +17,19 @@
 #include "deck-recommend/challenge-live-deck-recommend.h"
 #include "deck-recommend/mysekai-deck-recommend.h"
 #include "common/parallel-utils.h"
+
+#include <emscripten/emscripten.h>
+
+// 把C++错误消息作为真正的JS Error抛到JS侧，
+// 这样worker的catch(error)能读到error.message（而非落到兜底文案）。
+EM_JS(void, throwJsError, (const char* message), {
+    throw new Error(UTF8ToString(message));
+});
+
+[[noreturn]] static void rethrowAsJsError(const std::exception& e) {
+    throwJsError(e.what());
+    abort();  // 不可达，仅用于满足 [[noreturn]]
+}
 #include "area-item-recommend/area-item-recommend.h"
 #include "data-provider/static-data.h"
 #include "live-score/live-exact-calculator.h"
@@ -1221,16 +1234,49 @@ void wasmInitDataPath(const std::string& path) {
 
 EMSCRIPTEN_BINDINGS(sekai_deck_recommend) {
     emscripten::function("setEngineThreadCount", &setEngineThreadCount);
+    // 所有入口统一在注册处包装：C++异常 → JS Error（error.message可读）
     emscripten::class_<WasmSekaiDeckRecommend>("SekaiDeckRecommend")
         .constructor<>()
-        .function("updateMasterdataFromObject", &WasmSekaiDeckRecommend::updateMasterdataFromObject)
-        .function("updateMusicmetasFromString", &WasmSekaiDeckRecommend::updateMusicmetasFromString)
-        .function("recommend", &WasmSekaiDeckRecommend::recommend)
-        .function("recommendBatch", &WasmSekaiDeckRecommend::recommendBatch)
-        .function("recommendAreaItems", &WasmSekaiDeckRecommend::recommendAreaItems)
-        .function("recommendMusic", &WasmSekaiDeckRecommend::recommendMusic)
-        .function("calculateExactLive", &WasmSekaiDeckRecommend::calculateExactLive)
-        .function("getWorldBloomSupportCards", &WasmSekaiDeckRecommend::getWorldBloomSupportCards);
+        .function("updateMasterdataFromObject", emscripten::optional_override(
+            [](WasmSekaiDeckRecommend& self, emscripten::val data, const std::string& region) {
+                try { self.updateMasterdataFromObject(data, region); }
+                catch (const std::exception& e) { rethrowAsJsError(e); }
+            }))
+        .function("updateMusicmetasFromString", emscripten::optional_override(
+            [](WasmSekaiDeckRecommend& self, const std::string& s, const std::string& region) {
+                try { self.updateMusicmetasFromString(s, region); }
+                catch (const std::exception& e) { rethrowAsJsError(e); }
+            }))
+        .function("recommend", emscripten::optional_override(
+            [](WasmSekaiDeckRecommend& self, const std::string& optionsJson) -> std::string {
+                try { return self.recommend(optionsJson); }
+                catch (const std::exception& e) { rethrowAsJsError(e); }
+            }))
+        .function("recommendBatch", emscripten::optional_override(
+            [](WasmSekaiDeckRecommend& self, const std::string& optionsJsonArray) -> std::string {
+                try { return self.recommendBatch(optionsJsonArray); }
+                catch (const std::exception& e) { rethrowAsJsError(e); }
+            }))
+        .function("recommendAreaItems", emscripten::optional_override(
+            [](WasmSekaiDeckRecommend& self, const std::string& optionsJson) -> std::string {
+                try { return self.recommendAreaItems(optionsJson); }
+                catch (const std::exception& e) { rethrowAsJsError(e); }
+            }))
+        .function("recommendMusic", emscripten::optional_override(
+            [](WasmSekaiDeckRecommend& self, const std::string& optionsJson) -> std::string {
+                try { return self.recommendMusic(optionsJson); }
+                catch (const std::exception& e) { rethrowAsJsError(e); }
+            }))
+        .function("calculateExactLive", emscripten::optional_override(
+            [](WasmSekaiDeckRecommend& self, const std::string& optionsJson) -> std::string {
+                try { return self.calculateExactLive(optionsJson); }
+                catch (const std::exception& e) { rethrowAsJsError(e); }
+            }))
+        .function("getWorldBloomSupportCards", emscripten::optional_override(
+            [](WasmSekaiDeckRecommend& self, const std::string& optionsJson) -> std::string {
+                try { return self.getWorldBloomSupportCards(optionsJson); }
+                catch (const std::exception& e) { rethrowAsJsError(e); }
+            }));
 
     emscripten::function("initDataPath", &wasmInitDataPath);
 }
