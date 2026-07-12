@@ -322,6 +322,43 @@ void MasterData::buildDerivedCaches() {
     for (int i = 0; i < (int)gameCharacterUnits.size(); ++i) {
         this->gameCharacterUnitIndexById.emplace(gameCharacterUnits[i].id, i);
     }
+    this->cardIndexById.clear();
+    for (int i = 0; i < (int)cards.size(); ++i) {
+        this->cardIndexById.emplace(cards[i].id, i);
+    }
+    this->skillIndexById.clear();
+    for (int i = 0; i < (int)skills.size(); ++i) {
+        this->skillIndexById.emplace(skills[i].id, i);
+    }
+    this->characterRankIndexByKey.clear();
+    for (int i = 0; i < (int)characterRanks.size(); ++i) {
+        this->characterRankIndexByKey.emplace(
+            (long long)characterRanks[i].characterId * 100000 + characterRanks[i].characterRank, i);
+    }
+}
+
+const Card* MasterData::findCardById(int cardId) const
+{
+    auto it = cardIndexById.find(cardId);
+    return it != cardIndexById.end() ? &cards[it->second] : nullptr;
+}
+
+const Skill& MasterData::getSkillById(int skillId) const
+{
+    auto it = skillIndexById.find(skillId);
+    if (it == skillIndexById.end()) {
+        throw ElementNoFoundError("Skill not found for skillId=" + std::to_string(skillId));
+    }
+    return skills[it->second];
+}
+
+const CharacterRank& MasterData::getCharacterRank(int characterId, int rank) const
+{
+    auto it = characterRankIndexByKey.find((long long)characterId * 100000 + rank);
+    if (it == characterRankIndexByKey.end()) {
+        throw ElementNoFoundError("Character rank not found for characterId=" + std::to_string(characterId) + " rank=" + std::to_string(rank));
+    }
+    return characterRanks[it->second];
 }
 
 const std::vector<int>& MasterData::getEventDeckBonusIndices(int eventId) const

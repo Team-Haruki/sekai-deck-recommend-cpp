@@ -28,6 +28,9 @@ private:
     std::unordered_map<int, int> honorIndexById;
     std::unordered_map<int, std::vector<int>> eventDeckBonusIndicesByEventId;
     std::unordered_map<int, int> gameCharacterUnitIndexById;
+    std::unordered_map<int, int> cardIndexById;
+    std::unordered_map<int, int> skillIndexById;
+    std::unordered_map<long long, int> characterRankIndexByKey;
 
 public:
     std::string baseDir;
@@ -99,6 +102,12 @@ public:
     const std::vector<int>& getEventDeckBonusIndices(int eventId) const;
 
     const GameCharacterUnit& getGameCharacterUnitById(int gameCharacterUnitId) const;
+
+    const Card* findCardById(int cardId) const;
+
+    const Skill& getSkillById(int skillId) const;
+
+    const CharacterRank& getCharacterRank(int characterId, int rank) const;
 
     std::optional<double> getEventSkillScoreUpLimit(int eventId) const;
 

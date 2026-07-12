@@ -282,10 +282,14 @@ void BaseDeckRecommend::findBestCardsSA(
             no_improve_iter_num = 0;
         }
 
-        auto current_time = std::chrono::high_resolution_clock::now();
-        auto elapsed_time = std::chrono::duration_cast<std::chrono::milliseconds>(current_time - start_time).count();
-        if (elapsed_time > cfg.saMaxTimeMs) {
-            break;
+        // 时间检查每256次迭代做一次，避免每次迭代都读时钟（SA中占比可观）；
+        // 仅当saMaxTimeMs是绑定约束时，终止最多延后256次迭代
+        if ((iter_num & 255) == 0) {
+            auto current_time = std::chrono::high_resolution_clock::now();
+            auto elapsed_time = std::chrono::duration_cast<std::chrono::milliseconds>(current_time - start_time).count();
+            if (elapsed_time > cfg.saMaxTimeMs) {
+                break;
+            }
         }
         temperature *= cfg.saCoolingRate;
     }
