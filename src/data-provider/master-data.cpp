@@ -296,6 +296,94 @@ void MasterData::loadFromJsons(std::map<std::string, json_doc>& jsons) {
     addFakeEvent(Enums::EventType::marathon);
     addFakeEvent(Enums::EventType::cheerful);
     addLegacyWorldBloom2FinaleIfNeeded(*this);
+    buildDerivedCaches();
+}
+
+void MasterData::buildDerivedCaches() {
+    this->worldBloomFinaleEventIds.clear();
+    for (const auto& worldBloom : worldBlooms) {
+        if (worldBloom.worldBloomChapterType == "finale") {
+            this->worldBloomFinaleEventIds.insert(worldBloom.eventId);
+        }
+    }
+    this->eventCardBonusCountLimits.clear();
+    for (const auto& limit : eventCardBonusLimits) {
+        this->eventCardBonusCountLimits.emplace(limit.eventId, limit.memberCountLimit);
+    }
+    this->honorIndexById.clear();
+    for (int i = 0; i < (int)honors.size(); ++i) {
+        this->honorIndexById.emplace(honors[i].id, i);
+    }
+    this->eventDeckBonusIndicesByEventId.clear();
+    for (int i = 0; i < (int)eventDeckBonuses.size(); ++i) {
+        this->eventDeckBonusIndicesByEventId[eventDeckBonuses[i].eventId].push_back(i);
+    }
+    this->gameCharacterUnitIndexById.clear();
+    for (int i = 0; i < (int)gameCharacterUnits.size(); ++i) {
+        this->gameCharacterUnitIndexById.emplace(gameCharacterUnits[i].id, i);
+    }
+    this->cardIndexById.clear();
+    for (int i = 0; i < (int)cards.size(); ++i) {
+        this->cardIndexById.emplace(cards[i].id, i);
+    }
+    this->skillIndexById.clear();
+    for (int i = 0; i < (int)skills.size(); ++i) {
+        this->skillIndexById.emplace(skills[i].id, i);
+    }
+    this->characterRankIndexByKey.clear();
+    for (int i = 0; i < (int)characterRanks.size(); ++i) {
+        this->characterRankIndexByKey.emplace(
+            (long long)characterRanks[i].characterId * 100000 + characterRanks[i].characterRank, i);
+    }
+}
+
+const Card* MasterData::findCardById(int cardId) const
+{
+    auto it = cardIndexById.find(cardId);
+    return it != cardIndexById.end() ? &cards[it->second] : nullptr;
+}
+
+const Skill& MasterData::getSkillById(int skillId) const
+{
+    auto it = skillIndexById.find(skillId);
+    if (it == skillIndexById.end()) {
+        throw ElementNoFoundError("Skill not found for skillId=" + std::to_string(skillId));
+    }
+    return skills[it->second];
+}
+
+const CharacterRank& MasterData::getCharacterRank(int characterId, int rank) const
+{
+    auto it = characterRankIndexByKey.find((long long)characterId * 100000 + rank);
+    if (it == characterRankIndexByKey.end()) {
+        throw ElementNoFoundError("Character rank not found for characterId=" + std::to_string(characterId) + " rank=" + std::to_string(rank));
+    }
+    return characterRanks[it->second];
+}
+
+const std::vector<int>& MasterData::getEventDeckBonusIndices(int eventId) const
+{
+    static const std::vector<int> empty{};
+    auto it = eventDeckBonusIndicesByEventId.find(eventId);
+    return it != eventDeckBonusIndicesByEventId.end() ? it->second : empty;
+}
+
+const GameCharacterUnit& MasterData::getGameCharacterUnitById(int gameCharacterUnitId) const
+{
+    auto it = gameCharacterUnitIndexById.find(gameCharacterUnitId);
+    if (it == gameCharacterUnitIndexById.end()) {
+        throw ElementNoFoundError("Game character unit not found for gameCharacterUnitId=" + std::to_string(gameCharacterUnitId));
+    }
+    return gameCharacterUnits[it->second];
+}
+
+const Honor& MasterData::getHonorById(int honorId) const
+{
+    auto it = honorIndexById.find(honorId);
+    if (it == honorIndexById.end()) {
+        throw ElementNoFoundError("Honor not found for honorId=" + std::to_string(honorId));
+    }
+    return honors[it->second];
 }
 
 void MasterData::loadFromFiles(const std::string& baseDir) {
@@ -476,20 +564,14 @@ int MasterData::getWorldBloomEventTurn(int eventId) const
 
 bool MasterData::isWorldBloomFinale(int eventId) const
 {
-    for (const auto& worldBloom : worldBlooms) {
-        if (worldBloom.eventId == eventId && worldBloom.worldBloomChapterType == "finale") {
-            return true;
-        }
-    }
-    return false;
+    return worldBloomFinaleEventIds.count(eventId) > 0;
 }
 
 int MasterData::getEventCardBonusCountLimit(int eventId) const
 {
-    for (const auto& limit : eventCardBonusLimits) {
-        if (limit.eventId == eventId) {
-            return limit.memberCountLimit;
-        }
+    auto it = eventCardBonusCountLimits.find(eventId);
+    if (it != eventCardBonusCountLimits.end()) {
+        return it->second;
     }
     if (eventId == legacyWorldBloom2FinaleEventId) {
         return legacyWorldBloom2FinaleCardBonusCountLimit;

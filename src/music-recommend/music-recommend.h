@@ -29,7 +29,7 @@ public:
         int liveType,
         int eventType = 0,
         LiveSkillOrder liveSkillOrder = LiveSkillOrder::average,
-        std::optional<std::vector<int>> specificSkillOrder = std::nullopt,
+        const std::optional<std::vector<int>>& specificSkillOrder = std::nullopt,
         std::optional<int> multiTeammateScoreUp = std::nullopt,
         std::optional<int> multiTeammatePower = std::nullopt
     );

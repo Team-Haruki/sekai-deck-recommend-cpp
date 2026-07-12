@@ -6,6 +6,9 @@
 #include "event-point/event-service.h"
 #include "card-information/card-calculator.h"
 
+#include <array>
+#include <functional>
+
 enum class SkillReferenceChooseStrategy {
     Max,
     Min,
@@ -13,7 +16,8 @@ enum class SkillReferenceChooseStrategy {
 };
 
 struct DeckBonusInfo {
-    std::vector<double> cardBonus{};
+    // 卡组最多5张，固定数组避免评估热路径上的堆分配
+    std::array<double, 5> cardBonus{};
     double diffAttrBonus = 0.;
     double totalBonus = 0.;
 };
@@ -90,6 +94,23 @@ public:
         SkillReferenceChooseStrategy skillReferenceChooseStrategy = SkillReferenceChooseStrategy::Average,
         bool keepAfterTrainingState = false,
         bool bestSkillAsLeader = true
+    );
+
+    /**
+     * 与getDeckDetailByCards逻辑相同，但每个候选卡组详情通过visitor回调传出，
+     * 内部复用缓冲区，传给visitor的引用仅在回调期间有效。
+     * 该函数是组卡搜索每次评估的热路径，避免了逐候选的堆分配。
+     */
+    void forEachDeckDetail(
+        const std::vector<const CardDetail*>& cardDetails,
+        std::map<int, std::vector<SupportDeckCard>>& supportCards,
+        int honorBonus,
+        std::optional<int> eventType,
+        std::optional<int> eventId,
+        SkillReferenceChooseStrategy skillReferenceChooseStrategy,
+        bool keepAfterTrainingState,
+        bool bestSkillAsLeader,
+        const std::function<void(const DeckDetail&)>& visitor
     );
 };
    

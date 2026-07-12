@@ -5,6 +5,11 @@
 void DataProvider::init()
 {
     if (inited) return;
+    // 初始化结果写入共享的UserData，并发recommend下需要加锁且只执行一次
+    std::lock_guard<std::mutex> initLock(*userData->finalChapterHonorInitMutex);
+    inited = true;
+    if (userData->finalChapterHonorInited) return;
+    userData->finalChapterHonorInited = true;
 
     std::map<std::string, std::set<int>> unitCharacters = {
         { "lightsound", {1, 2, 3, 4} },
@@ -19,9 +24,7 @@ void DataProvider::init()
     userData->userCharacterFinalChapterHonorEventBonusMap.clear();
     for (const auto& userHonor : userData->userHonors) {
         try {
-            auto& honor = findOrThrow(masterData->honors,  [&](const Honor& it) { 
-                return it.id == userHonor.honorId; 
-            });
+            auto& honor = masterData->getHonorById(userHonor.honorId);
             if (honor.honorRarity == Enums::HonorRarity::high
             || honor.honorRarity == Enums::HonorRarity::highest) {
                 auto start_idx = honor.assetbundleName.find("wl_2nd");

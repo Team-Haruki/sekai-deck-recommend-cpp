@@ -157,6 +157,23 @@ the deck-service integration build:
   shaped; compact arrays are local export fixtures, not the API contract.
 - `src/card-information/*` — power breakdown and card state normalization.
 
+## Performance & Regression Verification
+
+Changes to search algorithms, deck evaluation, or other hot paths must
+be validated with the local harness in `tools/bench/` (see its README):
+
+- `regress.py run/compare` — fixed-seed regression. Deterministic
+  scenarios must stay bit-identical; time-budgeted scenarios (DFS_GA /
+  SA) are compared on top values only.
+- `rl_quality.py` — RL hit-rate protocol (`DECK_RL_SEED_CACHE_DISABLE=1`;
+  repeated runs must keep hitting the GA-reference optimum). RL stage
+  budgets are a quality floor; never trim them for speed.
+- `bench_matrix.py` — old-vs-new latency matrix; build the old version
+  from a git worktree and run both builds in the same session.
+
+Fixtures (masterdata, music metas, user suite) are local-only and must
+never be committed.
+
 ## Git Commit Format
 
 All commit subjects must follow:

@@ -56,7 +56,7 @@ public:
         int liveType,
         int eventType,
         LiveSkillOrder liveSkillOrder,
-        std::optional<std::vector<int>> specificSkillOrder = std::nullopt,
+        const std::optional<std::vector<int>>& specificSkillOrder = std::nullopt,
         std::optional<int> multiTeammateScoreUp = std::nullopt,
         std::optional<int> multiTeammatePower = std::nullopt
     );
@@ -70,7 +70,7 @@ public:
         int liveType, 
         int eventType,
         LiveSkillOrder liveSkillOrder,
-        std::optional<std::vector<int>> specificSkillOrder = std::nullopt,
+        const std::optional<std::vector<int>>& specificSkillOrder = std::nullopt,
         std::optional<int> multiTeammateScoreUp = std::nullopt,
         std::optional<int> multiTeammatePower = std::nullopt
     );

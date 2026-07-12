@@ -1,6 +1,8 @@
 #include "card-information/card-calculator.h"
 #include "card-calculator.h"
 
+#include "common/parallel-utils.h"
+
 std::optional<CardDetail> CardCalculator::getCardDetail(
     const UserCard& userCard,
     const std::vector<AreaItemLevel>& userAreaItemLevels,
@@ -15,17 +17,12 @@ std::optional<CardDetail> CardCalculator::getCardDetail(
     const std::optional<std::unordered_map<int, int>>& customBonusSupportUnits
 )
 {
-    auto& cards = this->dataProvider.masterData->cards;
-
-    Card card{};
-    try {
-        card = findOrThrow(cards, [&](const auto &it) { 
-            return it.id == userCard.cardId; 
-        });
-    } catch (const ElementNoFoundError& e) {
+    const Card* cardPtr = this->dataProvider.masterData->findCardById(userCard.cardId);
+    if (cardPtr == nullptr) {
         std::cerr << "[warning] card id " << userCard.cardId << " appears in user data but not in master data." << std::endl;
         return std::nullopt;
     }
+    const Card& card = *cardPtr;
 
     CardConfig cfg{};
     // 单独卡配置覆盖稀有度卡配置
@@ -109,19 +106,25 @@ std::vector<CardDetail> CardCalculator::batchGetCardDetail(
 )
 {
     std::vector<CardDetail> ret{};
+    ret.reserve(userCards.size());
     auto areaItemLevels0 = areaItemLevels.empty() ? this->areaItemService.getAreaItemLevels() : areaItemLevels;
     // 自定义世界专项加成
     auto userCanvasBonusCards = this->mysekaiService.getMysekaiCanvasBonusCards();
     auto userGateBonuses = this->mysekaiService.getMysekaiGateBonuses();
-    // 每张卡单独计算
-    for (const auto &userCard : userCards) {
-        auto cardDetail = this->getCardDetail(
-            userCard, areaItemLevels0, config, singleCardConfig, eventConfig, 
-            userCanvasBonusCards.find(userCard.cardId) != userCanvasBonusCards.end(),
+    // 每张卡的计算相互独立（各计算器无状态、masterdata只读），
+    // 结果写入按下标预分配的槽位后顺序收集，与串行结果逐位一致
+    std::vector<std::optional<CardDetail>> details(userCards.size());
+    parallelFor(userCards.size(), [&](std::size_t i) {
+        details[i] = this->getCardDetail(
+            userCards[i], areaItemLevels0, config, singleCardConfig, eventConfig,
+            userCanvasBonusCards.find(userCards[i].cardId) != userCanvasBonusCards.end(),
             userGateBonuses, scoreUpLimit, customBonusCharacterIds, customBonusAttr, customBonusSupportUnits
         );
+    });
+    for (auto& cardDetail : details) {
         if (cardDetail.has_value()) {
-            ret.push_back(cardDetail.value());
+            // CardDetail结构体很大，移动而不是拷贝
+            ret.push_back(std::move(cardDetail.value()));
         }
     }
     return ret;
@@ -160,14 +163,14 @@ SupportDeckCard CardCalculator::getSupportDeckCard(
 {
     UserCard supportCard = card;
     if (masterMax || skillMax) {
-        auto& cards = this->dataProvider.masterData->cards;
-        auto cardData = findOrThrow(cards, [&](const Card& it) {
-            return it.id == card.cardId;
-        }, [&]() { return "Support Deck Card not found for cardId=" + std::to_string(card.cardId); });
+        const Card* cardData = this->dataProvider.masterData->findCardById(card.cardId);
+        if (cardData == nullptr) {
+            throw ElementNoFoundError("Support Deck Card not found for cardId=" + std::to_string(card.cardId));
+        }
         CardConfig cfg{};
         cfg.masterMax = masterMax;
         cfg.skillMax = skillMax;
-        supportCard = this->cardService.applyCardConfig(card, cardData, cfg);
+        supportCard = this->cardService.applyCardConfig(card, *cardData, cfg);
     }
 
     auto bonus = this->bloomEventCalculator.getCardSupportDeckBonus(

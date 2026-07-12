@@ -156,7 +156,17 @@ class DeckRecommendOptions:
     Deck recommend options
     Attributes:
         target (str): Target of the recommendation in ["score", "power", "skill", "bonus"], default is "score"
-        algorithm (str): one of ["dfs", "ga", "dfs_ga", "rl", "sa"], default is "ga"
+        algorithm (str): one of ["dfs", "ga", "dfs_ga", "rl", "sa"].
+            Default is "ga" ("dfs" for challenge live types).
+            - "dfs": exact branch-and-bound search. For score target on marathon/banner
+              events and challenge live it typically completes the full card pool within
+              ~200ms and returns provably optimal decks; for world bloom / mysekai the
+              bound is loose, so give it a timeout_ms budget.
+            - "rl": lowest latency with learned warm starts; recommended for
+              high-throughput services.
+            - "dfs_ga": adaptive hybrid — exact DFS result when it completes in budget,
+              GA refinement otherwise (world bloom / mysekai).
+            - "ga": genetic algorithm baseline. "sa": legacy simulated annealing.
         region (str): Region in ["jp", "en", "tw", "kr", "cn"]
         user_data (DeckRecommendUserData): User suite data for deck recommendation
         user_data_file_path (str): File path of user suite data json
@@ -455,11 +465,26 @@ class SekaiDeckRecommend:
 
     def recommend(self, options: DeckRecommendOptions) -> DeckRecommendResult:
         """
-        Recommend event or challenge live decks
+        Recommend event or challenge live decks.
+        Releases the GIL during computation, so calls may run concurrently
+        from multiple Python threads; updates (update_masterdata etc.) are
+        internally synchronized against in-flight recommends.
         Args:
             options (DeckRecommendOptions): Options for deck recommendation
         Returns:
             DeckRecommendResult: Recommended decks sorted by score descending
+        """
+        ...
+
+    def recommend_batch(self, options_list: List[DeckRecommendOptions]) -> List[DeckRecommendResult]:
+        """
+        Run multiple recommendations in one call and return results in input
+        order. Items are independent — mix algorithms, musics, targets or live
+        types freely (e.g. submit the same request with algorithm "rl" and
+        "dfs" to race strategies). With engine parallelism enabled
+        (set_engine_thread_count or DECK_ENGINE_THREADS) items execute
+        concurrently inside the engine; otherwise they run sequentially with
+        identical results. Raises on the first failed item with its index.
         """
         ...
 
@@ -506,3 +531,13 @@ class SekaiDeckRecommend:
         Master data for ingameNotes and ingameCombos must be loaded for the region.
         """
         ...
+
+
+def set_engine_thread_count(threads: int) -> None:
+    """
+    Set engine-internal parallelism at runtime (overrides the
+    DECK_ENGINE_THREADS environment variable; 0 = fall back to the env var,
+    1 = fully serial). Clamped to hardware concurrency. Serial mode is
+    bit-identical to historical behavior.
+    """
+    ...

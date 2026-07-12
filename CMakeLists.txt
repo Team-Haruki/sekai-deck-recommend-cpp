@@ -19,6 +19,10 @@ list(REMOVE_ITEM SRC_FILES
     "${PROJECT_SOURCE_DIR}/src/sekai_deck_recommend_wasm.cpp"
 )
 
+# 浏览器端引擎内并行（需要站点开启COOP/COEP以获得SharedArrayBuffer）；
+# 默认OFF，产物与历史一致
+option(SEKAI_WASM_THREADS "Build wasm with pthreads for in-engine parallelism" OFF)
+
 if (EMSCRIPTEN)
     add_executable(sekai_deck_recommend
         ${SRC_FILES}
@@ -29,6 +33,13 @@ if (EMSCRIPTEN)
         -Wall -Wextra -Wuninitialized
         -fwasm-exceptions
     )
+    if (SEKAI_WASM_THREADS)
+        target_compile_options(sekai_deck_recommend PRIVATE -pthread)
+        target_link_options(sekai_deck_recommend PRIVATE
+            -pthread
+            "SHELL:-s PTHREAD_POOL_SIZE=navigator.hardwareConcurrency"
+        )
+    endif()
     target_link_options(sekai_deck_recommend PRIVATE
         -fwasm-exceptions
         -lembind
@@ -71,6 +82,15 @@ else()
         target_compile_options(sekai_deck_recommend PRIVATE
             -Wall -Wextra -Wuninitialized
         )
+    endif()
+
+    # Release构建启用跨编译单元优化（实测低个位数百分比收益，构建耗时增加可接受）
+    if (CMAKE_BUILD_TYPE STREQUAL "Release")
+        include(CheckIPOSupported)
+        check_ipo_supported(RESULT ipo_supported OUTPUT ipo_check_output)
+        if (ipo_supported)
+            set_property(TARGET sekai_deck_recommend PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)
+        endif()
     endif()
 
     set(INSTALL_DIR "sekai_deck_recommend_cpp")

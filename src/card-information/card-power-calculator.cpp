@@ -145,10 +145,8 @@ int CardPowerCalculator::getCharacterBonusPower(const BasePower &basePower, int 
     auto userCharacter = findOrThrow(userCharacters, [&](auto& it) {
         return it.characterId == characterId;
     }, [&]() { return "User character not found for characterId=" + std::to_string(characterId); });
-    auto characterRank = findOrThrow(characterRanks, [&](auto& it) {
-        return it.characterId == userCharacter.characterId &&
-               it.characterRank == userCharacter.characterRank;
-    }, [&]() { return "Character rank not found for characterId=" + std::to_string(userCharacter.characterId) + " rank=" + std::to_string(userCharacter.characterRank); });
+    const auto& characterRank = this->dataProvider.masterData->getCharacterRank(
+        userCharacter.characterId, userCharacter.characterRank);
     double rates[3] = {
         characterRank.power1BonusRate,
         characterRank.power2BonusRate,

@@ -5,14 +5,12 @@
 
 double CardEventCalculator::getEventDeckBonus(int eventId, const Card& card)
 {
+    // 该函数对每张用户卡调用一次，按eventId取索引避免全量线性扫描
     auto& eventDeckBonuses = this->dataProvider.masterData->eventDeckBonuses;
-    auto& gameCharacterUnits = this->dataProvider.masterData->gameCharacterUnits;
     double maxBonus = 0;
 
-    for (const auto& it : eventDeckBonuses) {
-        if (it.eventId != eventId) {
-            continue;
-        }
+    for (const auto index : this->dataProvider.masterData->getEventDeckBonusIndices(eventId)) {
+        const auto& it = eventDeckBonuses[index];
         if (it.cardAttr != Enums::Attr::null && it.cardAttr != card.attr) {
             continue;
         }
@@ -22,11 +20,7 @@ double CardEventCalculator::getEventDeckBonus(int eventId, const Card& card)
             continue;
         }
 
-        auto unit = findOrThrow(
-            gameCharacterUnits,
-            [it](const GameCharacterUnit& a) { return a.id == it.gameCharacterUnitId; },
-            [&]() { return "Game character unit not found for gameCharacterUnitId=" + std::to_string(it.gameCharacterUnitId); }
-        );
+        const auto& unit = this->dataProvider.masterData->getGameCharacterUnitById(it.gameCharacterUnitId);
         if (unit.gameCharacterId != card.characterId) {
             continue;
         }

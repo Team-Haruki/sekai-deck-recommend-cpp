@@ -126,6 +126,29 @@ struct DfsScoreUpperBoundContext {
     MusicMeta musicMeta;
 };
 
+// DFS递归中不变的预计算数据：固定角色约束和用于上界估计的预排序数据，
+// 在搜索入口构建一次，避免每个递归结点重复构建/排序
+struct DfsSearchContext {
+    std::vector<int> remainingFixedCharacters;
+    // 挑战live（角色可重复上场）：按卡降序，逐卡取top-k
+    std::vector<const CardDetail*> byPowerDesc;
+    std::vector<const CardDetail*> bySkillDesc;
+    // 非挑战live：按角色最大值估上界（每角色最多上1张，比逐卡top-k更紧，且O(角色数)）
+    bool useCharacterBounds = false;
+    int characterCount = 0;
+    std::array<int, 32> charPowerOrder{};    // 角色ID，按该角色最大综合力降序
+    std::array<int, 32> charPowerVals{};
+    std::array<int, 32> charSkillOrder{};    // 角色ID，按该角色最大技能降序
+    std::array<double, 32> charSkillVals{};
+    // 活动加成上界数据：让上界直接过scoreFunc换算到活动PT量级后与targetValue比较
+    //（live分数量级的上界对活动卡组永远高于PT量级的阈值，剪枝不会生效）
+    bool useEventPointBound = false;
+    std::array<int, 32> charBonusOrder{};    // 角色ID，按该角色最大活动加成降序
+    std::array<double, 32> charBonusVals{};
+    double supportDeckBonusUpperBound = 0.0;
+    double diffAttrBonusUpperBound = 0.0;
+};
+
 inline std::vector<int> resolveRequiredCharacters(
     const DeckRecommendConfig& config,
     bool isWorldBloomFinale = false,
@@ -187,12 +210,31 @@ inline std::optional<int> resolveLeaderCharacterId(
   
 
 class BaseDeckRecommend {
-    
+
     DataProvider dataProvider;
     DeckCalculator deckCalculator;
     CardCalculator cardCalculator;
     LiveCalculator liveCalculator;
     AreaItemService areaItemService;
+
+    // findBestCardsDFS的递归主体；searchContext由公开入口预计算
+    void findBestCardsDFSImpl(
+        int liveType,
+        const DeckRecommendConfig& config,
+        const std::vector<CardDetail>& cardDetails,
+        std::map<int, std::vector<SupportDeckCard>>& supportCards,
+        const std::function<Score(const DeckDetail&)>& scoreFunc,
+        RecommendCalcInfo& dfsInfo,
+        int limit,
+        bool isChallengeLive,
+        int member,
+        int honorBonus,
+        std::optional<int> eventType,
+        std::optional<int> eventId,
+        const std::vector<CardDetail>& fixedCards,
+        const DfsScoreUpperBoundContext* scoreUpperBoundContext,
+        const DfsSearchContext& searchContext
+    );
 
 public:
 

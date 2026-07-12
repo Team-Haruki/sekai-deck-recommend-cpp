@@ -8,24 +8,22 @@
 #include <numeric>
 
 DeckBonusInfo DeckCalculator::getDeckBonus(
-    const std::vector<const CardDetail *> &deckCards, 
+    const std::vector<const CardDetail *> &deckCards,
     std::optional<int> eventType,
     std::optional<int> eventId
-) 
+)
 {
     DeckBonusInfo ret{};
 
-    // 如果没有预处理好活动加成，则返回空
-    for (const auto &card : deckCards) 
+    // 如果没有预处理好活动加成，则返回空（cardBonus已零初始化）
+    for (const auto &card : deckCards)
         if (!card->maxEventBonus.has_value()) {
-            ret.cardBonus = std::vector<double>(deckCards.size(), 0.0);
             return ret;
         }
 
     // 正常加成
-    ret.cardBonus.reserve(deckCards.size());
-    for (const auto &card : deckCards) {
-        ret.cardBonus.push_back(card->maxEventBonus.value());
+    for (int i = 0; i < (int)deckCards.size(); i++) {
+        ret.cardBonus[i] = deckCards[i]->maxEventBonus.value();
     }
 
     if (eventId.has_value() && this->dataProvider.masterData->isWorldBloomFinale(eventId.value())) {
@@ -66,7 +64,10 @@ DeckBonusInfo DeckCalculator::getDeckBonus(
         ret.diffAttrBonus = it.bonusRate;
     }
 
-    ret.totalBonus = ret.diffAttrBonus + std::accumulate(ret.cardBonus.begin(), ret.cardBonus.end(), 0.0);
+    ret.totalBonus = ret.diffAttrBonus;
+    for (int i = 0; i < (int)deckCards.size(); i++) {
+        ret.totalBonus += ret.cardBonus[i];
+    }
     return ret;
 }
 
@@ -110,33 +111,54 @@ SupportDeckBonus DeckCalculator::getSupportDeckBonus(
 
 int DeckCalculator::getHonorBonusPower()
 {
-    auto& honors = this->dataProvider.masterData->honors;
     auto& userHonors = this->dataProvider.userData->userHonors;
     int bonus = 0;
     for (const auto &userHonor : userHonors) {
-        auto it = findOrThrow(honors, [&](const auto &it) { 
-            return it.id == userHonor.honorId; 
-        }, [&]() { return "Honor not found for honorId=" + std::to_string(userHonor.honorId); });
-        auto levelIt = findOrThrow(it.levels, [&](const auto &it) { 
-            return it.level == userHonor.level; 
-        }, [&]() { return "Honor level not found for honorId=" + std::to_string(userHonor.honorId) + " level=" + std::to_string(userHonor.level); });
-        bonus += levelIt.bonus;
+        auto& honor = this->dataProvider.masterData->getHonorById(userHonor.honorId);
+        auto levelIt = std::find_if(honor.levels.begin(), honor.levels.end(), [&](const auto &it) {
+            return it.level == userHonor.level;
+        });
+        if (levelIt == honor.levels.end()) {
+            throw ElementNoFoundError("Honor level not found for honorId=" + std::to_string(userHonor.honorId) + " level=" + std::to_string(userHonor.level));
+        }
+        bonus += levelIt->bonus;
     }
     return bonus;
 }
 
 
 std::vector<DeckDetail> DeckCalculator::getDeckDetailByCards(
-    const std::vector<const CardDetail*> &cardDetails, 
+    const std::vector<const CardDetail*> &cardDetails,
     std::map<int, std::vector<SupportDeckCard>>& supportCards,
-    int honorBonus, 
+    int honorBonus,
     std::optional<int> eventType,
     std::optional<int> eventId,
     SkillReferenceChooseStrategy skillReferenceChooseStrategy,
     bool keepAfterTrainingState,
     bool bestSkillAsLeader
 )
-{   
+{
+    std::vector<DeckDetail> ret{};
+    forEachDeckDetail(
+        cardDetails, supportCards, honorBonus, eventType, eventId,
+        skillReferenceChooseStrategy, keepAfterTrainingState, bestSkillAsLeader,
+        [&](const DeckDetail& deckDetail) { ret.push_back(deckDetail); }
+    );
+    return ret;
+}
+
+void DeckCalculator::forEachDeckDetail(
+    const std::vector<const CardDetail*> &cardDetails,
+    std::map<int, std::vector<SupportDeckCard>>& supportCards,
+    int honorBonus,
+    std::optional<int> eventType,
+    std::optional<int> eventId,
+    SkillReferenceChooseStrategy skillReferenceChooseStrategy,
+    bool keepAfterTrainingState,
+    bool bestSkillAsLeader,
+    const std::function<void(const DeckDetail&)>& visitor
+)
+{
     // 活动加成
     auto eventBonusInfo = getDeckBonus(cardDetails, eventType, eventId);
     
@@ -256,12 +278,14 @@ std::vector<DeckDetail> DeckCalculator::getDeckDetailByCards(
     }
 
     // 枚举技能状态，计算当前卡组的实际技能效果（包括选择花前/花后技能），并归纳卡牌在队伍中的详情信息
+    // 每个候选卡组都会走到这里，缓冲区用thread_local复用，避免逐候选堆分配
     std::array<DeckCardSkillDetail, 5> skills{};
     std::array<int, 5> order{};
-    std::vector<double> memberSkillMaxs{};
-    std::vector<std::pair<double, double>> scoreUps{};
+    static thread_local std::vector<double> memberSkillMaxs{};
+    static thread_local std::vector<std::pair<double, double>> scoreUps{};
+    scoreUps.clear();
     scoreUps.reserve(1 << needEnumerateCount);
-    std::vector<DeckDetail> ret{};
+    static thread_local DeckDetail deckDetailScratch{};
     for (int mask = needEnumerateStatusMask; mask >= 0; mask = mask ? (mask - 1) & needEnumerateStatusMask : -1) {
         // 根据mask枚举花前/花后技能状态，计算实际技能
         for (int i = 0; i < card_num; ++i) {
@@ -330,9 +354,11 @@ std::vector<DeckDetail> DeckCalculator::getDeckDetailByCards(
         if (skip) continue;
         scoreUps.push_back({ leaderScoreUp, otherScoreUpSum });
 
-        // 归纳卡牌在队伍中的详情信息
-        std::vector<DeckCardDetail> cards{};
-        cards.reserve(card_num);
+        // 归纳卡牌在队伍中的详情信息（复用scratch中的cards缓冲区）
+        // 注意：与既有行为保持一致，这里遍历完整的order数组（card_num<5时会重复填充队长位卡牌）
+        auto& cards = deckDetailScratch.cards;
+        cards.clear();
+        cards.reserve(order.size());
         for (auto i : order) {
             auto& cardDetail = *cardDetails[i];
 
@@ -342,11 +368,11 @@ std::vector<DeckDetail> DeckCalculator::getDeckDetailByCards(
                 defaultImage = skills[i].isAfterTraining ? Enums::DefaultImage::special_training : Enums::DefaultImage::original;
             }
 
-            cards.push_back(DeckCardDetail{ 
-                cardDetail.cardId, 
-                cardDetail.level, 
-                cardDetail.skillLevel, 
-                cardDetail.masterRank, 
+            cards.push_back(DeckCardDetail{
+                cardDetail.cardId,
+                cardDetail.level,
+                cardDetail.skillLevel,
+                cardDetail.masterRank,
                 cardPower[i],
                 eventBonusInfo.cardBonus[i],
                 skills[i],
@@ -361,20 +387,16 @@ std::vector<DeckDetail> DeckCalculator::getDeckDetailByCards(
         // 计算多人live的技能实效
         double multiLiveScoreUp = 0;
         multiLiveScoreUp += skills[order[0]].scoreUp;
-        for (int i = 1; i < card_num; ++i) 
+        for (int i = 1; i < card_num; ++i)
             multiLiveScoreUp += skills[order[i]].scoreUp * 0.2;
 
-        ret.push_back(DeckDetail{ 
-            .power = power, 
-            .eventBonus = eventBonusInfo.totalBonus,
-            .supportDeckBonus = supportDeckBonus.bonus,
-            .supportDeckCards = std::nullopt,
-            .cards = std::move(cards),
-            .multiLiveScoreUp = multiLiveScoreUp
-        });
+        deckDetailScratch.power = power;
+        deckDetailScratch.eventBonus = eventBonusInfo.totalBonus;
+        deckDetailScratch.supportDeckBonus = supportDeckBonus.bonus;
+        deckDetailScratch.supportDeckCards = std::nullopt;
+        deckDetailScratch.multiLiveScoreUp = multiLiveScoreUp;
+        visitor(deckDetailScratch);
     }
-
-    return ret;
 }
 
 
