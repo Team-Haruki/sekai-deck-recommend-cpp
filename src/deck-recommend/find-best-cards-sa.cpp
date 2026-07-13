@@ -1,10 +1,12 @@
 #include "deck-recommend/base-deck-recommend.h"
 
 #include <algorithm>
+#include <array>
 #include <chrono>
 #include <cmath>
 #include <iostream>
 #include <set>
+#include <unordered_map>
 
 
 void BaseDeckRecommend::findBestCardsSA(
@@ -118,7 +120,6 @@ void BaseDeckRecommend::findBestCardsSA(
     int no_improve_iter_num = 0;
     double current_score = -1e18;
     double last_score = -1e18;
-    std::vector<int> replacableCardIndices{};
     std::set<int> deckCharacters{};
     std::set<int> deckCardIds{};
 
@@ -207,6 +208,23 @@ void BaseDeckRecommend::findBestCardsSA(
         return;
     }
 
+    // 挑战Live允许同角色卡牌上场，因此候选只需排除卡组中其它卡牌ID。
+    // 预先记录每个ID在各角色桶中的出现次数，迭代时即可从桶大小扣除，
+    // 无需再扫描并物化全部可替换卡牌。
+    std::unordered_map<int, std::array<int, MAX_CID>> candidateCountsByCardId{};
+    if (isChallengeLive) {
+        candidateCountsByCardId.reserve(cardDetails.size());
+        for (int i = 0; i < MAX_CID; ++i) {
+            for (const auto* card : charaCardDetails[i]) {
+                auto it = candidateCountsByCardId.try_emplace(
+                    card->cardId,
+                    std::array<int, MAX_CID>{}
+                ).first;
+                ++it->second[i];
+            }
+        }
+    }
+
     while (true) {
         if (saInfo.isTimeout()) {
             break;
@@ -216,33 +234,64 @@ void BaseDeckRecommend::findBestCardsSA(
         }
 
         int pos = std::uniform_int_distribution<int>(0, int(deck.size()) - int(fixedCards.size()) - 1)(rng);
+        auto* old_card = deck[pos];
 
-        replacableCardIndices.clear();
-        for (int i = 0; i < MAX_CID; ++i) {
-            if (!isChallengeLive && remainingFixedCharacterSet.count(deck[pos]->characterId) && i != deck[pos]->characterId) {
-                continue;
-            }
-            if (!isChallengeLive && i != deck[pos]->characterId && deckCharacters.count(i)) {
-                continue;
-            }
-            for (int j = 0; j < int(charaCardDetails[i].size()); ++j) {
-                if (isChallengeLive
-                    && charaCardDetails[i][j]->cardId != deck[pos]->cardId
-                    && deckCardIds.count(charaCardDetails[i][j]->cardId)) {
+        std::array<int, MAX_CID> excludedCounts{};
+        if (isChallengeLive) {
+            for (const auto cardId : deckCardIds) {
+                if (cardId == old_card->cardId) {
                     continue;
                 }
-                replacableCardIndices.push_back(i * 10000 + j);
+                auto it = candidateCountsByCardId.find(cardId);
+                if (it == candidateCountsByCardId.end()) {
+                    continue;
+                }
+                for (int i = 0; i < MAX_CID; ++i) {
+                    excludedCounts[i] += it->second[i];
+                }
             }
         }
-        if (replacableCardIndices.empty()) {
+
+        // 保持原先按(characterId, 桶内下标)展开的顺序，仅以计数定位随机序号。
+        std::array<int, MAX_CID> replaceableCardCounts{};
+        int replaceableCardCount = 0;
+        for (int i = 0; i < MAX_CID; ++i) {
+            if (!isChallengeLive && remainingFixedCharacterSet.count(old_card->characterId) && i != old_card->characterId) {
+                continue;
+            }
+            if (!isChallengeLive && i != old_card->characterId && deckCharacters.count(i)) {
+                continue;
+            }
+            replaceableCardCounts[i] = int(charaCardDetails[i].size()) - excludedCounts[i];
+            replaceableCardCount += replaceableCardCounts[i];
+        }
+        if (replaceableCardCount == 0) {
             break;
         }
 
-        int index = std::uniform_int_distribution<int>(0, int(replacableCardIndices.size()) - 1)(rng);
-        int chara_index = replacableCardIndices[index] / 10000;
-        int card_index = replacableCardIndices[index] % 10000;
-        auto* old_card = deck[pos];
-        auto* new_card = charaCardDetails[chara_index][card_index];
+        int ordinal = std::uniform_int_distribution<int>(0, replaceableCardCount - 1)(rng);
+        const CardDetail* new_card = nullptr;
+        for (int i = 0; i < MAX_CID; ++i) {
+            if (ordinal >= replaceableCardCounts[i]) {
+                ordinal -= replaceableCardCounts[i];
+                continue;
+            }
+            if (!isChallengeLive) {
+                new_card = charaCardDetails[i][ordinal];
+                break;
+            }
+            for (const auto* card : charaCardDetails[i]) {
+                if (card->cardId != old_card->cardId && deckCardIds.count(card->cardId)) {
+                    continue;
+                }
+                if (ordinal == 0) {
+                    new_card = card;
+                    break;
+                }
+                --ordinal;
+            }
+            break;
+        }
 
         deck[pos] = new_card;
         double new_score = evaluateDeck(deck);

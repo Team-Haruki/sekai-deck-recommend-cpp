@@ -134,11 +134,17 @@ std::string jsonTypeName(const json_view& v) {
     return type ? std::string(type) : std::string("null");
 }
 
-// `user_data_str` may arrive as a JSON string OR already-parsed JSON object.
-// Normalize to a serialized string for UserData::loadFromString.
-std::string extractUserDataStr(const json_view& v) {
-    if (v.is_string()) return v.get<std::string>();
-    return dumpJson(v);
+// `user_data_str` may arrive as a JSON string OR an already-parsed JSON object.
+// Loading an object directly avoids serializing and parsing the full user payload
+// again. Keep loadFromString's behavior where parse failures are prefixed but
+// validation failures from loadFromJson are propagated unchanged.
+void loadUserDataValue(UserData& userdata, const json_view& v) {
+    if (v.is_string()) {
+        userdata.loadFromString(v.get<std::string>());
+        return;
+    }
+    userdata.path.clear();
+    userdata.loadFromJson(v);
 }
 
 class MutableJsonDoc {
@@ -218,10 +224,35 @@ struct PreparedOptions {
     DataProvider dataProvider = {};
 };
 
+class WasmUserDataHandle {
+public:
+    WasmUserDataHandle(
+        Region region,
+        const std::shared_ptr<MasterData>& masterdata,
+        std::shared_ptr<UserData> userdata
+    ) : region_(region), masterdata_(masterdata), userdata_(std::move(userdata)) {}
+
+    WasmUserDataHandle(const WasmUserDataHandle&) = delete;
+    WasmUserDataHandle& operator=(const WasmUserDataHandle&) = delete;
+
+    const std::shared_ptr<UserData>& userdata() const { return userdata_; }
+
+    bool matches(Region region, const std::shared_ptr<MasterData>& masterdata) const {
+        auto boundMasterdata = masterdata_.lock();
+        return region_ == region && boundMasterdata && boundMasterdata == masterdata;
+    }
+
+private:
+    Region region_;
+    std::weak_ptr<MasterData> masterdata_;
+    std::shared_ptr<UserData> userdata_;
+};
+
 PreparedOptions buildOptions(
     const json_view& opts,
-    std::map<Region, std::shared_ptr<MasterData>>& region_masterdata,
-    std::map<Region, std::shared_ptr<MusicMetas>>& region_musicmetas
+    const std::map<Region, std::shared_ptr<MasterData>>& region_masterdata,
+    const std::map<Region, std::shared_ptr<MusicMetas>>& region_musicmetas,
+    const WasmUserDataHandle* userdataHandle = nullptr
 ) {
     PreparedOptions out;
 
@@ -234,25 +265,36 @@ PreparedOptions buildOptions(
     Region region = regionIt->second;
 
     // user data
-    auto userdata = std::make_shared<UserData>();
-    if (opts.contains("user_data_file_path") && !opts["user_data_file_path"].is_null()) {
-        userdata->loadFromFile(opts["user_data_file_path"].get<std::string>());
-    } else if (opts.contains("user_data_str") && !opts["user_data_str"].is_null()) {
-        userdata->loadFromString(extractUserDataStr(opts["user_data_str"]));
-    } else if (opts.contains("user_data") && !opts["user_data"].is_null()) {
-        userdata->loadFromString(extractUserDataStr(opts["user_data"]));
+    std::shared_ptr<UserData> userdata;
+    if (userdataHandle) {
+        userdata = userdataHandle->userdata();
     } else {
-        throw std::invalid_argument("Either user_data / user_data_file_path / user_data_str is required.");
+        userdata = std::make_shared<UserData>();
+        if (opts.contains("user_data_file_path") && !opts["user_data_file_path"].is_null()) {
+            userdata->loadFromFile(opts["user_data_file_path"].get<std::string>());
+        } else if (opts.contains("user_data_str") && !opts["user_data_str"].is_null()) {
+            loadUserDataValue(*userdata, opts["user_data_str"]);
+        } else if (opts.contains("user_data") && !opts["user_data"].is_null()) {
+            loadUserDataValue(*userdata, opts["user_data"]);
+        } else {
+            throw std::invalid_argument("Either user_data / user_data_file_path / user_data_str is required.");
+        }
     }
 
     // master/music data
-    if (!region_masterdata.count(region))
+    auto masterdataIt = region_masterdata.find(region);
+    if (masterdataIt == region_masterdata.end())
         throw std::invalid_argument("Master data not found for region: " + *regionStr);
-    auto masterdata = region_masterdata[region];
+    auto masterdata = masterdataIt->second;
+    if (userdataHandle && !userdataHandle->matches(region, masterdata)) {
+        throw std::invalid_argument(
+            "User data handle does not belong to this region and master data generation.");
+    }
 
-    if (!region_musicmetas.count(region))
+    auto musicmetasIt = region_musicmetas.find(region);
+    if (musicmetasIt == region_musicmetas.end())
         throw std::invalid_argument("Music metas not found for region: " + *regionStr);
-    auto musicmetas = region_musicmetas[region];
+    auto musicmetas = musicmetasIt->second;
 
     out.dataProvider = DataProvider{region, masterdata, userdata, musicmetas};
 
@@ -865,6 +907,100 @@ class WasmSekaiDeckRecommend {
     mutable std::map<Region, std::shared_ptr<MasterData>> region_masterdata;
     mutable std::map<Region, std::shared_ptr<MusicMetas>> region_musicmetas;
 
+    struct NativeRecommendResult {
+        std::vector<RecommendDeck> decks;
+        double costMs = 0.0;
+    };
+
+    yyjson_mut_val* recommendResultToJson(
+        yyjson_mut_doc* doc,
+        const NativeRecommendResult& result
+    ) {
+        yyjson_mut_val* out = yyjson_mut_obj(doc);
+        if (!out) throw std::runtime_error("Failed to allocate recommend output JSON object.");
+        yyjson_mut_val* decks = yyjson_mut_arr(doc);
+        if (!decks) throw std::runtime_error("Failed to allocate recommend decks JSON array.");
+        for (const auto& deck : result.decks) {
+            jsonArrayAppend(decks, deckToJson(doc, deck));
+        }
+        jsonAddValue(doc, out, "decks", decks);
+        jsonAdd(doc, out, "cost_ms", result.costMs);
+        return out;
+    }
+
+    NativeRecommendResult runRecommendFromOptions(
+        const json_view& opts,
+        const WasmUserDataHandle* userdataHandle = nullptr
+    ) {
+        auto prepared = buildOptions(
+            opts, region_masterdata, region_musicmetas, userdataHandle);
+
+        // cost_ms只计算法搜索本身，不含options/userdata解析与结果序列化
+        auto searchStart = std::chrono::steady_clock::now();
+        NativeRecommendResult result;
+        if (prepared.config.target == RecommendTarget::Mysekai) {
+            MysekaiDeckRecommend r(prepared.dataProvider);
+            result.decks = r.recommendMysekaiDeck(prepared.eventId, prepared.config, prepared.worldBloomCharacterId);
+        } else if (Enums::LiveType::isChallenge(prepared.liveType)) {
+            ChallengeLiveDeckRecommend r(prepared.dataProvider);
+            result.decks = r.recommendChallengeLiveDeck(
+                prepared.liveType, prepared.challengeLiveCharacterId, prepared.config);
+        } else {
+            EventDeckRecommend r(prepared.dataProvider);
+            result.decks = r.recommendEventDeck(
+                prepared.eventId, prepared.liveType, prepared.config, prepared.worldBloomCharacterId);
+        }
+        result.costMs = std::chrono::duration<double, std::milli>(
+            std::chrono::steady_clock::now() - searchStart).count();
+        return result;
+    }
+
+    std::string recommendFromOptions(
+        const json_view& opts,
+        const WasmUserDataHandle* userdataHandle = nullptr
+    ) {
+        auto result = runRecommendFromOptions(opts, userdataHandle);
+        MutableJsonDoc outDoc;
+        return dumpMutableJson(recommendResultToJson(outDoc.get(), result));
+    }
+
+    std::string recommendBatchFromOptions(
+        const json_view& arr,
+        const WasmUserDataHandle* userdataHandle = nullptr
+    ) {
+        if (!arr.is_array())
+            throw std::invalid_argument("recommendBatch expects a JSON array of options");
+
+        const size_t count = arr.size();
+        std::vector<NativeRecommendResult> results(count);
+        std::vector<std::string> errors(count);
+        parallelFor(count, [&](std::size_t i) {
+            try {
+                results[i] = runRecommendFromOptions(arr[i], userdataHandle);
+            } catch (const std::exception& e) {
+                errors[i] = e.what();
+            }
+        }, 1);
+        for (std::size_t i = 0; i < errors.size(); ++i) {
+            if (!errors[i].empty()) {
+                throw std::runtime_error("batch item " + std::to_string(i) + " failed: " + errors[i]);
+            }
+        }
+
+        MutableJsonDoc outDoc;
+        yyjson_mut_val* out = yyjson_mut_arr(outDoc.get());
+        if (!out) throw std::runtime_error("Failed to allocate recommendBatch output JSON array.");
+        for (std::size_t i = 0; i < results.size(); ++i) {
+            try {
+                jsonArrayAppend(out, recommendResultToJson(outDoc.get(), results[i]));
+            } catch (const std::exception& e) {
+                throw std::runtime_error(
+                    "batch item " + std::to_string(i) + " failed: " + e.what());
+            }
+        }
+        return dumpMutableJson(out);
+    }
+
 public:
     WasmSekaiDeckRecommend() = default;
 
@@ -900,36 +1036,33 @@ public:
         region_musicmetas[it->second]->loadFromString(s);
     }
 
+    WasmUserDataHandle* createUserData(
+        const std::string& userdataJson,
+        const std::string& region
+    ) {
+        auto regionIt = REGION_ENUM_MAP.find(region);
+        if (regionIt == REGION_ENUM_MAP.end())
+            throw std::invalid_argument("Invalid region: " + region);
+        auto masterdataIt = region_masterdata.find(regionIt->second);
+        if (masterdataIt == region_masterdata.end())
+            throw std::invalid_argument("Master data not found for region: " + region);
+
+        auto userdata = std::make_shared<UserData>();
+        userdata->loadFromString(userdataJson);
+        return new WasmUserDataHandle(regionIt->second, masterdataIt->second, std::move(userdata));
+    }
+
     std::string recommend(const std::string& optionsJson) {
         auto optsDoc = json_doc::parse(optionsJson, "wasm recommend options");
-        json_view opts = optsDoc.root();
-        auto prepared = buildOptions(opts, region_masterdata, region_musicmetas);
+        return recommendFromOptions(optsDoc.root());
+    }
 
-        // cost_ms只计算法搜索本身，不含options/userdata解析与结果序列化
-        auto searchStart = std::chrono::steady_clock::now();
-        std::vector<RecommendDeck> result;
-        if (prepared.config.target == RecommendTarget::Mysekai) {
-            MysekaiDeckRecommend r(prepared.dataProvider);
-            result = r.recommendMysekaiDeck(prepared.eventId, prepared.config, prepared.worldBloomCharacterId);
-        } else if (Enums::LiveType::isChallenge(prepared.liveType)) {
-            ChallengeLiveDeckRecommend r(prepared.dataProvider);
-            result = r.recommendChallengeLiveDeck(prepared.liveType, prepared.challengeLiveCharacterId, prepared.config);
-        } else {
-            EventDeckRecommend r(prepared.dataProvider);
-            result = r.recommendEventDeck(prepared.eventId, prepared.liveType, prepared.config, prepared.worldBloomCharacterId);
-        }
-        double costMs = std::chrono::duration<double, std::milli>(
-            std::chrono::steady_clock::now() - searchStart).count();
-
-        MutableJsonDoc outDoc;
-        yyjson_mut_val* out = yyjson_mut_obj(outDoc.get());
-        if (!out) throw std::runtime_error("Failed to allocate recommend output JSON object.");
-        yyjson_mut_val* decks = yyjson_mut_arr(outDoc.get());
-        if (!decks) throw std::runtime_error("Failed to allocate recommend decks JSON array.");
-        for (const auto& d : result) jsonArrayAppend(decks, deckToJson(outDoc.get(), d));
-        jsonAddValue(outDoc.get(), out, "decks", decks);
-        jsonAdd(outDoc.get(), out, "cost_ms", costMs);
-        return dumpMutableJson(out);
+    std::string recommendWithUserData(
+        const std::string& optionsJson,
+        const WasmUserDataHandle& userdataHandle
+    ) {
+        auto optsDoc = json_doc::parse(optionsJson, "wasm recommend options");
+        return recommendFromOptions(optsDoc.root(), &userdataHandle);
     }
 
     // 批量推荐：JSON数组进（每项为一份完整options）、按序JSON数组出。
@@ -937,44 +1070,15 @@ public:
     // 无线程构建自动退化为顺序执行，行为一致。
     std::string recommendBatch(const std::string& optionsJsonArray) {
         auto arrDoc = json_doc::parse(optionsJsonArray, "wasm recommendBatch options array");
-        json_view arr = arrDoc.root();
-        if (!arr.is_array())
-            throw std::invalid_argument("recommendBatch expects a JSON array of options");
-        std::vector<std::string> optionJsons{};
-        size_t count = arr.size();
-        optionJsons.reserve(count);
-        for (size_t i = 0; i < count; ++i) {
-            // 逐项重序列化后复用单次recommend的完整解析/校验路径
-            yyjson_val* item = yyjson_arr_get(arr.raw(), i);
-            char* text = item ? yyjson_val_write(item, 0, nullptr) : nullptr;
-            if (text == nullptr)
-                throw std::invalid_argument("recommendBatch item " + std::to_string(i) + " is not valid JSON");
-            optionJsons.emplace_back(text);
-            free(text);
-        }
+        return recommendBatchFromOptions(arrDoc.root());
+    }
 
-        std::vector<std::string> results(optionJsons.size());
-        std::vector<std::string> errors(optionJsons.size());
-        parallelFor(optionJsons.size(), [&](std::size_t i) {
-            try {
-                results[i] = recommend(optionJsons[i]);
-            } catch (const std::exception& e) {
-                errors[i] = e.what();
-            }
-        }, 1);
-        for (std::size_t i = 0; i < errors.size(); ++i) {
-            if (!errors[i].empty()) {
-                throw std::runtime_error("batch item " + std::to_string(i) + " failed: " + errors[i]);
-            }
-        }
-
-        std::string out = "[";
-        for (std::size_t i = 0; i < results.size(); ++i) {
-            if (i) out += ",";
-            out += results[i];
-        }
-        out += "]";
-        return out;
+    std::string recommendBatchWithUserData(
+        const std::string& optionsJsonArray,
+        const WasmUserDataHandle& userdataHandle
+    ) {
+        auto arrDoc = json_doc::parse(optionsJsonArray, "wasm recommendBatch options array");
+        return recommendBatchFromOptions(arrDoc.root(), &userdataHandle);
     }
 
     std::string recommendAreaItems(const std::string& optionsJson) {
@@ -994,9 +1098,9 @@ public:
         if (opts.contains("user_data_file_path") && !opts["user_data_file_path"].is_null()) {
             userdata->loadFromFile(opts["user_data_file_path"].get<std::string>());
         } else if (opts.contains("user_data_str") && !opts["user_data_str"].is_null()) {
-            userdata->loadFromString(extractUserDataStr(opts["user_data_str"]));
+            loadUserDataValue(*userdata, opts["user_data_str"]);
         } else if (opts.contains("user_data") && !opts["user_data"].is_null()) {
-            userdata->loadFromString(extractUserDataStr(opts["user_data"]));
+            loadUserDataValue(*userdata, opts["user_data"]);
         } else {
             throw std::invalid_argument("Either user_data / user_data_file_path / user_data_str is required.");
         }
@@ -1151,9 +1255,9 @@ public:
         if (opts.contains("user_data_file_path") && !opts["user_data_file_path"].is_null()) {
             userdata->loadFromFile(opts["user_data_file_path"].get<std::string>());
         } else if (opts.contains("user_data_str") && !opts["user_data_str"].is_null()) {
-            userdata->loadFromString(extractUserDataStr(opts["user_data_str"]));
+            loadUserDataValue(*userdata, opts["user_data_str"]);
         } else if (opts.contains("user_data") && !opts["user_data"].is_null()) {
-            userdata->loadFromString(extractUserDataStr(opts["user_data"]));
+            loadUserDataValue(*userdata, opts["user_data"]);
         } else {
             throw std::invalid_argument("Either user_data / user_data_file_path / user_data_str is required.");
         }
@@ -1240,6 +1344,7 @@ void wasmInitDataPath(const std::string& path) {
 
 EMSCRIPTEN_BINDINGS(sekai_deck_recommend) {
     emscripten::function("setEngineThreadCount", &setEngineThreadCount);
+    emscripten::class_<WasmUserDataHandle>("UserDataHandle");
     // 所有入口统一在注册处包装：C++异常 → JS Error（error.message可读）
     emscripten::class_<WasmSekaiDeckRecommend>("SekaiDeckRecommend")
         .constructor<>()
@@ -1253,14 +1358,35 @@ EMSCRIPTEN_BINDINGS(sekai_deck_recommend) {
                 try { self.updateMusicmetasFromString(s, region); }
                 catch (const std::exception& e) { rethrowAsJsError(e); }
             }))
+        .function("createUserData", emscripten::optional_override(
+            [](WasmSekaiDeckRecommend& self,
+               const std::string& userdataJson,
+               const std::string& region) -> WasmUserDataHandle* {
+                try { return self.createUserData(userdataJson, region); }
+                catch (const std::exception& e) { rethrowAsJsError(e); }
+            }), emscripten::return_value_policy::take_ownership())
         .function("recommend", emscripten::optional_override(
             [](WasmSekaiDeckRecommend& self, const std::string& optionsJson) -> std::string {
                 try { return self.recommend(optionsJson); }
                 catch (const std::exception& e) { rethrowAsJsError(e); }
             }))
+        .function("recommendWithUserData", emscripten::optional_override(
+            [](WasmSekaiDeckRecommend& self,
+               const std::string& optionsJson,
+               const WasmUserDataHandle& userdataHandle) -> std::string {
+                try { return self.recommendWithUserData(optionsJson, userdataHandle); }
+                catch (const std::exception& e) { rethrowAsJsError(e); }
+            }))
         .function("recommendBatch", emscripten::optional_override(
             [](WasmSekaiDeckRecommend& self, const std::string& optionsJsonArray) -> std::string {
                 try { return self.recommendBatch(optionsJsonArray); }
+                catch (const std::exception& e) { rethrowAsJsError(e); }
+            }))
+        .function("recommendBatchWithUserData", emscripten::optional_override(
+            [](WasmSekaiDeckRecommend& self,
+               const std::string& optionsJsonArray,
+               const WasmUserDataHandle& userdataHandle) -> std::string {
+                try { return self.recommendBatchWithUserData(optionsJsonArray, userdataHandle); }
                 catch (const std::exception& e) { rethrowAsJsError(e); }
             }))
         .function("recommendAreaItems", emscripten::optional_override(

@@ -52,7 +52,6 @@ DeckCardPowerDetail CardPowerCalculator::getPower(const Card &card, const BasePo
 
 BasePower CardPowerCalculator::getBasePower(const UserCard &userCard, const Card &card, bool hasMysekaiCanvas)
 {
-    auto& cardEpisodes = dataProvider.masterData->cardEpisodes;
     auto& masterLessons = dataProvider.masterData->masterLessons;
 
     BasePower ret = {0, 0, 0};
@@ -76,12 +75,14 @@ BasePower CardPowerCalculator::getBasePower(const UserCard &userCard, const Card
     // 剧情
     for (auto& it : userCard.episodes) {
         if (it.scenarioStatus == Enums::ScenarioStatus::already_read) {
-            auto episode = findOrThrow(cardEpisodes, [&](auto& e) {
-                return e.id == it.cardEpisodeId;
-            }, [&]() { return "Card episode not found for cardId=" + std::to_string(card.id) + " episodeId=" + std::to_string(it.cardEpisodeId); });
-            ret[0] += episode.power1BonusFixed;
-            ret[1] += episode.power2BonusFixed;
-            ret[2] += episode.power3BonusFixed;
+            const auto* episode = dataProvider.masterData->findCardEpisodeById(it.cardEpisodeId);
+            if (episode == nullptr) {
+                throw ElementNoFoundError("Card episode not found for cardId=" + std::to_string(card.id)
+                    + " episodeId=" + std::to_string(it.cardEpisodeId));
+            }
+            ret[0] += episode->power1BonusFixed;
+            ret[1] += episode->power2BonusFixed;
+            ret[2] += episode->power3BonusFixed;
         }
     }
     // 突破
@@ -162,23 +163,18 @@ int CardPowerCalculator::getCharacterBonusPower(const BasePower &basePower, int 
 int CardPowerCalculator::getFixtureBonusPower(const BasePower &basePower, int characterId, std::optional<int> limit)
 {
     auto& userFixtureBonuses = dataProvider.userData->userMysekaiFixtureGameCharacterPerformanceBonuses;
-    if (userFixtureBonuses.empty()) {
+    auto fixtureBonus = std::find_if(userFixtureBonuses.begin(), userFixtureBonuses.end(), [&](const auto& it) {
+        return it.gameCharacterId == characterId;
+    });
+    if (fixtureBonus == userFixtureBonuses.end()) {
         return 0;
     }
-    // 寻找对应的加成，如果没有任何加成会空
-    try {
-        auto& fixtureBonus = findOrThrow(userFixtureBonuses, [&](auto& it) {
-            return it.gameCharacterId == characterId;
-        });
-        double rate = fixtureBonus.totalBonusRate;
-        if (limit.has_value()) 
-            rate = std::min(rate, double(limit.value()));
-        // 按各个综合分别计算加成，其中totalBonusRate单位是0.1%
-        int total = sumPower(basePower) * rate * 0.001;
-        return std::floor(total);
-    } catch (const ElementNoFoundError &e) {
-        return 0;
-    }
+    double rate = fixtureBonus->totalBonusRate;
+    if (limit.has_value())
+        rate = std::min(rate, double(limit.value()));
+    // 按各个综合分别计算加成，其中totalBonusRate单位是0.1%
+    int total = sumPower(basePower) * rate * 0.001;
+    return std::floor(total);
 }
 
 int CardPowerCalculator::getGateBonusPower(const BasePower &basePower, const std::vector<MysekaiGateBonus> &userGateBonuses, const std::vector<int> &cardUnits)

@@ -81,13 +81,11 @@ CardEventBonusInfo CardEventCalculator::getCardEventBonus(
     const std::optional<std::unordered_map<int, int>>& customBonusSupportUnits
 )
 {
-    auto& cards = this->dataProvider.masterData->cards;
-    auto card = findOrThrow(
-        cards,
-        [&](const Card& it) { return it.id == userCard.cardId; },
-        [&]() { return "Card not found for cardId=" + std::to_string(userCard.cardId); }
-    );
-    auto& eventCards = this->dataProvider.masterData->eventCards;
+    const Card* cardPtr = this->dataProvider.masterData->findCardById(userCard.cardId);
+    if (cardPtr == nullptr) {
+        throw ElementNoFoundError("Card not found for cardId=" + std::to_string(userCard.cardId));
+    }
+    const Card& card = *cardPtr;
     auto& eventRarityBonusRates = this->dataProvider.masterData->eventRarityBonusRates;
 
     if (eventId == this->dataProvider.masterData->getNoEventFakeEventId(Enums::EventType::marathon)
@@ -100,7 +98,7 @@ CardEventBonusInfo CardEventCalculator::getCardEventBonus(
     double basicBonus = this->getEventDeckBonus(eventId, card);
     basicBonus += getCustomEventDeckBonus(card, customBonusCharacterIds, customBonusAttr, customBonusSupportUnits);
 
-    auto masterRankBonus = findOrThrow(
+    const auto& masterRankBonus = findOrThrow(
         eventRarityBonusRates,
         [&](const EventRarityBonusRate& it) {
             return it.cardRarityType == card.cardRarityType && it.masterRank == userCard.masterRank;
@@ -116,14 +114,10 @@ CardEventBonusInfo CardEventCalculator::getCardEventBonus(
 
     double limitedBonus = 0.0;
     double leaderLimitBonus = 0.0;
-    bool matchedEventCard = false;
-    for (const auto& it : eventCards) {
-        if (it.eventId == eventId && it.cardId == card.id) {
-            limitedBonus = it.bonusRate;
-            leaderLimitBonus = it.leaderBonusRate;
-            matchedEventCard = true;
-            break;
-        }
+    const EventCard* eventCard = this->dataProvider.masterData->findEventCard(eventId, card.id);
+    if (eventCard != nullptr) {
+        limitedBonus = eventCard->bonusRate;
+        leaderLimitBonus = eventCard->leaderBonusRate;
     }
 
     if (this->dataProvider.masterData->isWorldBloomFinale(eventId)) {
@@ -143,9 +137,14 @@ CardEventBonusInfo CardEventCalculator::getCardEventBonus(
             }
         }
         if (!hasEventHonorBonusMaster && eventId == legacyWorldBloom2FinaleEventId) {
-            leaderHonorBonus = this->dataProvider.userData->userCharacterFinalChapterHonorEventBonusMap[card.characterId];
+            const auto& honorBonuses =
+                this->dataProvider.userData->userCharacterFinalChapterHonorEventBonusMap;
+            auto honorBonus = honorBonuses.find(card.characterId);
+            if (honorBonus != honorBonuses.end()) {
+                leaderHonorBonus = honorBonus->second;
+            }
         }
-        if (leaderLimitBonus == 0.0 && matchedEventCard && eventId == legacyWorldBloom2FinaleEventId) {
+        if (leaderLimitBonus == 0.0 && eventCard != nullptr && eventId == legacyWorldBloom2FinaleEventId) {
             leaderLimitBonus = 20.0;
         }
         return CardEventBonusInfo{
