@@ -1,7 +1,12 @@
+#if defined(_WIN32) && !defined(NOMINMAX)
+#define NOMINMAX
+#endif
+
 #include "deck-recommend/base-deck-recommend.h"
 #include "card-priority/card-priority-filter.h"
 #include "common/parallel-utils.h"
 #include "common/timer.h"
+#include <atomic>
 #include <bit>
 #include <chrono>
 #include <cmath>
@@ -11,6 +16,13 @@
 #include <mutex>
 #include <random>
 #include <sstream>
+
+#if defined(_WIN32)
+#include <process.h>
+#include <windows.h>
+#elif !defined(__EMSCRIPTEN__)
+#include <unistd.h>
+#endif
 
 
 uint64_t BaseDeckRecommend::calcDeckHash(const std::vector<const CardDetail*>& deck) {
@@ -27,6 +39,8 @@ uint64_t BaseDeckRecommend::calcDeckHash(const std::vector<const CardDetail*>& d
 };
 
 namespace {
+
+std::atomic<std::uint64_t> persistentCacheTempSequence{0};
 
 bool applyFixedCardOrder(
     std::vector<const CardDetail*>& deck,
@@ -53,6 +67,38 @@ bool applyFixedCardOrder(
         target++;
     }
     return true;
+}
+
+std::string makePersistentCacheTempPath(const std::string& path) {
+    const auto nonce = std::chrono::duration_cast<std::chrono::nanoseconds>(
+        std::chrono::system_clock::now().time_since_epoch()
+    ).count();
+#if defined(_WIN32)
+    const auto processId = static_cast<unsigned long long>(::_getpid());
+#elif defined(__EMSCRIPTEN__)
+    constexpr unsigned long long processId = 0;
+#else
+    const auto processId = static_cast<unsigned long long>(::getpid());
+#endif
+    return path + ".tmp."
+        + std::to_string(processId) + "."
+        + std::to_string(nonce) + "."
+        + std::to_string(persistentCacheTempSequence.fetch_add(1, std::memory_order_relaxed));
+}
+
+bool replacePersistentCacheFile(const std::string& pendingPath, const std::string& path) {
+#if defined(_WIN32)
+    return ::MoveFileExA(
+        pendingPath.c_str(),
+        path.c_str(),
+        MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH
+    ) != 0;
+#else
+    // pendingPath is created beside path, so rename publishes a complete file
+    // atomically. Concurrent processes cannot truncate one another; as this is
+    // a best-effort warm cache, the last successfully published snapshot wins.
+    return std::rename(pendingPath.c_str(), path.c_str()) == 0;
+#endif
 }
 
 } // namespace
@@ -1094,10 +1140,12 @@ std::vector<RecommendDeck> BaseDeckRecommend::recommendHighScoreDeck(
             };
             double baselineReward = 0.0;
             int episodes = 0;
+            std::uint64_t lastAccess = 0;
         };
         struct RlSeedBucket {
             double bestTargetValue = -1e18;
             std::vector<RlStoredSeed> bestSeeds{};
+            std::uint64_t lastAccess = 0;
         };
         struct RlCardRankEntry {
             int cardId = 0;
@@ -1108,12 +1156,44 @@ std::vector<RecommendDeck> BaseDeckRecommend::recommendHighScoreDeck(
         struct RlCardRankBucket {
             std::unordered_map<int, RlCardRankEntry> cards{};
             int updates = 0;
+            std::uint64_t lastAccess = 0;
         };
         static std::unordered_map<std::string, RlPolicyBucket> rlPolicyBuckets{};
         static std::unordered_map<std::string, RlSeedBucket> rlSeedBuckets{};
         static std::unordered_map<std::string, RlCardRankBucket> rlCardRankBuckets{};
         static std::mutex rlMemoryMutex;
         static bool rlSeedCacheLoaded = false;
+        static bool rlSeedCacheDirty = false;
+        static bool rlSeedCacheWriteInProgress = false;
+        static std::size_t rlSeedCachePendingUpdates = 0;
+        static auto rlSeedCacheLastFlush = std::chrono::steady_clock::now();
+        static bool rlSeedCacheHasFlushed = false;
+        static std::uint64_t rlMemoryAccessClock = 0;
+        constexpr std::size_t rlBucketLimit = 512;
+        auto pruneLruBuckets = [](
+            auto& buckets,
+            std::size_t maxBuckets,
+            const auto& isProtected
+        ) {
+            while (buckets.size() > maxBuckets) {
+                auto oldest = buckets.end();
+                for (auto it = buckets.begin(); it != buckets.end(); ++it) {
+                    if (isProtected(it->first)) {
+                        continue;
+                    }
+                    if (oldest == buckets.end()
+                        || it->second.lastAccess < oldest->second.lastAccess
+                        || (it->second.lastAccess == oldest->second.lastAccess
+                            && it->first < oldest->first)) {
+                        oldest = it;
+                    }
+                }
+                if (oldest == buckets.end()) {
+                    break;
+                }
+                buckets.erase(oldest);
+            }
+        };
 
         auto calcStoredSeedHash = [](const std::array<int, 5>& cardIds, int size) {
             auto ids = cardIds;
@@ -1315,21 +1395,25 @@ std::vector<RecommendDeck> BaseDeckRecommend::recommendHighScoreDeck(
                 }
             }
         };
-        auto savePersistentSeedBuckets = [&](const std::string& path) {
+        auto savePersistentSeedBuckets = [](
+            const std::string& path,
+            const std::unordered_map<std::string, RlSeedBucket>& seedBuckets,
+            const std::unordered_map<std::string, RlCardRankBucket>& cardRankBuckets
+        ) {
             if (path.empty()) {
-                return;
+                return true;
             }
 
-            std::string tmpPath = path + ".tmp";
+            const auto tmpPath = makePersistentCacheTempPath(path);
             std::ofstream out(tmpPath, std::ios::trunc);
             if (!out) {
-                return;
+                return false;
             }
             out << "# deck-service RL memory cache v2\n";
 
             std::size_t seedBucketCount = 0;
             constexpr std::size_t maxPersistentBuckets = 512;
-            for (const auto& [key, bucket] : rlSeedBuckets) {
+            for (const auto& [key, bucket] : seedBuckets) {
                 if (key.find(":transfer_seeds") == std::string::npos || bucket.bestSeeds.empty()) {
                     continue;
                 }
@@ -1354,7 +1438,7 @@ std::vector<RecommendDeck> BaseDeckRecommend::recommendHighScoreDeck(
                 }
             }
             std::size_t rankBucketCount = 0;
-            for (const auto& [key, bucket] : rlCardRankBuckets) {
+            for (const auto& [key, bucket] : cardRankBuckets) {
                 if (key.find(":card_ranks") == std::string::npos || bucket.cards.empty()) {
                     continue;
                 }
@@ -1390,10 +1474,13 @@ std::vector<RecommendDeck> BaseDeckRecommend::recommendHighScoreDeck(
             out.close();
             if (!out) {
                 std::remove(tmpPath.c_str());
-                return;
+                return false;
             }
-            std::remove(path.c_str());
-            std::rename(tmpPath.c_str(), path.c_str());
+            if (!replacePersistentCacheFile(tmpPath, path)) {
+                std::remove(tmpPath.c_str());
+                return false;
+            }
+            return true;
         };
 
         auto fullSorted = sortCardsByStrength(cards);
@@ -1847,11 +1934,19 @@ std::vector<RecommendDeck> BaseDeckRecommend::recommendHighScoreDeck(
             std::lock_guard<std::mutex> lock(rlMemoryMutex);
             if (!rlSeedCacheLoaded) {
                 loadPersistentSeedBuckets(persistentSeedCachePath);
+                pruneLruBuckets(rlSeedBuckets, rlBucketLimit, [&](const std::string& key) {
+                    return key == rlStateKey || key == transferSeedKey;
+                });
+                pruneLruBuckets(rlCardRankBuckets, rlBucketLimit, [&](const std::string& key) {
+                    return key == broadCardRankKey || key == cardRankKey;
+                });
                 rlSeedCacheLoaded = true;
             }
+            const auto accessStamp = ++rlMemoryAccessClock;
 
             auto policyIt = rlPolicyBuckets.find(rlStateKey);
             if (policyIt != rlPolicyBuckets.end()) {
+                policyIt->second.lastAccess = accessStamp;
                 bucket = policyIt->second;
             }
             if (config.target == RecommendTarget::Mysekai && bucket.episodes == 0) {
@@ -1870,9 +1965,13 @@ std::vector<RecommendDeck> BaseDeckRecommend::recommendHighScoreDeck(
 
             auto seedIt = rlSeedBuckets.find(rlStateKey);
             if (seedIt != rlSeedBuckets.end()) {
+                seedIt->second.lastAccess = accessStamp;
                 seedBucket = seedIt->second;
             }
             auto transferSeedIt = rlSeedBuckets.find(transferSeedKey);
+            if (transferSeedIt != rlSeedBuckets.end()) {
+                transferSeedIt->second.lastAccess = accessStamp;
+            }
             if (seedBucket.bestSeeds.empty()
                 && transferSeedIt != rlSeedBuckets.end()
                 && !transferSeedIt->second.bestSeeds.empty()) {
@@ -1884,10 +1983,12 @@ std::vector<RecommendDeck> BaseDeckRecommend::recommendHighScoreDeck(
             }
             auto broadCardRankIt = rlCardRankBuckets.find(broadCardRankKey);
             if (broadCardRankIt != rlCardRankBuckets.end()) {
+                broadCardRankIt->second.lastAccess = accessStamp;
                 cardRankBucketForRequest = broadCardRankIt->second;
             }
             auto cardRankIt = rlCardRankBuckets.find(cardRankKey);
             if (cardRankIt != rlCardRankBuckets.end()) {
+                cardRankIt->second.lastAccess = accessStamp;
                 mergeCardRankBucket(cardRankBucketForRequest, cardRankIt->second, 160);
             }
         }
@@ -3844,12 +3945,15 @@ std::vector<RecommendDeck> BaseDeckRecommend::recommendHighScoreDeck(
             auto refineInfo = makeCalcInfo(refineBudgetMs);
 
             std::unordered_map<int, const CardDetail*> cardById{};
+            cardById.reserve(fullSorted.size());
             for (const auto& card : fullSorted) {
                 cardById.emplace(card.cardId, &card);
             }
 
             std::vector<const CardDetail*> refineCards{};
             std::unordered_set<int> refineCardIds{};
+            refineCards.reserve(config.filterOtherUnit ? 190 : 150);
+            refineCardIds.reserve(config.filterOtherUnit ? 190 : 150);
             auto addRefineCard = [&](const CardDetail& card) {
                 if (refineCardIds.insert(card.cardId).second) {
                     refineCards.push_back(&card);
@@ -3929,6 +4033,8 @@ std::vector<RecommendDeck> BaseDeckRecommend::recommendHighScoreDeck(
             };
             std::vector<PendingRefineEval> pendingEvals{};
             const std::size_t refineChunk = std::max<std::size_t>(64, std::size_t(engineThreadCount()) * 16);
+            pendingEvals.reserve(refineChunk);
+            visitedDecks.reserve(refineChunk * 2);
             auto flushPendingEvals = [&]() {
                 if (pendingEvals.empty()) {
                     return;
@@ -3972,10 +4078,12 @@ std::vector<RecommendDeck> BaseDeckRecommend::recommendHighScoreDeck(
                 }
             };
 
-            std::unordered_set<int> fixedCardIdSet{};
-            for (const auto& card : fixedCards) {
-                fixedCardIdSet.insert(card.cardId);
-            }
+            auto isFixedCardId = [&](int cardId) {
+                return std::any_of(fixedCards.begin(), fixedCards.end(), [&](const CardDetail& card) {
+                    return card.cardId == cardId;
+                });
+            };
+            const bool enforceUniqueCharacters = !Enums::LiveType::isChallenge(liveType);
 
             int seedLimit = std::min(int(seedDecks.size()), std::max(refineLimit * 4, config.filterOtherUnit ? 18 : 16));
             for (int seedIndex = 0; seedIndex < seedLimit && !refineInfo.isTimeout(); ++seedIndex) {
@@ -3985,17 +4093,33 @@ std::vector<RecommendDeck> BaseDeckRecommend::recommendHighScoreDeck(
                 }
                 tryEvaluate(deck);
 
-                std::unordered_set<int> baseCardIds{};
-                std::unordered_set<int> baseCharacterIds{};
-                for (const auto* card : deck) {
-                    baseCardIds.insert(card->cardId);
-                    baseCharacterIds.insert(card->characterId);
-                }
+                auto deckContainsCardId = [&](int cardId) {
+                    return std::any_of(deck.begin(), deck.end(), [&](const CardDetail* card) {
+                        return card->cardId == cardId;
+                    });
+                };
+                auto conflictsWithUnchangedCharacter = [&](
+                    const CardDetail* replacement,
+                    int firstReplaced,
+                    int secondReplaced
+                ) {
+                    for (int pos = 0; pos < int(deck.size()); ++pos) {
+                        if (pos != firstReplaced
+                            && pos != secondReplaced
+                            && deck[pos]->characterId == replacement->characterId) {
+                            return true;
+                        }
+                    }
+                    return false;
+                };
+                std::vector<const CardDetail*> candidate{};
+                candidate.reserve(deck.size());
 
                 for (int pos = 0; pos < int(deck.size()) && !refineInfo.isTimeout(); ++pos) {
-                    if (fixedCardIdSet.count(deck[pos]->cardId)) {
+                    if (isFixedCardId(deck[pos]->cardId)) {
                         continue;
                     }
+                    candidate.assign(deck.begin(), deck.end());
                     int tried = 0;
                     for (const auto* replacement : refineCards) {
                         if (refineInfo.isTimeout()) {
@@ -4004,15 +4128,13 @@ std::vector<RecommendDeck> BaseDeckRecommend::recommendHighScoreDeck(
                         if (++tried > (config.filterOtherUnit ? 52 : 44)) {
                             break;
                         }
-                        if (baseCardIds.count(replacement->cardId)) {
+                        if (deckContainsCardId(replacement->cardId)) {
                             continue;
                         }
-                        if (!Enums::LiveType::isChallenge(liveType)
-                            && replacement->characterId != deck[pos]->characterId
-                            && baseCharacterIds.count(replacement->characterId)) {
+                        if (enforceUniqueCharacters
+                            && conflictsWithUnchangedCharacter(replacement, pos, -1)) {
                             continue;
                         }
-                        auto candidate = deck;
                         candidate[pos] = replacement;
                         tryEvaluate(candidate);
                     }
@@ -4020,48 +4142,38 @@ std::vector<RecommendDeck> BaseDeckRecommend::recommendHighScoreDeck(
 
                 int pairWidth = config.filterOtherUnit ? 18 : 14;
                 for (int first = 0; first < int(deck.size()) && !refineInfo.isTimeout(); ++first) {
-                    if (fixedCardIdSet.count(deck[first]->cardId)) {
+                    if (isFixedCardId(deck[first]->cardId)) {
                         continue;
                     }
                     for (int second = first + 1; second < int(deck.size()) && !refineInfo.isTimeout(); ++second) {
-                        if (fixedCardIdSet.count(deck[second]->cardId)) {
+                        if (isFixedCardId(deck[second]->cardId)) {
                             continue;
                         }
+                        candidate.assign(deck.begin(), deck.end());
                         int firstTried = 0;
                         for (const auto* firstReplacement : refineCards) {
                             if (++firstTried > pairWidth || refineInfo.isTimeout()) {
                                 break;
                             }
-                            if (baseCardIds.count(firstReplacement->cardId)) {
+                            if (deckContainsCardId(firstReplacement->cardId)) {
                                 continue;
                             }
+                            candidate[first] = firstReplacement;
                             int secondTried = 0;
                             for (const auto* secondReplacement : refineCards) {
                                 if (++secondTried > pairWidth || refineInfo.isTimeout()) {
                                     break;
                                 }
                                 if (firstReplacement->cardId == secondReplacement->cardId
-                                    || baseCardIds.count(secondReplacement->cardId)) {
+                                    || deckContainsCardId(secondReplacement->cardId)) {
                                     continue;
                                 }
-                                if (!Enums::LiveType::isChallenge(liveType)) {
-                                    std::unordered_set<int> chars{};
-                                    bool duplicate = false;
-                                    for (int pos = 0; pos < int(deck.size()); ++pos) {
-                                        const CardDetail* card = pos == first
-                                            ? firstReplacement
-                                            : (pos == second ? secondReplacement : deck[pos]);
-                                        if (!chars.insert(card->characterId).second) {
-                                            duplicate = true;
-                                            break;
-                                        }
-                                    }
-                                    if (duplicate) {
-                                        continue;
-                                    }
+                                if (enforceUniqueCharacters
+                                    && (firstReplacement->characterId == secondReplacement->characterId
+                                        || conflictsWithUnchangedCharacter(firstReplacement, first, second)
+                                        || conflictsWithUnchangedCharacter(secondReplacement, first, second))) {
+                                    continue;
                                 }
-                                auto candidate = deck;
-                                candidate[first] = firstReplacement;
                                 candidate[second] = secondReplacement;
                                 tryEvaluate(candidate);
                             }
@@ -4196,17 +4308,98 @@ std::vector<RecommendDeck> BaseDeckRecommend::recommendHighScoreDeck(
         rememberStoredSeeds(transferSeedBucket, totalInfo, std::max(config.limit * 8, 32));
         RlCardRankBucket cardRankBucket{};
         rememberCardRanks(cardRankBucket, totalInfo, std::max(config.limit * 8, 24));
+        std::unordered_map<std::string, RlSeedBucket> persistentSeedSnapshot{};
+        std::unordered_map<std::string, RlCardRankBucket> persistentRankSnapshot{};
+        bool flushPersistentCache = false;
         {
             std::lock_guard<std::mutex> lock(rlMemoryMutex);
+            const auto accessStamp = ++rlMemoryAccessClock;
             auto& storedPolicyBucket = rlPolicyBuckets[rlStateKey];
             if (bucket.episodes >= storedPolicyBucket.episodes) {
                 storedPolicyBucket = bucket;
             }
-            mergeSeedBucket(rlSeedBuckets[rlStateKey], seedBucket, 16);
-            mergeSeedBucket(rlSeedBuckets[transferSeedKey], transferSeedBucket, 32);
-            mergeCardRankBucket(rlCardRankBuckets[broadCardRankKey], cardRankBucket, 160);
-            mergeCardRankBucket(rlCardRankBuckets[cardRankKey], cardRankBucket, 160);
-            savePersistentSeedBuckets(persistentSeedCachePath);
+            storedPolicyBucket.lastAccess = accessStamp;
+            auto& storedSeedBucket = rlSeedBuckets[rlStateKey];
+            mergeSeedBucket(storedSeedBucket, seedBucket, 16);
+            storedSeedBucket.lastAccess = accessStamp;
+            auto& storedTransferSeedBucket = rlSeedBuckets[transferSeedKey];
+            mergeSeedBucket(storedTransferSeedBucket, transferSeedBucket, 32);
+            storedTransferSeedBucket.lastAccess = accessStamp;
+            auto& storedBroadCardRankBucket = rlCardRankBuckets[broadCardRankKey];
+            mergeCardRankBucket(storedBroadCardRankBucket, cardRankBucket, 160);
+            storedBroadCardRankBucket.lastAccess = accessStamp;
+            auto& storedCardRankBucket = rlCardRankBuckets[cardRankKey];
+            mergeCardRankBucket(storedCardRankBucket, cardRankBucket, 160);
+            storedCardRankBucket.lastAccess = accessStamp;
+
+            pruneLruBuckets(rlPolicyBuckets, rlBucketLimit, [&](const std::string& key) {
+                return key == rlStateKey;
+            });
+            pruneLruBuckets(rlSeedBuckets, rlBucketLimit, [&](const std::string& key) {
+                return key == rlStateKey || key == transferSeedKey;
+            });
+            pruneLruBuckets(rlCardRankBuckets, rlBucketLimit, [&](const std::string& key) {
+                return key == broadCardRankKey || key == cardRankKey;
+            });
+            if (!persistentSeedCachePath.empty()) {
+                // This is a best-effort warm cache. The first update is written
+                // immediately and later updates are coalesced; a final partial
+                // window is intentionally not flushed during DLL/static teardown.
+                rlSeedCacheDirty = true;
+                rlSeedCachePendingUpdates++;
+
+                constexpr std::size_t flushUpdateThreshold = 8;
+                constexpr auto flushInterval = std::chrono::seconds(2);
+                const auto now = std::chrono::steady_clock::now();
+                if (!rlSeedCacheWriteInProgress
+                    && rlSeedCacheDirty
+                    && (!rlSeedCacheHasFlushed
+                        || rlSeedCachePendingUpdates >= flushUpdateThreshold
+                        || now - rlSeedCacheLastFlush >= flushInterval)) {
+                    // Copy a coherent snapshot under the state lock, but keep
+                    // sorting, serialization and filesystem I/O off the hot
+                    // critical section. Concurrent requests coalesce writes
+                    // where their timing overlaps; trailing dirty updates stay
+                    // best-effort until a later threshold or interval flush.
+                    persistentSeedSnapshot.reserve(rlSeedBuckets.size());
+                    for (const auto& [key, seed] : rlSeedBuckets) {
+                        if (key.find(":transfer_seeds") != std::string::npos
+                            && !seed.bestSeeds.empty()) {
+                            persistentSeedSnapshot.emplace(key, seed);
+                        }
+                    }
+                    persistentRankSnapshot.reserve(rlCardRankBuckets.size());
+                    for (const auto& [key, rank] : rlCardRankBuckets) {
+                        if (key.find(":card_ranks") != std::string::npos
+                            && !rank.cards.empty()) {
+                            persistentRankSnapshot.emplace(key, rank);
+                        }
+                    }
+                    rlSeedCacheDirty = false;
+                    rlSeedCachePendingUpdates = 0;
+                    rlSeedCacheWriteInProgress = true;
+                    rlSeedCacheLastFlush = now;
+                    rlSeedCacheHasFlushed = true;
+                    flushPersistentCache = true;
+                }
+            }
+        }
+        if (flushPersistentCache) {
+            const bool saved = savePersistentSeedBuckets(
+                persistentSeedCachePath,
+                persistentSeedSnapshot,
+                persistentRankSnapshot
+            );
+            std::lock_guard<std::mutex> lock(rlMemoryMutex);
+            rlSeedCacheWriteInProgress = false;
+            if (!saved) {
+                rlSeedCacheDirty = true;
+                rlSeedCacheHasFlushed = false;
+                rlSeedCachePendingUpdates = std::max<std::size_t>(
+                    rlSeedCachePendingUpdates,
+                    1
+                );
+            }
         }
 
         auto result = collectResults(totalInfo);

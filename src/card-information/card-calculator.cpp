@@ -161,18 +161,31 @@ SupportDeckCard CardCalculator::getSupportDeckCard(
     bool requireSpecialUnitMatch
 )
 {
-    UserCard supportCard = card;
+    int masterRank = card.masterRank;
+    int skillLevel = card.skillLevel;
     if (masterMax || skillMax) {
         const Card* cardData = this->dataProvider.masterData->findCardById(card.cardId);
         if (cardData == nullptr) {
             throw ElementNoFoundError("Support Deck Card not found for cardId=" + std::to_string(card.cardId));
         }
-        CardConfig cfg{};
-        cfg.masterMax = masterMax;
-        cfg.skillMax = skillMax;
-        supportCard = this->cardService.applyCardConfig(card, *cardData, cfg);
+        auto& cardRarities = dataProvider.masterData->cardRarities;
+        const auto& cardRarity = findOrThrow(cardRarities, [&](const CardRarity& it) {
+            return it.cardRarityType == cardData->cardRarityType;
+        }, [&]() {
+            return "Card rarity not found for cardRarityType=" + std::to_string(cardData->cardRarityType);
+        });
+        if (masterMax) {
+            masterRank = 5;
+        }
+        if (skillMax) {
+            skillLevel = cardRarity.maxSkillLevel;
+        }
     }
 
+    UserCard supportCard{};
+    supportCard.cardId = card.cardId;
+    supportCard.masterRank = masterRank;
+    supportCard.skillLevel = skillLevel;
     auto bonus = this->bloomEventCalculator.getCardSupportDeckBonus(
         supportCard,
         eventId,
@@ -182,10 +195,10 @@ SupportDeckCard CardCalculator::getSupportDeckCard(
     return SupportDeckCard{
         .cardId = card.cardId,
         .bonus = bonus.value_or(0.0),
-        .skillLevel = supportCard.skillLevel,
-        .masterRank = supportCard.masterRank,
-        .level = supportCard.level,
-        .afterTraining = supportCard.specialTrainingStatus == Enums::SpecialTrainingStatus::done,
-        .defaultImage = supportCard.defaultImage,
+        .skillLevel = skillLevel,
+        .masterRank = masterRank,
+        .level = card.level,
+        .afterTraining = card.specialTrainingStatus == Enums::SpecialTrainingStatus::done,
+        .defaultImage = card.defaultImage,
     };
 }
