@@ -277,6 +277,13 @@ export interface RecommendResult {
   cost_ms: number
 }
 
+/** Immutable, reusable user-data snapshot bound to one engine, region, and master-data generation. */
+export class SekaiDeckRecommendUserData {
+  private constructor()
+  readonly disposed: boolean
+  dispose(): void
+}
+
 export interface WorldBloomSupportCard {
   card_id: number
   bonus: number
@@ -290,12 +297,19 @@ export interface WorldBloomSupportCard {
 export interface RawSekaiDeckRecommendInstance {
   updateMasterdataFromObject(data: Record<string, unknown>, region: SekaiRegion): void
   updateMusicmetasFromString(data: string, region: SekaiRegion): void
+  createUserData(dataJson: string, region: SekaiRegion): RawSekaiDeckRecommendUserData
   recommend(optionsJson: string): string
+  recommendWithUserData(optionsJson: string, userData: RawSekaiDeckRecommendUserData): string
   recommendBatch(optionsJsonArray: string): string
+  recommendBatchWithUserData(optionsJsonArray: string, userData: RawSekaiDeckRecommendUserData): string
   recommendAreaItems(optionsJson: string): string
   recommendMusic(optionsJson: string): string
   calculateExactLive(optionsJson: string): string
   getWorldBloomSupportCards(optionsJson: string): string
+  delete(): void
+}
+
+export interface RawSekaiDeckRecommendUserData {
   delete(): void
 }
 
@@ -316,9 +330,11 @@ export class SekaiDeckRecommendWasm {
   readonly module: RawSekaiDeckRecommendModule
   loadMasterData(region: SekaiRegion, data: Record<string, unknown>): void
   loadMusicMetas(region: SekaiRegion, data: string | object): void
-  recommend(options: RecommendOptions): RecommendResult
+  /** Parses a user-data snapshot once for reuse. Must be called after loadMasterData for the region. */
+  createUserData(region: SekaiRegion, data: string | Record<string, unknown>): SekaiDeckRecommendUserData
+  recommend(options: RecommendOptions, userData?: SekaiDeckRecommendUserData): RecommendResult
   /** Runs each request through the full recommend pipeline; results are returned in input order. */
-  recommendBatch(optionsList: RecommendOptions[]): RecommendResult[]
+  recommendBatch(optionsList: RecommendOptions[], userData?: SekaiDeckRecommendUserData): RecommendResult[]
   getWorldBloomSupportCards(options: WorldBloomSupportOptions): WorldBloomSupportCard[]
   recommendAreaItems(options: AreaItemRecommendOptions): RecommendAreaItem[]
   recommendMusic(options: MusicRecommendOptions, deck: RecommendDeck): RecommendMusic[]

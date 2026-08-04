@@ -2,9 +2,7 @@
 #include "data-provider/static-data.h"
 
 #include <algorithm>
-#include <fstream>
 #include <iostream>
-#include <iterator>
 #include <unordered_map>
 #include <vector>
 #include "master-data.h"
@@ -60,17 +58,20 @@ static const std::vector<std::vector<int>> worldBloom3PartCharacterIds = {
     {25, 7, 11, 15, 19},
 };
 
+static std::uint64_t makeEventCardKey(int eventId, int cardId)
+{
+    return (static_cast<std::uint64_t>(static_cast<std::uint32_t>(eventId)) << 32)
+         | static_cast<std::uint32_t>(cardId);
+}
+
 
 void loadMasterDataJsonFromFile(std::map<std::string, json_doc>& jsons, const std::string& baseDir, const std::string& key) {
     try {
         std::string filePath = baseDir + "/" + key + ".json";
-        std::ifstream file(filePath);
-        if (!file.is_open()) {
-            jsons.erase(key);
-            return;
-        }
-        std::string content{std::istreambuf_iterator<char>(file), std::istreambuf_iterator<char>()};
-        jsons[key] = json_doc::parse(content, "master data file: " + key);
+        jsons[key] = json_doc::parseFile(filePath, "master data file: " + key);
+    }
+    catch (const JsonFileOpenError&) {
+        jsons.erase(key);
     }
     catch (const std::exception& e) {
         throw std::runtime_error("Failed to load master data from file: " + key + ", error: " + e.what());
@@ -314,6 +315,11 @@ void MasterData::buildDerivedCaches() {
     for (int i = 0; i < (int)honors.size(); ++i) {
         this->honorIndexById.emplace(honors[i].id, i);
     }
+    this->eventCardIndexByKey.clear();
+    this->eventCardIndexByKey.reserve(eventCards.size());
+    for (int i = 0; i < (int)eventCards.size(); ++i) {
+        this->eventCardIndexByKey.emplace(makeEventCardKey(eventCards[i].eventId, eventCards[i].cardId), i);
+    }
     this->eventDeckBonusIndicesByEventId.clear();
     for (int i = 0; i < (int)eventDeckBonuses.size(); ++i) {
         this->eventDeckBonusIndicesByEventId[eventDeckBonuses[i].eventId].push_back(i);
@@ -321,6 +327,11 @@ void MasterData::buildDerivedCaches() {
     this->gameCharacterUnitIndexById.clear();
     for (int i = 0; i < (int)gameCharacterUnits.size(); ++i) {
         this->gameCharacterUnitIndexById.emplace(gameCharacterUnits[i].id, i);
+    }
+    this->cardEpisodeIndexById.clear();
+    this->cardEpisodeIndexById.reserve(cardEpisodes.size());
+    for (int i = 0; i < (int)cardEpisodes.size(); ++i) {
+        this->cardEpisodeIndexById.emplace(cardEpisodes[i].id, i);
     }
     this->cardIndexById.clear();
     for (int i = 0; i < (int)cards.size(); ++i) {
@@ -335,6 +346,12 @@ void MasterData::buildDerivedCaches() {
         this->characterRankIndexByKey.emplace(
             (long long)characterRanks[i].characterId * 100000 + characterRanks[i].characterRank, i);
     }
+}
+
+const CardEpisode* MasterData::findCardEpisodeById(int cardEpisodeId) const
+{
+    auto it = cardEpisodeIndexById.find(cardEpisodeId);
+    return it != cardEpisodeIndexById.end() ? &cardEpisodes[it->second] : nullptr;
 }
 
 const Card* MasterData::findCardById(int cardId) const
@@ -366,6 +383,12 @@ const std::vector<int>& MasterData::getEventDeckBonusIndices(int eventId) const
     static const std::vector<int> empty{};
     auto it = eventDeckBonusIndicesByEventId.find(eventId);
     return it != eventDeckBonusIndicesByEventId.end() ? it->second : empty;
+}
+
+const EventCard* MasterData::findEventCard(int eventId, int cardId) const
+{
+    auto it = eventCardIndexByKey.find(makeEventCardKey(eventId, cardId));
+    return it != eventCardIndexByKey.end() ? &eventCards[it->second] : nullptr;
 }
 
 const GameCharacterUnit& MasterData::getGameCharacterUnitById(int gameCharacterUnitId) const

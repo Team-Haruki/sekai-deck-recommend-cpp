@@ -14,6 +14,7 @@ Run from the repo root: a bare .so resolves static data at ./data.
 Mongo-exported suites (a JSON list wrapping one suite object) are
 unwrapped automatically.
 """
+import contextlib
 import json
 import os
 import sys
@@ -39,17 +40,32 @@ def load_engine():
     return m
 
 
+@contextlib.contextmanager
 def userdata_path():
     path = os.environ.get('SEKAI_BENCH_USERDATA', os.path.join(REPO_ROOT, 'collections.suite.json'))
     with open(path, 'rb') as f:
         first = f.read(1)
     if first != b'[':
-        return path
-    data = json.load(open(path))
+        yield path
+        return
+
+    with open(path) as f:
+        data = json.load(f)
     inner = data[0] if isinstance(data, list) and data else data
-    out = os.path.join(tempfile.gettempdir(), 'sekai_bench_suite_inner.json')
-    json.dump(inner, open(out, 'w'))
-    return out
+    # A process-private directory prevents concurrent benchmark processes from
+    # truncating each other's fixture and keeps the unwrapped user data private.
+    # Publish only a fully written file, then remove it immediately after load.
+    with tempfile.TemporaryDirectory(prefix='sekai_bench_userdata_') as temp_dir:
+        out = os.path.join(temp_dir, 'suite-inner.json')
+        fd, pending = tempfile.mkstemp(prefix='.suite-inner-', suffix='.tmp', dir=temp_dir)
+        try:
+            with os.fdopen(fd, 'w') as f:
+                json.dump(inner, f)
+            os.replace(pending, out)
+            yield out
+        finally:
+            if os.path.exists(pending):
+                os.unlink(pending)
 
 
 def make_engine(region='jp'):
@@ -59,7 +75,8 @@ def make_engine(region='jp'):
     metas = os.environ.get('SEKAI_BENCH_MUSICMETAS', os.path.join(os.path.dirname(REPO_ROOT), 'music_metas.json'))
     sdr.update_musicmetas(metas, region)
     user_data = m.DeckRecommendUserData()
-    user_data.load_from_file(userdata_path())
+    with userdata_path() as path:
+        user_data.load_from_file(path)
     return m, sdr, user_data
 
 
@@ -73,6 +90,19 @@ def detect_events():
     wl_event = max((w['eventId'] for w in wl_chapters), default=None)
     wl_char = next((w['gameCharacterId'] for w in wl_chapters if w['eventId'] == wl_event), None)
     return marathon, wl_event, wl_char
+
+
+def detect_finale_event():
+    """Pick the newest real world-bloom finale event, if available."""
+    path = os.path.join(masterdata_dir(), 'worldBlooms.json')
+    with open(path) as f:
+        world_blooms = json.load(f)
+    finale_events = [
+        w['eventId']
+        for w in world_blooms
+        if w['eventId'] < 1000 and w.get('worldBloomChapterType') == 'finale'
+    ]
+    return max(finale_events, default=None)
 
 
 def base_options(m, user_data, **kw):

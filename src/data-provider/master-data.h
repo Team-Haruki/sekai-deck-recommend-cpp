@@ -3,6 +3,7 @@
 
 #include "data-provider/master-data-types.h"
 
+#include <cstdint>
 #include <unordered_map>
 #include <unordered_set>
 
@@ -26,8 +27,10 @@ private:
     std::unordered_set<int> worldBloomFinaleEventIds;
     std::unordered_map<int, int> eventCardBonusCountLimits;
     std::unordered_map<int, int> honorIndexById;
+    std::unordered_map<std::uint64_t, int> eventCardIndexByKey;
     std::unordered_map<int, std::vector<int>> eventDeckBonusIndicesByEventId;
     std::unordered_map<int, int> gameCharacterUnitIndexById;
+    std::unordered_map<int, int> cardEpisodeIndexById;
     std::unordered_map<int, int> cardIndexById;
     std::unordered_map<int, int> skillIndexById;
     std::unordered_map<long long, int> characterRankIndexByKey;
@@ -98,10 +101,14 @@ public:
 
     const Honor& getHonorById(int honorId) const;
 
+    const EventCard* findEventCard(int eventId, int cardId) const;
+
     // 指定活动的eventDeckBonuses下标列表（无则返回空列表）
     const std::vector<int>& getEventDeckBonusIndices(int eventId) const;
 
     const GameCharacterUnit& getGameCharacterUnitById(int gameCharacterUnitId) const;
+
+    const CardEpisode* findCardEpisodeById(int cardEpisodeId) const;
 
     const Card* findCardById(int cardId) const;
 

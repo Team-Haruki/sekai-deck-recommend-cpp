@@ -185,6 +185,11 @@ inline json_array_iterator json_view::end() const {
     return {};
 }
 
+class JsonFileOpenError : public std::runtime_error {
+public:
+    using std::runtime_error::runtime_error;
+};
+
 class json_doc {
 public:
     json_doc() = default;
@@ -204,16 +209,34 @@ public:
 
     static json_doc parse(const std::string& text, const std::string& source = "json") {
         yyjson_read_err err{};
-        std::string padded = text;
-        padded.resize(text.size() + YYJSON_PADDING_SIZE);
         yyjson_doc* parsed = yyjson_read_opts(
-            padded.data(),
+            const_cast<char*>(text.data()),
             text.size(),
             YYJSON_READ_NOFLAG,
             nullptr,
             &err
         );
         if (!parsed) {
+            throw std::runtime_error(
+                "Failed to parse " + source + " at position " + std::to_string(err.pos) +
+                ": " + (err.msg ? std::string(err.msg) : std::string("unknown error"))
+            );
+        }
+        return json_doc(parsed);
+    }
+
+    static json_doc parseFile(const std::string& path, const std::string& source = "json file") {
+        yyjson_read_err err{};
+        yyjson_doc* parsed = yyjson_read_file(
+            path.c_str(),
+            YYJSON_READ_NOFLAG,
+            nullptr,
+            &err
+        );
+        if (!parsed) {
+            if (err.code == YYJSON_READ_ERROR_FILE_OPEN) {
+                throw JsonFileOpenError("Failed to open " + source + ": " + path);
+            }
             throw std::runtime_error(
                 "Failed to parse " + source + " at position " + std::to_string(err.pos) +
                 ": " + (err.msg ? std::string(err.msg) : std::string("unknown error"))

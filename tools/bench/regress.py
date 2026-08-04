@@ -17,6 +17,7 @@ import common
 
 def scenarios():
     marathon, wl_event, wl_char = common.detect_events()
+    finale_event = common.detect_finale_event()
     s = {
         'ga-marathon-multi-score': dict(live_type='multi', event_id=marathon, algorithm='ga', target='score'),
         'ga-marathon-multi-skill': dict(live_type='multi', event_id=marathon, algorithm='ga', target='skill'),
@@ -29,12 +30,30 @@ def scenarios():
         'dfs-challenge':           dict(live_type='challenge', challenge_live_character_id=1, algorithm='dfs', target='score'),
         'dfs-marathon-member2':    dict(live_type='multi', event_id=marathon, algorithm='dfs', target='score', member=2),
         'dfs-marathon-multi':      dict(live_type='multi', event_id=marathon, algorithm='dfs', target='score'),
+        'bonuslist-marathon-easy': dict(live_type='multi', event_id=marathon, algorithm='dfs', target='bonus', target_bonus_list=[355]),
+        'bonuslist-marathon-hard': dict(live_type='multi', event_id=marathon, algorithm='dfs', target='bonus', target_bonus_list=[185]),
+        'bonuslist-marathon-multi': dict(live_type='multi', event_id=marathon, algorithm='dfs', target='bonus', target_bonus_list=[185, 355]),
+        'bonuslist-marathon-miss': dict(live_type='multi', event_id=marathon, algorithm='dfs', target='bonus', target_bonus_list=[999]),
         'dfsga-marathon-multi':    dict(live_type='multi', event_id=marathon, algorithm='dfs_ga', target='score'),
         'dfsga-challenge':         dict(live_type='challenge', challenge_live_character_id=1, algorithm='dfs_ga', target='score'),
         'sa-marathon-multi':       dict(live_type='multi', event_id=marathon, algorithm='sa', target='score'),
     }
     if wl_event is not None:
         s['ga-wl-multi-score'] = dict(live_type='multi', event_id=wl_event, algorithm='ga', target='score', world_bloom_character_id=wl_char)
+        s['bonuslist-wl-easy'] = dict(live_type='multi', event_id=wl_event, algorithm='dfs', target='bonus', target_bonus_list=[345], world_bloom_character_id=wl_char)
+        s['bonuslist-wl-hard'] = dict(live_type='multi', event_id=wl_event, algorithm='dfs', target='bonus', target_bonus_list=[225], world_bloom_character_id=wl_char)
+        s['bonuslist-wl-multi'] = dict(live_type='multi', event_id=wl_event, algorithm='dfs', target='bonus', target_bonus_list=[300, 345], world_bloom_character_id=wl_char)
+        s['bonuslist-wl-miss'] = dict(live_type='multi', event_id=wl_event, algorithm='dfs', target='bonus', target_bonus_list=[999], world_bloom_character_id=wl_char)
+    if finale_event is not None:
+        s['ga-finale-support'] = dict(
+            live_type='multi',
+            event_id=finale_event,
+            algorithm='ga',
+            target='power',
+            forcedLeaderCharacterId=1,
+            limit=1,
+            member=2,
+        )
     return s
 
 
@@ -53,6 +72,18 @@ def deck_repr(d):
         'cards': [c.card_id for c in d.cards],
         'card_skill_score_up': [c.skill_score_up for c in d.cards],
         'card_total_power': [c.total_power for c in d.cards],
+        'support_deck_cards': [
+            {
+                'card_id': c.card_id,
+                'bonus': c.bonus,
+                'skill_level': c.skill_level,
+                'master_rank': c.master_rank,
+                'level': c.level,
+                'after_training': c.after_training,
+                'default_image': c.default_image,
+            }
+            for c in d.support_deck_cards
+        ],
     }
 
 

@@ -32,6 +32,7 @@ const engine = await createSekaiDeckRecommend({ wasmUrl })
 engine.loadMasterData("jp", masterData)
 engine.loadMusicMetas("jp", musicMetasText)
 
+const userData = engine.createUserData("jp", suiteData)
 const result = engine.recommend({
   region: "jp",
   live_type: "multi",
@@ -41,7 +42,6 @@ const result = engine.recommend({
   algorithm: "ga",
   music_id: 1,
   music_diff: "easy",
-  user_data: suiteData,
   single_card_configs: [{
     card_id: 12345,
     level: 60,
@@ -52,10 +52,17 @@ const result = engine.recommend({
   }],
   limit: 10,
   timeout_ms: 15000,
-})
+}, userData)
 
+userData.dispose()
 engine.dispose()
 ```
+
+For repeated recommendations, `createUserData` parses an immutable user-data
+snapshot once and the optional second argument reuses it in both `recommend`
+and `recommendBatch`. Passing `user_data` inline remains supported. Recreate
+the snapshot after reloading master data for its region; disposing the engine
+also disposes its remaining snapshots.
 
 Run recommendation calls in a Web Worker for production UI usage. Master data can
 be tens of MiB after JSON encoding, and long-running algorithms should not block

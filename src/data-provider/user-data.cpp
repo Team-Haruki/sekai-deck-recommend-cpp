@@ -1,8 +1,6 @@
 #include "data-provider/user-data.h"
 
-#include <fstream>
 #include <iostream>
-#include <iterator>
 
 
 template<typename T>
@@ -53,18 +51,14 @@ void UserData::loadFromJson(const json_view& j) {
 }
 
 void UserData::loadFromFile(const std::string& path) {
-    std::string content;
+    json_doc doc;
     try {
         this->path = path;
-        std::ifstream file(path);
-        if (!file.is_open()) {
-            throw std::runtime_error("Failed to open user data file: " + path);
-        }
-        content.assign(std::istreambuf_iterator<char>(file), std::istreambuf_iterator<char>());
-    } catch (const std::exception& e) {
-        throw std::runtime_error("Failed to load user data from file: " + path + ", error: " + e.what());
+        doc = json_doc::parseFile(path, "user data file: " + path);
+    } catch (const JsonFileOpenError&) {
+        throw std::runtime_error("Failed to load user data from file: " + path
+            + ", error: Failed to open user data file: " + path);
     }
-    auto doc = json_doc::parse(content, "user data file: " + path);
     this->loadFromJson(doc.root());
 }
 
