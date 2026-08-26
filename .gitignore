@@ -9,6 +9,7 @@ __pycache__/
 .idea/
 collections.suite.json
 suite.json
+data/rl_seed_cache.tsv
 uv.lock
 haruki-sekai-master/
 haruki-sekai-sc-master/

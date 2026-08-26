@@ -27,6 +27,9 @@ recommendation and live calculation. The same engineering rules also live in
 - Do not rewrite scoring, event bonus, support deck, or skill order logic unless
   the task explicitly requires it.
 - Avoid changing static data in `data/` unless the task is about static data.
+  `data/rl_seed_cache.tsv` is a runtime-generated RL warm-start cache
+  (written when `DECK_DATA_DIR` or `DECK_RL_SEED_CACHE_FILE` is set); it is
+  gitignored and must never be committed.
 - Prefer clear validation errors for malformed options and missing userdata.
 
 ## Important Paths

@@ -24,10 +24,11 @@ change live automation behavior downstream.
 
 - `src/`: core C++ engine sources.
 - `src/deck-recommend/`: event, challenge live, MySekai, and base deck
-  recommendation logic.
+  recommendation logic; result ordering for emitted detail fields.
 - `src/deck-information/`: fixed deck lookup and deck power aggregation.
 - `src/card-information/`: card detail, power, skill, and image state logic.
-- `src/live-score/`: live score and skill order calculations.
+- `src/live-score/`: live score, skill ordering, multi-live active bonus,
+  and fixed-live timing calculations.
 - `src/event-point/`: event point and event bonus calculations.
 - `src/data-provider/`: static data, masterdata, music metas, and userdata
   loading.
@@ -38,9 +39,15 @@ change live automation behavior downstream.
 - `3rdparty/yyjson/`: vendored yyjson dependency for masterdata, music metas,
   userdata parsing, and wasm JSON-in / JSON-out binding payloads.
 - `sekai_deck_recommend.cpp` and `.pyi`: Python binding surface.
-- `data/`: static data required by the engine.
+- `data/`: static data required by the engine. `data/rl_seed_cache.tsv` is a
+  runtime-generated RL warm-start cache (written when `DECK_DATA_DIR` or
+  `DECK_RL_SEED_CACHE_FILE` is set); it is gitignored and must never be
+  committed.
 
 ## Build And Test
+
+Prerequisites: CMake ≥ 3.15, C++20 compiler (GCC/Clang/MSVC), Python 3.10+
+with development headers.
 
 Common local checks:
 
@@ -139,10 +146,14 @@ and keep their schemas identical.
 
 ## High-Risk Areas
 
+These spots have produced production-visible regressions in the past — read
+the surrounding code before changing them, and prefer adding tests or running
+the deck-service integration build:
+
 - `src/live-score/live-calculator.cpp`: skill ordering, multi-live active bonus,
   and fixed live score timing.
-- `src/deck-recommend/base-deck-recommend.h`: card filtering and shared deck
-  recommendation config.
+- `src/deck-recommend/base-deck-recommend.{h,cpp}`: card filtering and the
+  shared deck recommendation config used by every recommender.
 - `src/deck-recommend/deck-result-update.*`: result ordering and emitted detail
   fields consumed by deck-service.
 - `src/data-provider/user-data.cpp` and `src/user-data/*`: downstream runtime
@@ -205,8 +216,9 @@ Rules:
 
 Suggested values per agent:
 
-- Claude (any 4.x): `Co-authored-by: Claude Opus 4.7 <noreply@anthropic.com>`
-  (substitute the actual model, e.g. `Claude Sonnet 4.6`)
+- Claude: `Co-authored-by: Claude <Model> <noreply@anthropic.com>` with the
+  actual model name (e.g. `Claude Fable 5`, `Claude Opus 4.7`,
+  `Claude Haiku 4.5`)
 - Codex: `Co-authored-by: Codex <noreply@openai.com>`
 - Copilot: `Co-authored-by: Copilot <223556219+Copilot@users.noreply.github.com>`
 

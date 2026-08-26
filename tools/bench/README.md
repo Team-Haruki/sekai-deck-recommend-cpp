@@ -41,6 +41,10 @@ DECK_RL_SEED_CACHE_DISABLE=1 python tools/bench/rl_quality.py --processes 4 --ca
 ```
 
 门槛：所有调用的 top 值持续命中参考最优（例如 20/20）。注意：
+- `DECK_RL_SEED_CACHE_DISABLE=1` 同时关闭内存与磁盘种子缓存，保证各次调用
+  互不污染。持久化文件写到 `DECK_RL_SEED_CACHE_FILE` 或
+  `$DECK_DATA_DIR/rl_seed_cache.tsv`；`data/rl_seed_cache.tsv` 是运行时
+  产物，已 gitignore，不要提交。
 - **RL 各阶段预算常数是质量下限**——历史上多次为修质量问题而加预算，
   永远不要为提速削减它们；提速的正确方式是降低预算内的实现开销。
 - 冷启动的**同分卡组组成不保证确定**（墙钟截断所致），比值不比卡组列表。
