@@ -8,11 +8,50 @@ bit-identical across a pure-performance change. Time-budgeted scenarios
 (DFS_GA / SA — internal wall-clock budgets make node counts vary with
 speed) are compared on top score only.
 """
+import argparse
 import json
 import sys
+import tempfile
 import time
+from pathlib import Path
 
 import common
+
+
+SAFE_CLI_ROOTS = (
+    Path(common.REPO_ROOT).resolve(),
+    Path(tempfile.gettempdir()).resolve(),
+    Path('/tmp').resolve(),
+)
+
+
+def safe_cli_file(raw_path, *, must_exist):
+    """Resolve a CLI file path inside the workspace or the system temp dir."""
+    if not raw_path:
+        raise ValueError('path must not be empty')
+    path = Path(raw_path).expanduser()
+    if not path.is_absolute():
+        path = Path.cwd() / path
+    if must_exist:
+        resolved = path.resolve(strict=True)
+        if not resolved.is_file():
+            raise ValueError(f'path is not a file: {raw_path}')
+    else:
+        parent = path.parent.resolve(strict=True)
+        if not parent.is_dir():
+            raise ValueError(f'parent is not a directory: {path.parent}')
+        resolved = parent / path.name
+        if resolved.is_symlink():
+            resolved = resolved.resolve(strict=True)
+        if resolved.exists():
+            if not resolved.is_file():
+                raise ValueError(f'output path is not a file: {raw_path}')
+        elif resolved.is_symlink():
+            raise ValueError(f'output path is a broken symlink: {raw_path}')
+    if not any(resolved == root or root in resolved.parents for root in SAFE_CLI_ROOTS):
+        allowed = ', '.join(str(root) for root in SAFE_CLI_ROOTS)
+        raise ValueError(f'path must be inside one of: {allowed}')
+    return resolved
 
 
 def scenarios():
@@ -105,12 +144,15 @@ def run(out_path, filt=None):
             timings[name] = -1
         top = results[name][0]['score'] if isinstance(results[name], list) and results[name] else 'ERR'
         print(f'{name:28s} {timings[name]:9.1f}ms top={top}', flush=True)
-    json.dump({'results': results, 'timings': timings}, open(out_path, 'w'), indent=1, sort_keys=True)
+    with out_path.open('w', encoding='utf-8') as out_file:
+        json.dump({'results': results, 'timings': timings}, out_file, indent=1, sort_keys=True)
 
 
 def compare(base_path, after_path):
-    a = json.load(open(base_path))['results']
-    b = json.load(open(after_path))['results']
+    with base_path.open(encoding='utf-8') as base_file:
+        a = json.load(base_file)['results']
+    with after_path.open(encoding='utf-8') as after_file:
+        b = json.load(after_file)['results']
     fail = 0
     for name in sorted(set(a) | set(b)):
         ra, rb = a.get(name), b.get(name)
@@ -135,11 +177,28 @@ def compare(base_path, after_path):
     return 1 if fail else 0
 
 
+def main(argv=None):
+    parser = argparse.ArgumentParser(description=__doc__)
+    commands = parser.add_subparsers(dest='command', required=True)
+    run_parser = commands.add_parser('run')
+    run_parser.add_argument('output')
+    run_parser.add_argument('scenario_filter', nargs='?')
+    compare_parser = commands.add_parser('compare')
+    compare_parser.add_argument('baseline')
+    compare_parser.add_argument('after')
+    args = parser.parse_args(argv)
+
+    try:
+        if args.command == 'run':
+            run(safe_cli_file(args.output, must_exist=False), args.scenario_filter)
+            return 0
+        return compare(
+            safe_cli_file(args.baseline, must_exist=True),
+            safe_cli_file(args.after, must_exist=True),
+        )
+    except (OSError, ValueError) as exc:
+        parser.error(str(exc))
+
+
 if __name__ == '__main__':
-    if len(sys.argv) >= 3 and sys.argv[1] == 'run':
-        run(sys.argv[2], sys.argv[3] if len(sys.argv) > 3 else None)
-    elif len(sys.argv) == 4 and sys.argv[1] == 'compare':
-        sys.exit(compare(sys.argv[2], sys.argv[3]))
-    else:
-        print(__doc__)
-        sys.exit(2)
+    sys.exit(main())

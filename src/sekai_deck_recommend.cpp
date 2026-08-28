@@ -857,9 +857,8 @@ class SekaiDeckRecommend {
 
     mutable std::map<Region, std::shared_ptr<MasterData>> region_masterdata;
     mutable std::map<Region, std::shared_ptr<MusicMetas>> region_musicmetas;
-    // recommend系列在无GIL下并发执行，与update_*互斥（读写锁）；
-    // 用shared_ptr保持类可拷贝（pybind注册需要）
-    std::shared_ptr<std::shared_mutex> engine_mutex = std::make_shared<std::shared_mutex>();
+    // recommend系列在无GIL下并发执行，与update_*互斥（读写锁）。
+    mutable std::shared_mutex engine_mutex;
 
     struct DeckRecommendOptions {
         int liveType = 0;
@@ -1513,9 +1512,17 @@ class SekaiDeckRecommend {
 
 public:
 
+    SekaiDeckRecommend() = default;
+
+    SekaiDeckRecommend(const SekaiDeckRecommend& other) {
+        std::shared_lock<std::shared_mutex> lock(other.engine_mutex);
+        region_masterdata = other.region_masterdata;
+        region_musicmetas = other.region_musicmetas;
+    }
+
     // 从指定目录更新区服masterdata数据
     void update_masterdata(const std::string& base_dir, const std::string& region) {
-        std::unique_lock<std::shared_mutex> lock(*engine_mutex);
+        std::unique_lock<std::shared_mutex> lock(engine_mutex);
         if (!REGION_ENUM_MAP.count(region)) 
             throw std::invalid_argument("Invalid region: " + region);
         region_masterdata[REGION_ENUM_MAP.at(region)] = std::make_shared<MasterData>();
@@ -1524,7 +1531,7 @@ public:
 
     // 从指定string的dict更新区服masterdata数据
     void update_masterdata_from_strings(const py::dict& dict, const std::string& region) {
-        std::unique_lock<std::shared_mutex> lock(*engine_mutex);
+        std::unique_lock<std::shared_mutex> lock(engine_mutex);
         if (!REGION_ENUM_MAP.count(region)) 
             throw std::invalid_argument("Invalid region: " + region);
         std::map<std::string, std::string> data;
@@ -1538,7 +1545,7 @@ public:
 
     // 从指定文件更新区服musicmetas数据
     void update_musicmetas(const std::string& file_path, const std::string& region) {
-        std::unique_lock<std::shared_mutex> lock(*engine_mutex);
+        std::unique_lock<std::shared_mutex> lock(engine_mutex);
         if (!REGION_ENUM_MAP.count(region)) 
             throw std::invalid_argument("Invalid region: " + region);
         region_musicmetas[REGION_ENUM_MAP.at(region)] = std::make_shared<MusicMetas>();
@@ -1547,7 +1554,7 @@ public:
 
     // 从指定string更新区服musicmetas数据
     void update_musicmetas_from_string(const std::string& s, const std::string& region) {
-        std::unique_lock<std::shared_mutex> lock(*engine_mutex);
+        std::unique_lock<std::shared_mutex> lock(engine_mutex);
         if (!REGION_ENUM_MAP.count(region)) 
             throw std::invalid_argument("Invalid region: " + region);
         region_musicmetas[REGION_ENUM_MAP.at(region)] = std::make_shared<MusicMetas>();
@@ -1555,6 +1562,7 @@ public:
     }
 
     std::vector<PyRecommendSupportDeckCard> get_world_bloom_support_cards(const PyDeckRecommendOptions& pyoptions) const {
+        std::shared_lock<std::shared_mutex> lock(engine_mutex);
         if (!pyoptions.region.has_value())
             throw std::invalid_argument("region is required.");
         if (!REGION_ENUM_MAP.count(pyoptions.region.value()))
@@ -1651,6 +1659,7 @@ public:
         const PyDeckRecommendOptions& pyoptions,
         const std::vector<int>& card_ids
     ) const {
+        std::shared_lock<std::shared_mutex> lock(engine_mutex);
         auto dataProvider = construct_data_provider_from_py(pyoptions, true, false);
         dataProvider.init();
         AreaItemRecommend recommend(dataProvider);
@@ -1667,6 +1676,7 @@ public:
         const PyDeckRecommendOptions& pyoptions,
         const PyRecommendDeck& deck
     ) const {
+        std::shared_lock<std::shared_mutex> lock(engine_mutex);
         auto dataProvider = construct_data_provider_from_py(pyoptions, false, true);
         int liveType = get_live_type_from_py(pyoptions);
         int eventType = get_event_type_from_py(pyoptions, dataProvider);
@@ -1710,6 +1720,7 @@ public:
         int multi_sum_power = 0,
         const std::optional<std::string>& fever_music_score_json = std::nullopt
     ) const {
+        std::shared_lock<std::shared_mutex> lock(engine_mutex);
         if (!REGION_ENUM_MAP.count(region))
             throw std::invalid_argument("Invalid region: " + region);
         Region regionEnum = REGION_ENUM_MAP.at(region);
@@ -1781,7 +1792,7 @@ public:
 
     // 推荐卡组
     PyDeckRecommendResult recommend(const PyDeckRecommendOptions& pyoptions) {
-        std::shared_lock<std::shared_mutex> lock(*engine_mutex);
+        std::shared_lock<std::shared_mutex> lock(engine_mutex);
         auto options = construct_options_from_py(pyoptions);
         return run_recommend(options);
     }
@@ -1791,7 +1802,7 @@ public:
     // set_engine_thread_count）后各项真正并行；parallelFor的嵌套守卫
     // 会让各项内部的并行阶段自动退化为串行，避免线程超订。
     std::vector<PyDeckRecommendResult> recommend_batch(const std::vector<PyDeckRecommendOptions>& pyoptionsList) {
-        std::shared_lock<std::shared_mutex> lock(*engine_mutex);
+        std::shared_lock<std::shared_mutex> lock(engine_mutex);
         std::vector<DeckRecommendOptions> optionsList{};
         optionsList.reserve(pyoptionsList.size());
         for (std::size_t i = 0; i < pyoptionsList.size(); ++i) {

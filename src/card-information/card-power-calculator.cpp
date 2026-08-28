@@ -140,7 +140,6 @@ int CardPowerCalculator::getAreaItemBonusPower(const std::vector<AreaItemLevel> 
 
 int CardPowerCalculator::getCharacterBonusPower(const BasePower &basePower, int characterId)
 {
-    auto& characterRanks = dataProvider.masterData->characterRanks;
     auto& userCharacters = dataProvider.userData->userCharacters;
 
     auto userCharacter = findOrThrow(userCharacters, [&](auto& it) {

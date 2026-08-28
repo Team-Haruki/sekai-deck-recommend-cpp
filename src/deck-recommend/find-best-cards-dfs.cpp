@@ -747,7 +747,7 @@ void BaseDeckRecommend::findBestCardsDFSImpl(
                 if (lessThan) continue;
             } else {
                 // 计算实效或综合力最优时性能够用，使用较温和的优化
-                if (lessThan && deckCards.size() != member - 1) continue;
+                if (lessThan && static_cast<int>(deckCards.size()) != member - 1) continue;
             }
         }
         preCard = &card;

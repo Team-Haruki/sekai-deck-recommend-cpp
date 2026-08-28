@@ -12,10 +12,12 @@ tied-optimum compositions nondeterministic.
 
 RL stage budgets are a quality floor; never trim them for speed.
 """
+import argparse
 import os
 import subprocess
 import sys
 import time
+from pathlib import Path
 
 import common
 
@@ -56,16 +58,35 @@ def run_calls(calls, use_ref):
             print(f'{name} call={i} val={top_value(kw, r.decks[0])} ms={ms:.0f}', flush=True)
 
 
-if __name__ == '__main__':
-    args = sys.argv[1:]
-    use_ref = '--ref' in args
-    calls = int(args[args.index('--calls') + 1]) if '--calls' in args else 5
-    processes = int(args[args.index('--processes') + 1]) if '--processes' in args else 0
+def bounded_count(value):
+    parsed = int(value)
+    if parsed < 1 or parsed > 100:
+        raise argparse.ArgumentTypeError('must be between 1 and 100')
+    return parsed
+
+
+def main(argv=None):
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--ref', action='store_true')
+    parser.add_argument('--calls', type=bounded_count, default=5)
+    parser.add_argument('--processes', type=bounded_count, default=1)
+    args = parser.parse_args(argv)
+    use_ref = args.ref
+    calls = args.calls
+    processes = args.processes
     if os.environ.get('DECK_RL_SEED_CACHE_DISABLE') != '1' and not use_ref:
         print('[warn] DECK_RL_SEED_CACHE_DISABLE=1 not set; persistent seed cache may leak between runs', file=sys.stderr)
     if processes > 1:
-        child_args = [a for a in args if a not in ('--processes', str(processes))]
+        script = Path(__file__).resolve(strict=True)
+        child_args = ['--calls', str(calls)]
+        if use_ref:
+            child_args.append('--ref')
         for _ in range(processes):
-            subprocess.run([sys.executable, os.path.abspath(__file__), *child_args], check=True)
+            subprocess.run([sys.executable, str(script), *child_args], check=True)
     else:
         run_calls(calls, use_ref)
+    return 0
+
+
+if __name__ == '__main__':
+    sys.exit(main())

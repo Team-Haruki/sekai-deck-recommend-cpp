@@ -23,7 +23,7 @@ Score MysekaiEventCalculator::getDeckMysekaiEventPoint(const DeckDetail &deckDet
 
 ScoreFunction MysekaiEventCalculator::getMysekaiEventPointFunction()
 {
-    return [this] (const MusicMeta &musicMeta, const DeckDetail &deckDetail) {
+    return [this] (const MusicMeta &, const DeckDetail &deckDetail) {
         return this->getDeckMysekaiEventPoint(deckDetail);
     };
 }

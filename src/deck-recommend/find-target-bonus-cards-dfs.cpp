@@ -152,8 +152,8 @@ void BaseDeckRecommend::findTargetBonusCardsDFS(
     const std::vector<CardDetail> &cardDetails, 
     const std::function<Score(const DeckDetail &)> &scoreFunc, 
     RecommendCalcInfo &dfsInfo, 
-    int limit, 
-    int member, 
+    int,
+    int,
     std::optional<int> eventType, 
     std::optional<int> eventId
 )
