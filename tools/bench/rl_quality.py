@@ -13,11 +13,10 @@ tied-optimum compositions nondeterministic.
 RL stage budgets are a quality floor; never trim them for speed.
 """
 import argparse
+import multiprocessing
 import os
-import subprocess
 import sys
 import time
-from pathlib import Path
 
 import common
 
@@ -65,6 +64,14 @@ def bounded_count(value):
     return parsed
 
 
+def run_in_fresh_process(calls, use_ref):
+    process = multiprocessing.get_context('spawn').Process(target=run_calls, args=(calls, use_ref))
+    process.start()
+    process.join()
+    if process.exitcode != 0:
+        raise RuntimeError(f'quality worker exited with status {process.exitcode}')
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--ref', action='store_true')
@@ -77,12 +84,8 @@ def main(argv=None):
     if os.environ.get('DECK_RL_SEED_CACHE_DISABLE') != '1' and not use_ref:
         print('[warn] DECK_RL_SEED_CACHE_DISABLE=1 not set; persistent seed cache may leak between runs', file=sys.stderr)
     if processes > 1:
-        script = Path(__file__).resolve(strict=True)
-        child_args = ['--calls', str(calls)]
-        if use_ref:
-            child_args.append('--ref')
         for _ in range(processes):
-            subprocess.run([sys.executable, str(script), *child_args], check=True)
+            run_in_fresh_process(calls, use_ref)
     else:
         run_calls(calls, use_ref)
     return 0

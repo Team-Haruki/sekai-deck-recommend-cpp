@@ -22,6 +22,7 @@ list(REMOVE_ITEM SRC_FILES
 # 浏览器端引擎内并行（需要站点开启COOP/COEP以获得SharedArrayBuffer）；
 # 默认OFF，产物与历史一致
 option(SEKAI_WASM_THREADS "Build wasm with pthreads for in-engine parallelism" OFF)
+option(SEKAI_ENABLE_COVERAGE "Instrument the native Python module for coverage" OFF)
 
 if (EMSCRIPTEN)
     add_executable(sekai_deck_recommend
@@ -68,6 +69,15 @@ else()
         ${YYJSON_SOURCE}
         "${PROJECT_SOURCE_DIR}/src/sekai_deck_recommend.cpp"
     )
+
+    if (SEKAI_ENABLE_COVERAGE)
+        if (CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+            target_compile_options(sekai_deck_recommend PRIVATE --coverage -O0 -g)
+            target_link_options(sekai_deck_recommend PRIVATE --coverage)
+        else()
+            message(FATAL_ERROR "SEKAI_ENABLE_COVERAGE requires GCC or Clang")
+        endif()
+    endif()
 
     if (MSVC)
         target_compile_options(sekai_deck_recommend PRIVATE

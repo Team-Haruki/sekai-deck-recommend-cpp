@@ -11,47 +11,50 @@ speed) are compared on top score only.
 import argparse
 import json
 import sys
-import tempfile
 import time
 from pathlib import Path
 
 import common
 
 
-SAFE_CLI_ROOTS = (
-    Path(common.REPO_ROOT).resolve(),
-    Path(tempfile.gettempdir()).resolve(),
-    Path('/tmp').resolve(),
-)
+SAFE_CLI_ROOT = Path(common.REPO_ROOT).resolve()
 
 
-def safe_cli_file(raw_path, *, must_exist):
-    """Resolve a CLI file path inside the workspace or the system temp dir."""
+def resolve_cli_path(raw_path):
     if not raw_path:
         raise ValueError('path must not be empty')
     path = Path(raw_path).expanduser()
-    if not path.is_absolute():
-        path = Path.cwd() / path
-    if must_exist:
-        resolved = path.resolve(strict=True)
-        if not resolved.is_file():
-            raise ValueError(f'path is not a file: {raw_path}')
-    else:
-        parent = path.parent.resolve(strict=True)
-        if not parent.is_dir():
-            raise ValueError(f'parent is not a directory: {path.parent}')
-        resolved = parent / path.name
-        if resolved.is_symlink():
-            resolved = resolved.resolve(strict=True)
-        if resolved.exists():
-            if not resolved.is_file():
-                raise ValueError(f'output path is not a file: {raw_path}')
-        elif resolved.is_symlink():
-            raise ValueError(f'output path is a broken symlink: {raw_path}')
-    if not any(resolved == root or root in resolved.parents for root in SAFE_CLI_ROOTS):
-        allowed = ', '.join(str(root) for root in SAFE_CLI_ROOTS)
-        raise ValueError(f'path must be inside one of: {allowed}')
+    return path if path.is_absolute() else Path.cwd() / path
+
+
+def resolve_input_file(path, raw_path):
+    resolved = path.resolve(strict=True)
+    if not resolved.is_file():
+        raise ValueError(f'path is not a file: {raw_path}')
     return resolved
+
+
+def resolve_output_file(path, raw_path):
+    parent = path.parent.resolve(strict=True)
+    resolved = parent / path.name
+    if resolved.is_symlink():
+        resolved = resolved.resolve(strict=True)
+    if resolved.exists() and not resolved.is_file():
+        raise ValueError(f'output path is not a file: {raw_path}')
+    return resolved
+
+
+def ensure_workspace_file(path):
+    if not path.is_relative_to(SAFE_CLI_ROOT):
+        raise ValueError(f'path must be inside the repository: {SAFE_CLI_ROOT}')
+    return path
+
+
+def safe_cli_file(raw_path, *, must_exist):
+    """Resolve a CLI file path without allowing access outside the repository."""
+    path = resolve_cli_path(raw_path)
+    resolved = resolve_input_file(path, raw_path) if must_exist else resolve_output_file(path, raw_path)
+    return ensure_workspace_file(resolved)
 
 
 def scenarios():

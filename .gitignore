@@ -1,5 +1,8 @@
 build/
+build-sonar/
 build_wasm/
+coverage-reports/
+.coverage
 sandbox/
 .vscode/
 npm/haruki-sekai-deck-recommend-cpp/sekai_deck_recommend.js

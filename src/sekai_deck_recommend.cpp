@@ -869,6 +869,29 @@ class SekaiDeckRecommend {
         DataProvider dataProvider = {};
     };
 
+    struct RegionDataSnapshot {
+        std::shared_ptr<MasterData> masterData;
+        std::shared_ptr<MusicMetas> musicMetas;
+    };
+
+    RegionDataSnapshot snapshot_region_data(
+        Region region,
+        const std::string& regionName,
+        bool requireMusicMetas
+    ) const {
+        std::shared_lock<std::shared_mutex> lock(engine_mutex);
+        auto masterDataIt = region_masterdata.find(region);
+        if (masterDataIt == region_masterdata.end())
+            throw std::invalid_argument("Master data not found for region: " + regionName);
+        auto musicMetasIt = region_musicmetas.find(region);
+        if (requireMusicMetas && musicMetasIt == region_musicmetas.end())
+            throw std::invalid_argument("Music metas not found for region: " + regionName);
+        return RegionDataSnapshot{
+            masterDataIt->second,
+            musicMetasIt == region_musicmetas.end() ? std::shared_ptr<MusicMetas>{} : musicMetasIt->second,
+        };
+    }
+
     Region get_region_from_py(const std::optional<std::string>& regionOption) const {
         if (!regionOption.has_value())
             throw std::invalid_argument("region is required.");
@@ -899,15 +922,12 @@ class SekaiDeckRecommend {
         bool requireMusicMetas
     ) const {
         Region region = get_region_from_py(pyoptions.region);
-        if (!region_masterdata.count(region))
-            throw std::invalid_argument("Master data not found for region: " + pyoptions.region.value());
-        if (requireMusicMetas && !region_musicmetas.count(region))
-            throw std::invalid_argument("Music metas not found for region: " + pyoptions.region.value());
+        auto regionData = snapshot_region_data(region, pyoptions.region.value(), requireMusicMetas);
         return DataProvider{
             region,
-            region_masterdata.at(region),
+            regionData.masterData,
             load_user_data_from_py(pyoptions, requireUserData),
-            region_musicmetas.count(region) ? region_musicmetas.at(region) : std::shared_ptr<MusicMetas>{}
+            regionData.musicMetas,
         };
     }
 
@@ -970,20 +990,14 @@ class SekaiDeckRecommend {
             throw std::invalid_argument("Either user_data / user_data_file_path / user_data_str is required.");
 
         // region master data and music metas
-        if (!region_masterdata.count(region))
-            throw std::invalid_argument("Master data not found for region: " + pyoptions.region.value());
-        auto masterdata = region_masterdata[region];
-
-        if (!region_musicmetas.count(region))
-            throw std::invalid_argument("Music metas not found for region: " + pyoptions.region.value());
-        auto musicmetas = region_musicmetas[region];
+        auto regionData = snapshot_region_data(region, pyoptions.region.value(), true);
 
         // dataProvider
         options.dataProvider = DataProvider{
             region,
-            masterdata,
+            regionData.masterData,
             userdata,
-            musicmetas
+            regionData.musicMetas
         };
 
         // liveType
@@ -1562,14 +1576,8 @@ public:
     }
 
     std::vector<PyRecommendSupportDeckCard> get_world_bloom_support_cards(const PyDeckRecommendOptions& pyoptions) const {
-        std::shared_lock<std::shared_mutex> lock(engine_mutex);
-        if (!pyoptions.region.has_value())
-            throw std::invalid_argument("region is required.");
-        if (!REGION_ENUM_MAP.count(pyoptions.region.value()))
-            throw std::invalid_argument("Invalid region: " + pyoptions.region.value());
-        Region region = REGION_ENUM_MAP.at(pyoptions.region.value());
-        if (!region_masterdata.count(region))
-            throw std::invalid_argument("Master data not found for region: " + pyoptions.region.value());
+        Region region = get_region_from_py(pyoptions.region);
+        auto regionData = snapshot_region_data(region, pyoptions.region.value(), false);
 
         auto userdata = std::make_shared<UserData>();
         if (pyoptions.user_data.has_value())
@@ -1591,14 +1599,14 @@ public:
             if (turn == 3) {
                 if (!pyoptions.world_bloom_character_id.has_value())
                     throw std::invalid_argument("world_bloom_character_id is required for world bloom 3 fake event.");
-                int part = region_masterdata[region]->getWorldBloom3PartByCharacterId(pyoptions.world_bloom_character_id.value());
-                eventId = region_masterdata[region]->getWorldBloomFakeEventId(turn, part);
+                int part = regionData.masterData->getWorldBloom3PartByCharacterId(pyoptions.world_bloom_character_id.value());
+                eventId = regionData.masterData->getWorldBloomFakeEventId(turn, part);
             } else {
                 if (!pyoptions.event_unit.has_value())
                     throw std::invalid_argument("event_unit is required for world bloom fake event.");
                 if (!VALID_UNIT_TYPES.count(pyoptions.event_unit.value()))
                     throw std::invalid_argument("Invalid event unit: " + pyoptions.event_unit.value());
-                eventId = region_masterdata[region]->getWorldBloomFakeEventId(
+                eventId = regionData.masterData->getWorldBloomFakeEventId(
                     turn,
                     mapEnum(EnumMap::unit, pyoptions.event_unit.value())
                 );
@@ -1620,9 +1628,9 @@ public:
 
         DataProvider dataProvider{
             region,
-            region_masterdata[region],
+            regionData.masterData,
             userdata,
-            region_musicmetas.count(region) ? region_musicmetas.at(region) : std::shared_ptr<MusicMetas>{}
+            regionData.musicMetas,
         };
         dataProvider.init();
 
@@ -1659,7 +1667,6 @@ public:
         const PyDeckRecommendOptions& pyoptions,
         const std::vector<int>& card_ids
     ) const {
-        std::shared_lock<std::shared_mutex> lock(engine_mutex);
         auto dataProvider = construct_data_provider_from_py(pyoptions, true, false);
         dataProvider.init();
         AreaItemRecommend recommend(dataProvider);
@@ -1676,7 +1683,6 @@ public:
         const PyDeckRecommendOptions& pyoptions,
         const PyRecommendDeck& deck
     ) const {
-        std::shared_lock<std::shared_mutex> lock(engine_mutex);
         auto dataProvider = construct_data_provider_from_py(pyoptions, false, true);
         int liveType = get_live_type_from_py(pyoptions);
         int eventType = get_event_type_from_py(pyoptions, dataProvider);
@@ -1720,20 +1726,18 @@ public:
         int multi_sum_power = 0,
         const std::optional<std::string>& fever_music_score_json = std::nullopt
     ) const {
-        std::shared_lock<std::shared_mutex> lock(engine_mutex);
         if (!REGION_ENUM_MAP.count(region))
             throw std::invalid_argument("Invalid region: " + region);
         Region regionEnum = REGION_ENUM_MAP.at(region);
-        if (!region_masterdata.count(regionEnum))
-            throw std::invalid_argument("Master data not found for region: " + region);
+        auto regionData = snapshot_region_data(regionEnum, region, false);
         if (!VALID_LIVE_TYPES.count(live_type) || live_type == "mysekai")
             throw std::invalid_argument("Invalid live type: " + live_type);
 
         DataProvider dataProvider{
             regionEnum,
-            region_masterdata.at(regionEnum),
+            regionData.masterData,
             std::make_shared<UserData>(),
-            region_musicmetas.count(regionEnum) ? region_musicmetas.at(regionEnum) : std::shared_ptr<MusicMetas>{}
+            regionData.musicMetas,
         };
         auto musicScore = MusicScore::fromJsonString(music_score_json);
         std::optional<MusicScore> feverMusicScore = std::nullopt;
@@ -1752,7 +1756,6 @@ public:
         return live_exact_detail_to_py(detail);
     }
 
-    // 推荐核心（调用方需持有engine_mutex共享锁）
     PyDeckRecommendResult run_recommend(DeckRecommendOptions& options) {
         // cost_ms只计算法搜索本身，不含options构建与结果转换
         auto searchStart = std::chrono::steady_clock::now();
@@ -1792,7 +1795,6 @@ public:
 
     // 推荐卡组
     PyDeckRecommendResult recommend(const PyDeckRecommendOptions& pyoptions) {
-        std::shared_lock<std::shared_mutex> lock(engine_mutex);
         auto options = construct_options_from_py(pyoptions);
         return run_recommend(options);
     }
@@ -1802,7 +1804,6 @@ public:
     // set_engine_thread_count）后各项真正并行；parallelFor的嵌套守卫
     // 会让各项内部的并行阶段自动退化为串行，避免线程超订。
     std::vector<PyDeckRecommendResult> recommend_batch(const std::vector<PyDeckRecommendOptions>& pyoptionsList) {
-        std::shared_lock<std::shared_mutex> lock(engine_mutex);
         std::vector<DeckRecommendOptions> optionsList{};
         optionsList.reserve(pyoptionsList.size());
         for (std::size_t i = 0; i < pyoptionsList.size(); ++i) {
