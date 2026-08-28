@@ -47,8 +47,9 @@ live automation behavior downstream.
 - `data/`: static data required by the engine. Do not change unless the task
   is explicitly about static data. `data/rl_seed_cache.tsv` is a
   runtime-generated RL warm-start cache (written when `DECK_DATA_DIR` or
-  `DECK_RL_SEED_CACHE_FILE` is set); it is gitignored and must never be
-  committed.
+  `DECK_RL_SEED_CACHE_FILE` is set). Only the default
+  `data/rl_seed_cache.tsv` path is gitignored; add any custom in-repository
+  cache path to `.gitignore`, and never commit generated cache files.
 
 ## Build & Run
 

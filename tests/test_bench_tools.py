@@ -143,6 +143,36 @@ class RegressHelpersTests(unittest.TestCase):
         self.assertEqual(payload["results"]["success"][0]["score"], 10)
         self.assertEqual(payload["results"]["failure"], {"error": "bad"})
 
+    def test_run_replaces_racing_symlink_without_overwriting_target(self):
+        target = self.root / "target.json"
+        target.write_text("do not overwrite", encoding="utf-8")
+        output = regress.safe_cli_file(self.root / "results.json", must_exist=False)
+        output.symlink_to(target)
+        engine = mock.Mock()
+        engine.recommend.return_value = types.SimpleNamespace(decks=[])
+        with (
+            mock.patch.object(regress.common, "make_engine", return_value=(object(), engine, {})),
+            mock.patch.object(regress.common, "fixed_seeds", side_effect=lambda _m, options: options),
+            mock.patch.object(regress.common, "base_options", return_value=types.SimpleNamespace()),
+            mock.patch.object(regress, "scenarios", return_value={"case": {"target": "score"}}),
+            redirect_stdout(io.StringIO()),
+        ):
+            regress.run(output)
+        self.assertEqual(target.read_text(encoding="utf-8"), "do not overwrite")
+        self.assertFalse(output.is_symlink())
+        self.assertEqual(__import__("json").loads(output.read_text(encoding="utf-8"))["results"], {"case": []})
+
+    def test_atomic_writer_cleans_up_when_publish_fails(self):
+        output = self.root / "results.json"
+        output.write_text("original", encoding="utf-8")
+        with (
+            mock.patch.object(regress.os, "replace", side_effect=OSError("publish failed")),
+            self.assertRaisesRegex(OSError, "publish failed"),
+        ):
+            regress.write_json_atomically(output, {"result": "new"})
+        self.assertEqual(output.read_text(encoding="utf-8"), "original")
+        self.assertEqual(list(self.root.glob(".results.json.*.tmp")), [])
+
     def test_compare_covers_exact_sanity_and_mismatch(self):
         baseline = self.root / "baseline.json"
         after = self.root / "after.json"

@@ -10,7 +10,9 @@ speed) are compared on top score only.
 """
 import argparse
 import json
+import os
 import sys
+import tempfile
 import time
 from pathlib import Path
 
@@ -55,6 +57,27 @@ def safe_cli_file(raw_path, *, must_exist):
     path = resolve_cli_path(raw_path)
     resolved = resolve_input_file(path, raw_path) if must_exist else resolve_output_file(path, raw_path)
     return ensure_workspace_file(resolved)
+
+
+def write_json_atomically(out_path, payload):
+    """Write JSON through a private sibling file, then replace the destination."""
+    pending_path = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode='w',
+            encoding='utf-8',
+            dir=out_path.parent,
+            prefix=f'.{out_path.name}.',
+            suffix='.tmp',
+            delete=False,
+        ) as pending_file:
+            pending_path = Path(pending_file.name)
+            json.dump(payload, pending_file, indent=1, sort_keys=True)
+        os.replace(pending_path, out_path)
+        pending_path = None
+    finally:
+        if pending_path is not None:
+            pending_path.unlink(missing_ok=True)
 
 
 def scenarios():
@@ -147,8 +170,7 @@ def run(out_path, filt=None):
             timings[name] = -1
         top = results[name][0]['score'] if isinstance(results[name], list) and results[name] else 'ERR'
         print(f'{name:28s} {timings[name]:9.1f}ms top={top}', flush=True)
-    with out_path.open('w', encoding='utf-8') as out_file:
-        json.dump({'results': results, 'timings': timings}, out_file, indent=1, sort_keys=True)
+    write_json_atomically(out_path, {'results': results, 'timings': timings})
 
 
 def compare(base_path, after_path):
