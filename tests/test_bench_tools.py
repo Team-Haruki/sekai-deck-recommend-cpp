@@ -1,3 +1,4 @@
+import argparse
 import io
 import os
 import sys
@@ -214,7 +215,7 @@ class RlQualityTests(unittest.TestCase):
         self.assertEqual(rl_quality.bounded_count("1"), 1)
         self.assertEqual(rl_quality.bounded_count("100"), 100)
         for value in ("0", "101"):
-            with self.assertRaises(Exception):
+            with self.assertRaises(argparse.ArgumentTypeError):
                 rl_quality.bounded_count(value)
 
     def test_top_value(self):
