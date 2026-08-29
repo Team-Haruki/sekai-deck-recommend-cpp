@@ -30,8 +30,6 @@ struct RecommendDeck : DeckDetail {
     int score;
     // 游玩歌曲分数
     int liveScore;
-    // 多人技能加成（实效）
-    double multiLiveScoreUp;
     // 优化目标值（不一定是分数）
     double targetValue;
     // Mysekai活动点数

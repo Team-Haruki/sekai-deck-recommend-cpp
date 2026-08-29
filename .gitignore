@@ -1,5 +1,8 @@
 build/
+build-sonar/
 build_wasm/
+coverage-reports/
+.coverage
 sandbox/
 .vscode/
 npm/haruki-sekai-deck-recommend-cpp/sekai_deck_recommend.js
@@ -9,6 +12,7 @@ __pycache__/
 .idea/
 collections.suite.json
 suite.json
+data/rl_seed_cache.tsv
 uv.lock
 haruki-sekai-master/
 haruki-sekai-sc-master/

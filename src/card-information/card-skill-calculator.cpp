@@ -123,7 +123,7 @@ SkillDetail CardSkillCalculator::getSkillDetail(const UserCard &userCard, const 
     return ret;
 }
 
-Skill CardSkillCalculator::getSkill(const UserCard &userCard, const Card &card, bool afterTraining)
+Skill CardSkillCalculator::getSkill(const UserCard &, const Card &card, bool afterTraining)
 {
     int skillId = card.skillId;
     // 有觉醒后特殊技能且当前选择的是觉醒后

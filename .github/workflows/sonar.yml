@@ -20,10 +20,42 @@ jobs:
     name: Analyze
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
-        uses: actions/checkout@v7
+      - name: Checkout source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           fetch-depth: 0
+          submodules: recursive
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        with:
+          python-version: "3.11"
+
+      - name: Install coverage tools
+        run: "python -m pip install --only-binary :all: coverage==7.15.3 gcovr==8.6"
+
+      - name: Build instrumented native module
+        run: |
+          cmake -S . -B build-sonar \
+            -DCMAKE_BUILD_TYPE=Debug \
+            -DSEKAI_ENABLE_COVERAGE=ON
+          cmake --build build-sonar --parallel 2
+
+      - name: Run tests and collect coverage
+        env:
+          SEKAI_BINDING_DIR: ${{ github.workspace }}/build-sonar
+        run: |
+          mkdir -p coverage-reports
+          python -m coverage run --source=tools/bench \
+            -m unittest discover -s tests -p 'test_bench_tools.py'
+          python -m coverage xml -o coverage-reports/python-coverage.xml
+          python -m unittest discover -s tests -p 'test_binding_smoke.py'
+          gcovr --root . --filter 'src/' \
+            --exclude 'src/sekai_deck_recommend_wasm.cpp' \
+            --sonarqube-metric line \
+            --sonarqube coverage-reports/cpp-coverage.xml \
+            --print-summary build-sonar
 
       - name: SonarQube scan
         uses: SonarSource/sonarqube-scan-action@7006c4492b2e0ee0f816d36501671557c97f5995 # v8.1.0

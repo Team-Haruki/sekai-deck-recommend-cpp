@@ -5,6 +5,7 @@ build-backend = "scikit_build_core.build"
 [project]
 name = "haruki-sekai-deck-recommend-cpp"
 version = "0.3.4"
+requires-python = ">=3.10"
 
 [tool.scikit-build]
 build-dir = "build/{wheel_tag}"

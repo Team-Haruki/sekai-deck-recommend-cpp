@@ -83,7 +83,7 @@ void LiveCalculator::getSortedSkillDetails(
         // 按照顺序放入技能
         std::vector<DeckCardSkillDetail> orderedSkills{};
         for (const auto &index : specificSkillOrder.value()) {
-            if (index < 0 || index >= skills.size()) 
+            if (index < 0 || index >= static_cast<int>(skills.size()))
                 throw std::runtime_error("specificSkillOrder index out of range: " + std::to_string(index));
             orderedSkills.push_back(skills[index]);
         }

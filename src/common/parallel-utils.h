@@ -202,8 +202,8 @@ inline int engineThreadCount() {
 #ifdef SEKAI_ENGINE_SINGLE_THREADED
     return 1;
 #else
-    int override = engine_parallel_detail::threadOverride().load();
-    int requested = override;
+    int threadOverride = engine_parallel_detail::threadOverride().load();
+    int requested = threadOverride;
     if (requested <= 0) {
         const char* env = std::getenv("DECK_ENGINE_THREADS");
         if (env == nullptr || *env == '\0') {

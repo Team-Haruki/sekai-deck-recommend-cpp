@@ -142,6 +142,11 @@ npm pack
   environment variable or `set_engine_thread_count()` (default is fully
   serial and bit-identical to historical behavior). The Python `recommend`
   releases the GIL, so calls can also run concurrently from Python threads.
+- The RL algorithm keeps cross-request warm starts in memory and can persist
+  them across processes: set `DECK_RL_SEED_CACHE_FILE=<path>` (or
+  `DECK_DATA_DIR=<dir>`, which stores `rl_seed_cache.tsv` inside it) to
+  enable the on-disk cache, and `DECK_RL_SEED_CACHE_DISABLE=1` to turn the
+  cache off entirely (used by the quality benchmarks).
 - A pthreads wasm variant can be built with `-DSEKAI_WASM_THREADS=ON`
   (requires COOP/COEP headers for SharedArrayBuffer).
 - Local benchmark / regression tooling lives in `tools/bench/` (see its

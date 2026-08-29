@@ -45,7 +45,11 @@ live automation behavior downstream.
   userdata parsing, and wasm JSON-in / JSON-out binding payloads.
 - `sekai_deck_recommend.cpp` / `.pyi`: Python binding surface.
 - `data/`: static data required by the engine. Do not change unless the task
-  is explicitly about static data.
+  is explicitly about static data. `data/rl_seed_cache.tsv` is a
+  runtime-generated RL warm-start cache (written when `DECK_DATA_DIR` or
+  `DECK_RL_SEED_CACHE_FILE` is set). Only the default
+  `data/rl_seed_cache.tsv` path is gitignored; add any custom in-repository
+  cache path to `.gitignore`, and never commit generated cache files.
 
 ## Build & Run
 
@@ -208,8 +212,9 @@ Rules:
 
 Suggested values per agent:
 
-- Claude (any 4.x): `Co-authored-by: Claude Opus 4.7 <noreply@anthropic.com>`
-  (substitute the actual model, e.g. `Claude Sonnet 4.6`, `Claude Haiku 4.5`)
+- Claude: `Co-authored-by: Claude <Model> <noreply@anthropic.com>` with the
+  actual model name (e.g. `Claude Fable 5`, `Claude Opus 4.7`,
+  `Claude Haiku 4.5`)
 - Codex: `Co-authored-by: Codex <noreply@openai.com>`
 - Copilot: `Co-authored-by: Copilot <223556219+Copilot@users.noreply.github.com>`
 
@@ -227,5 +232,5 @@ Agent-authored commit example:
 ```text
 [Docs] Add agent commit guidelines
 
-Co-authored-by: Claude Opus 4.7 <noreply@anthropic.com>
+Co-authored-by: Claude Fable 5 <noreply@anthropic.com>
 ```

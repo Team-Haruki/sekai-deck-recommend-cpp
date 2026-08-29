@@ -3174,9 +3174,10 @@ std::vector<RecommendDeck> BaseDeckRecommend::recommendHighScoreDeck(
                 int added = 0;
                 int addLimit = std::max(maxSeedCount * 2, 32);
                 for (const auto& [score, hash, deck] : candidates) {
-                    if (int(seeds.size()) >= seedBuildLimit || added++ >= addLimit) {
+                    if (int(seeds.size()) >= seedBuildLimit || added >= addLimit) {
                         break;
                     }
+                    ++added;
                     appendSeed(deck);
                 }
             };
@@ -3193,9 +3194,10 @@ std::vector<RecommendDeck> BaseDeckRecommend::recommendHighScoreDeck(
             int usedUnits = 0;
             int maxUnits = requireDistinctAttrs ? 8 : 5;
             for (const auto& [unitScore, unit] : unitScores) {
-                if (int(seeds.size()) >= seedBuildLimit || usedUnits++ >= maxUnits) {
+                if (int(seeds.size()) >= seedBuildLimit || usedUnits >= maxUnits) {
                     break;
                 }
+                ++usedUnits;
                 if (unit == 0) {
                     runBeamForRankedCards(allRanked, false);
                     continue;
@@ -4257,7 +4259,7 @@ std::vector<RecommendDeck> BaseDeckRecommend::recommendHighScoreDeck(
                 config.timeout_ms,
                 resolveBudgetMs(
                     config.timeout_ms,
-                    config.filterOtherUnit ? 0.08 : 0.08,
+                    0.08,
                     config.filterOtherUnit ? 45 : 40,
                     config.filterOtherUnit ? 170 : 160
                 )
@@ -4276,7 +4278,7 @@ std::vector<RecommendDeck> BaseDeckRecommend::recommendHighScoreDeck(
             );
             gaRefineConfig.gaParentSize = std::min(gaRefineConfig.gaParentSize, std::max(80, gaRefineConfig.gaPopSize / 5));
             gaRefineConfig.gaEliteSize = std::min(gaRefineConfig.gaEliteSize, std::max(12, gaRefineConfig.gaPopSize / 25));
-            gaRefineConfig.gaMaxIter = std::min(gaRefineConfig.gaMaxIter, config.filterOtherUnit ? 44 : 44);
+            gaRefineConfig.gaMaxIter = std::min(gaRefineConfig.gaMaxIter, 44);
             gaRefineConfig.gaMaxIterNoImprove = std::min(gaRefineConfig.gaMaxIterNoImprove, 3);
             runGaSearch(gaRefineConfig, gaRefineCards, gaRefineInfo, gaSeedDecks.empty() ? nullptr : &gaSeedDecks);
             mergeCalcInfo(totalInfo, gaRefineInfo);
