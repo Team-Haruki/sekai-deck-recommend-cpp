@@ -4,7 +4,7 @@
 #include "card-priority/card-priority-filter.h"
 #include "common/collection-utils.h"
 
-inline std::vector<CardPriority> bloomCardPriorities = {
+inline const std::vector<CardPriority> bloomCardPriorities = {
     CardPriority{
         .eventBonus = 25 + 25, // 同队 5破四星
         .cardRarityType = Enums::CardRarityType::rarity_4,

@@ -40,7 +40,10 @@ uint64_t BaseDeckRecommend::calcDeckHash(const std::vector<const CardDetail*>& d
 
 namespace {
 
-std::atomic<std::uint64_t> persistentCacheTempSequence{0};
+std::atomic<std::uint64_t>& persistentCacheTempSequence() {
+    static std::atomic<std::uint64_t> sequence{0};
+    return sequence;
+}
 
 bool applyFixedCardOrder(
     std::vector<const CardDetail*>& deck,
@@ -83,7 +86,7 @@ std::string makePersistentCacheTempPath(const std::string& path) {
     return path + ".tmp."
         + std::to_string(processId) + "."
         + std::to_string(nonce) + "."
-        + std::to_string(persistentCacheTempSequence.fetch_add(1, std::memory_order_relaxed));
+        + std::to_string(persistentCacheTempSequence().fetch_add(1, std::memory_order_relaxed));
 }
 
 bool replacePersistentCacheFile(const std::string& pendingPath, const std::string& path) {

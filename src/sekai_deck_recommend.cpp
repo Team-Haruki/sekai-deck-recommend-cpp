@@ -1534,6 +1534,11 @@ public:
         region_musicmetas = other.region_musicmetas;
     }
 
+    SekaiDeckRecommend& operator=(const SekaiDeckRecommend&) = delete;
+    SekaiDeckRecommend(SekaiDeckRecommend&&) = delete;
+    SekaiDeckRecommend& operator=(SekaiDeckRecommend&&) = delete;
+    ~SekaiDeckRecommend() = default;
+
     // 从指定目录更新区服masterdata数据
     void update_masterdata(const std::string& base_dir, const std::string& region) {
         std::unique_lock<std::shared_mutex> lock(engine_mutex);

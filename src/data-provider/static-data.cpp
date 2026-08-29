@@ -1,18 +1,37 @@
 #include "static-data.h"
 
-std::string staticDataDir = "./data";
+#include <mutex>
+
+namespace {
+
+std::string& staticDataDirStorage()
+{
+    static std::string path = "./data";
+    return path;
+}
+
+std::mutex& staticDataDirMutex()
+{
+    static std::mutex mutex;
+    return mutex;
+}
+
+} // namespace
 
 void setStaticDataDir(const std::string &path)
 {
-    staticDataDir = path;
+    std::lock_guard<std::mutex> lock(staticDataDirMutex());
+    staticDataDirStorage() = path;
 }
 
 std::string getStaticDataDir()
 {
-    return staticDataDir;
+    std::lock_guard<std::mutex> lock(staticDataDirMutex());
+    return staticDataDirStorage();
 }
 
 std::string getStaticDataFilePath(const std::string &filename)
 {
-    return staticDataDir + "/" + filename;
+    std::lock_guard<std::mutex> lock(staticDataDirMutex());
+    return staticDataDirStorage() + "/" + filename;
 }

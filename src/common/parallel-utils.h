@@ -26,7 +26,10 @@ inline std::atomic<int>& threadOverride() {
     static std::atomic<int> value{0}; // 0 = 未设置，走环境变量
     return value;
 }
-inline thread_local bool insideParallelRegion = false;
+inline bool& insideParallelRegion() {
+    static thread_local bool value = false;
+    return value;
+}
 
 #ifndef SEKAI_ENGINE_SINGLE_THREADED
 
@@ -114,7 +117,7 @@ private:
     }
 
     void workerLoop() {
-        insideParallelRegion = true;
+        insideParallelRegion() = true;
         uint64_t seenGeneration = 0;
         while (true) {
             {
@@ -234,7 +237,7 @@ inline void parallelFor(std::size_t count, const Fn& fn, std::size_t minTasksPer
 #else
     int threadCount = engineThreadCount();
     if (threadCount <= 1
-        || engine_parallel_detail::insideParallelRegion
+        || engine_parallel_detail::insideParallelRegion()
         || count < std::size_t(threadCount) * minTasksPerThread) {
         for (std::size_t i = 0; i < count; ++i) {
             fn(i);
@@ -242,7 +245,7 @@ inline void parallelFor(std::size_t count, const Fn& fn, std::size_t minTasksPer
         return;
     }
 
-    engine_parallel_detail::insideParallelRegion = true;
+    engine_parallel_detail::insideParallelRegion() = true;
     bool dispatched = false;
     try {
         dispatched = engine_parallel_detail::pool().tryRun(
@@ -252,10 +255,10 @@ inline void parallelFor(std::size_t count, const Fn& fn, std::size_t minTasksPer
             &fn, count, threadCount
         );
     } catch (...) {
-        engine_parallel_detail::insideParallelRegion = false;
+        engine_parallel_detail::insideParallelRegion() = false;
         throw;
     }
-    engine_parallel_detail::insideParallelRegion = false;
+    engine_parallel_detail::insideParallelRegion() = false;
     if (!dispatched) {
         for (std::size_t i = 0; i < count; ++i) {
             fn(i);
