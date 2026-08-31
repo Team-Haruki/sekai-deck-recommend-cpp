@@ -7,6 +7,26 @@
 class UserData {
 
 public:
+    UserData() = default;
+
+    UserData(const UserData& other) {
+        std::lock_guard<std::mutex> lock(other.finalChapterHonorInitMutex);
+        path = other.path;
+        userGamedata = other.userGamedata;
+        userAreas = other.userAreas;
+        userCards = other.userCards;
+        userChallengeLiveSoloDecks = other.userChallengeLiveSoloDecks;
+        userCharacters = other.userCharacters;
+        userDecks = other.userDecks;
+        userHonors = other.userHonors;
+        userMysekaiCanvases = other.userMysekaiCanvases;
+        userMysekaiFixtureGameCharacterPerformanceBonuses = other.userMysekaiFixtureGameCharacterPerformanceBonuses;
+        userMysekaiGates = other.userMysekaiGates;
+        userWorldBloomSupportDecks = other.userWorldBloomSupportDecks;
+        userCharacterFinalChapterHonorEventBonusMap = other.userCharacterFinalChapterHonorEventBonusMap;
+        finalChapterHonorInited = other.finalChapterHonorInited;
+    }
+
     std::string path;
 
     UserGameData userGamedata;
@@ -25,7 +45,7 @@ public:
     // 多个并发recommend共享同一份UserData，初始化状态必须挂在共享对象上
     //（DataProvider按值拷贝，其inited标志不跨请求共享）并加锁保护
     std::map<int, double> userCharacterFinalChapterHonorEventBonusMap;
-    std::mutex finalChapterHonorInitMutex;
+    mutable std::mutex finalChapterHonorInitMutex;
     bool finalChapterHonorInited = false;
 
     void loadFromJson(const json_view& j);

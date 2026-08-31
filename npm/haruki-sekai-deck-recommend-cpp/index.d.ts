@@ -93,6 +93,7 @@ export interface RecommendOptions {
   userDataFilePath?: string
   event_id?: number
   world_bloom_event_turn?: number
+  world_bloom_finale_turn?: number
   world_bloom_character_id?: number
   challenge_live_character_id?: number
   event_attr?: EventAttr
@@ -142,6 +143,7 @@ export interface WorldBloomSupportOptions {
   userDataFilePath?: string
   event_id?: number
   world_bloom_event_turn?: number
+  world_bloom_finale_turn?: number
   world_bloom_character_id?: number
   forcedLeaderCharacterId?: number
   event_unit?: UnitType

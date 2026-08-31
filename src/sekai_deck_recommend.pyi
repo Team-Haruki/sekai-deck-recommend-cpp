@@ -179,6 +179,7 @@ class DeckRecommendOptions:
         event_unit (str): Unit of unit-attr-specificed recommendation, only available when event_id is None. In ["light_sound", "idol", "street", "theme_park", "school_refusal", "piapro"]
         event_type (str): Event type of unit-attr-specificed/no-event recommendation, only available when event_id is None. In ["marathon", "cheerful_carnival"]
         world_bloom_event_turn (int): World bloom event turn, only available when event_id is None, In [1, 3]
+        world_bloom_finale_turn (int): Simulated World Bloom finale turn, only available when event_id is None, In [2, 3]
         world_bloom_character_id (int): World bloom character ID, only required when event is world bloom
         challenge_live_character_id (int): Challenge live character ID, only required when live is challenge live
         limit (int): Limit of returned decks, default is 10. No guarantee to return this number of decks if not enough cards
@@ -227,6 +228,7 @@ class DeckRecommendOptions:
     event_unit: Optional[str]
     event_type: Optional[str]
     world_bloom_event_turn: int
+    world_bloom_finale_turn: Optional[int]
     world_bloom_character_id: Optional[int]
     challenge_live_character_id: Optional[int]
     limit: Optional[int]
@@ -495,7 +497,7 @@ class SekaiDeckRecommend:
         """
         Get world bloom support deck cards for the specified event and character.
         Args:
-            options (DeckRecommendOptions): Options with region, user data, event_id or world_bloom_event_turn, and world_bloom_character_id.
+            options (DeckRecommendOptions): Options with region, user data, event_id, world_bloom_event_turn, or world_bloom_finale_turn, plus a leader character.
         Returns:
             List[RecommendSupportDeckCard]: Support deck cards sorted by bonus descending
         """

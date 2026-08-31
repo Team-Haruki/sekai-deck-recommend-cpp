@@ -4,7 +4,7 @@ build-backend = "scikit_build_core.build"
 
 [project]
 name = "haruki-sekai-deck-recommend-cpp"
-version = "0.3.4"
+version = "0.3.5"
 requires-python = ">=3.10"
 
 [tool.scikit-build]

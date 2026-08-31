@@ -91,11 +91,15 @@ public:
 
     int getWorldBloomFakeEventId(int worldBloomTurn, int unit) const;
 
+    int getWorldBloomFakeFinaleEventId(int worldBloomTurn) const;
+
     int getWorldBloom3PartByCharacterId(int characterId) const;
 
     int getWorldBloomEventTurn(int eventId) const;
 
     bool isWorldBloomFinale(int eventId) const;
+
+    bool isWorldBloomFakeFinale(int eventId) const;
 
     int getEventCardBonusCountLimit(int eventId) const;
 

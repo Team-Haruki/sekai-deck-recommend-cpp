@@ -144,7 +144,10 @@ CardEventBonusInfo CardEventCalculator::getCardEventBonus(
                 leaderHonorBonus = honorBonus->second;
             }
         }
-        if (leaderLimitBonus == 0.0 && eventCard != nullptr && eventId == legacyWorldBloom2FinaleEventId) {
+        if (leaderLimitBonus == 0.0
+         && eventCard != nullptr
+         && (eventId == legacyWorldBloom2FinaleEventId
+          || this->dataProvider.masterData->isWorldBloomFakeFinale(eventId))) {
             leaderLimitBonus = 20.0;
         }
         return CardEventBonusInfo{

@@ -359,6 +359,7 @@ struct PyDeckRecommendOptions {
     std::optional<std::string> event_unit;
     std::optional<std::string> event_type;
     std::optional<int> world_bloom_event_turn;
+    std::optional<int> world_bloom_finale_turn;
     std::optional<int> world_bloom_character_id;
     std::optional<int> challenge_live_character_id;
     std::optional<int> limit;
@@ -409,6 +410,8 @@ struct PyDeckRecommendOptions {
         if (event_type.has_value())            result["event_type"] = event_type.value();
         if (world_bloom_event_turn.has_value())
             result["world_bloom_event_turn"] = world_bloom_event_turn.value();
+        if (world_bloom_finale_turn.has_value())
+            result["world_bloom_finale_turn"] = world_bloom_finale_turn.value();
         if (world_bloom_character_id.has_value())
             result["world_bloom_character_id"] = world_bloom_character_id.value();
         if (challenge_live_character_id.has_value())
@@ -493,6 +496,8 @@ struct PyDeckRecommendOptions {
             options.world_bloom_character_id = dict["world_bloom_character_id"].cast<int>();
         if (dict.contains("world_bloom_event_turn"))
             options.world_bloom_event_turn = dict["world_bloom_event_turn"].cast<int>();
+        if (dict.contains("world_bloom_finale_turn"))
+            options.world_bloom_finale_turn = dict["world_bloom_finale_turn"].cast<int>();
         if (dict.contains("challenge_live_character_id"))
             options.challenge_live_character_id = dict["challenge_live_character_id"].cast<int>();
         if (dict.contains("limit"))                 options.limit = dict["limit"].cast<int>();
@@ -1031,7 +1036,14 @@ class SekaiDeckRecommend {
                     throw std::invalid_argument("Invalid event type: " + event_type);    
                 auto event_type_enum = mapEnum(EnumMap::eventType, event_type);
                 
-                if (pyoptions.world_bloom_event_turn.has_value()) {
+                if (pyoptions.world_bloom_finale_turn.has_value()) {
+                    int turn = pyoptions.world_bloom_finale_turn.value();
+                    if (turn < 2 || turn > 3)
+                        throw std::invalid_argument("Invalid world bloom finale turn: " + std::to_string(turn));
+                    options.eventId = turn == 2
+                        ? legacyWorldBloom2FinaleEventId
+                        : options.dataProvider.masterData->getWorldBloomFakeFinaleEventId(turn);
+                } else if (pyoptions.world_bloom_event_turn.has_value()) {
                     // liveType非挑战，没有传入eventId时，首先尝试模拟WL组卡
                     int turn = pyoptions.world_bloom_event_turn.value();
                     if (turn < 1 || turn > 3)
@@ -1087,9 +1099,11 @@ class SekaiDeckRecommend {
             options.worldBloomCharacterId = pyoptions.world_bloom_character_id.value();
             if (options.worldBloomCharacterId < 1 || options.worldBloomCharacterId > 26)
                 throw std::invalid_argument("Invalid world bloom character ID: " + std::to_string(options.worldBloomCharacterId));
-            findOrThrow(options.dataProvider.masterData->worldBlooms, [&](const WorldBloom& it) {
-                return it.eventId == options.eventId && it.gameCharacterId == options.worldBloomCharacterId;
-            }, "World bloom chapter not found for eventId: " + std::to_string(options.eventId) + ", characterId: " + std::to_string(options.worldBloomCharacterId));
+            if (!pyoptions.world_bloom_finale_turn.has_value()) {
+                findOrThrow(options.dataProvider.masterData->worldBlooms, [&](const WorldBloom& it) {
+                    return it.eventId == options.eventId && it.gameCharacterId == options.worldBloomCharacterId;
+                }, "World bloom chapter not found for eventId: " + std::to_string(options.eventId) + ", characterId: " + std::to_string(options.worldBloomCharacterId));
+            }
         }
 
         // config
@@ -1597,6 +1611,13 @@ public:
         int eventId = 0;
         if (pyoptions.event_id.has_value()) {
             eventId = pyoptions.event_id.value();
+        } else if (pyoptions.world_bloom_finale_turn.has_value()) {
+            int turn = pyoptions.world_bloom_finale_turn.value();
+            if (turn < 2 || turn > 3)
+                throw std::invalid_argument("Invalid world bloom finale turn: " + std::to_string(turn));
+            eventId = turn == 2
+                ? legacyWorldBloom2FinaleEventId
+                : region_masterdata[region]->getWorldBloomFakeFinaleEventId(turn);
         } else if (pyoptions.world_bloom_event_turn.has_value()) {
             int turn = pyoptions.world_bloom_event_turn.value();
             if (turn < 1 || turn > 3)
@@ -1617,7 +1638,7 @@ public:
                 );
             }
         } else {
-            throw std::invalid_argument("event_id or world_bloom_event_turn is required.");
+            throw std::invalid_argument("event_id, world_bloom_event_turn, or world_bloom_finale_turn is required.");
         }
 
         int characterId = 0;
@@ -1932,6 +1953,7 @@ PYBIND11_MODULE(sekai_deck_recommend, m) {
         .def_readwrite("event_unit", &PyDeckRecommendOptions::event_unit)
         .def_readwrite("event_type", &PyDeckRecommendOptions::event_type)
         .def_readwrite("world_bloom_event_turn", &PyDeckRecommendOptions::world_bloom_event_turn)
+        .def_readwrite("world_bloom_finale_turn", &PyDeckRecommendOptions::world_bloom_finale_turn)
         .def_readwrite("world_bloom_character_id", &PyDeckRecommendOptions::world_bloom_character_id)
         .def_readwrite("challenge_live_character_id", &PyDeckRecommendOptions::challenge_live_character_id)
         .def_readwrite("limit", &PyDeckRecommendOptions::limit)

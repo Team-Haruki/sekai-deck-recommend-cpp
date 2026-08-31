@@ -315,6 +315,7 @@ PreparedOptions buildOptions(
     // eventId
     auto eventIdOpt = jsonOpt<int>(opts, "event_id");
     auto worldBloomTurnOpt = jsonOpt<int>(opts, "world_bloom_event_turn");
+    auto worldBloomFinaleTurnOpt = jsonOpt<int>(opts, "world_bloom_finale_turn");
     auto worldBloomCharOpt = jsonOpt<int>(opts, "world_bloom_character_id");
     auto eventAttrOpt = jsonOpt<std::string>(opts, "event_attr");
     auto eventUnitOpt = jsonOpt<std::string>(opts, "event_unit");
@@ -333,7 +334,14 @@ PreparedOptions buildOptions(
             throw std::invalid_argument("Invalid event type: " + event_type);
         int event_type_enum = mapEnum(EnumMap::eventType, event_type);
 
-        if (worldBloomTurnOpt) {
+        if (worldBloomFinaleTurnOpt) {
+            int turn = *worldBloomFinaleTurnOpt;
+            if (turn < 2 || turn > 3)
+                throw std::invalid_argument("Invalid world bloom finale turn: " + std::to_string(turn));
+            out.eventId = turn == 2
+                ? legacyWorldBloom2FinaleEventId
+                : out.dataProvider.masterData->getWorldBloomFakeFinaleEventId(turn);
+        } else if (worldBloomTurnOpt) {
             int turn = *worldBloomTurnOpt;
             if (turn < 1 || turn > 3)
                 throw std::invalid_argument("Invalid world bloom event turn: " + std::to_string(turn));
@@ -381,10 +389,12 @@ PreparedOptions buildOptions(
         out.worldBloomCharacterId = *worldBloomCharOpt;
         if (out.worldBloomCharacterId < 1 || out.worldBloomCharacterId > 26)
             throw std::invalid_argument("Invalid world bloom character ID: " + std::to_string(out.worldBloomCharacterId));
-        findOrThrowVec(out.dataProvider.masterData->worldBlooms, [&](const WorldBloom& it) {
-            return it.eventId == out.eventId && it.gameCharacterId == out.worldBloomCharacterId;
-        }, "World bloom chapter not found for eventId: " + std::to_string(out.eventId) +
-           ", characterId: " + std::to_string(out.worldBloomCharacterId));
+        if (!worldBloomFinaleTurnOpt) {
+            findOrThrowVec(out.dataProvider.masterData->worldBlooms, [&](const WorldBloom& it) {
+                return it.eventId == out.eventId && it.gameCharacterId == out.worldBloomCharacterId;
+            }, "World bloom chapter not found for eventId: " + std::to_string(out.eventId) +
+               ", characterId: " + std::to_string(out.worldBloomCharacterId));
+        }
     }
 
     // build DeckRecommendConfig
@@ -1265,11 +1275,19 @@ public:
         int eventId = 0;
         auto eventIdOpt = jsonOpt<int>(opts, "event_id");
         auto worldBloomTurnOpt = jsonOpt<int>(opts, "world_bloom_event_turn");
+        auto worldBloomFinaleTurnOpt = jsonOpt<int>(opts, "world_bloom_finale_turn");
         auto worldBloomCharOpt = jsonOpt<int>(opts, "world_bloom_character_id");
         auto eventUnitOpt = jsonOpt<std::string>(opts, "event_unit");
 
         if (eventIdOpt) {
             eventId = *eventIdOpt;
+        } else if (worldBloomFinaleTurnOpt) {
+            int turn = *worldBloomFinaleTurnOpt;
+            if (turn < 2 || turn > 3)
+                throw std::invalid_argument("Invalid world bloom finale turn: " + std::to_string(turn));
+            eventId = turn == 2
+                ? legacyWorldBloom2FinaleEventId
+                : region_masterdata[region]->getWorldBloomFakeFinaleEventId(turn);
         } else if (worldBloomTurnOpt) {
             int turn = *worldBloomTurnOpt;
             if (turn < 1 || turn > 3)
@@ -1288,7 +1306,7 @@ public:
                     turn, mapEnum(EnumMap::unit, *eventUnitOpt));
             }
         } else {
-            throw std::invalid_argument("event_id or world_bloom_event_turn is required.");
+            throw std::invalid_argument("event_id, world_bloom_event_turn, or world_bloom_finale_turn is required.");
         }
 
         int characterId = 0;

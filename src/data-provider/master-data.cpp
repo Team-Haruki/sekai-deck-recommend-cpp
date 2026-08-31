@@ -2,6 +2,7 @@
 #include "data-provider/static-data.h"
 
 #include <algorithm>
+#include <cctype>
 #include <iostream>
 #include <unordered_map>
 #include <vector>
@@ -232,6 +233,149 @@ static std::vector<WorldBloomSupportDeckUnitEventLimitedBonus> buildFakeWorldBlo
     return bonuses;
 }
 
+static bool hasWorldBloomFinaleChapter(const MasterData& md, int eventId) {
+    return std::any_of(md.worldBlooms.begin(), md.worldBlooms.end(), [&](const WorldBloom& worldBloom) {
+        return worldBloom.eventId == eventId && worldBloom.worldBloomChapterType == "finale";
+    });
+}
+
+static bool isTop1000WorldBloomHonor(const Honor& honor) {
+    const std::string rankPrefix = "honor_top_";
+    if (!honor.assetbundleName.starts_with(rankPrefix)) {
+        return false;
+    }
+    const auto rankEnd = honor.assetbundleName.find("_event_wl_", rankPrefix.size());
+    if (rankEnd == std::string::npos) {
+        return false;
+    }
+    const auto rankText = honor.assetbundleName.substr(rankPrefix.size(), rankEnd - rankPrefix.size());
+    if (rankText.empty()
+     || !std::all_of(rankText.begin(), rankText.end(), [](unsigned char ch) { return std::isdigit(ch); })) {
+        return false;
+    }
+    const int rank = std::stoi(rankText);
+    return rank > 0 && rank <= 1000;
+}
+
+static void addFakeWorldBloomFinale(MasterData& md, int turn) {
+    const int fakeEventId = md.getWorldBloomFakeFinaleEventId(turn);
+    if (std::any_of(md.events.begin(), md.events.end(), [&](const Event& event) {
+        return event.id == fakeEventId;
+    })) {
+        return;
+    }
+
+    std::set<int> sourceEventIds{};
+    for (const auto& event : md.events) {
+        if (event.id >= 1000
+         || event.eventType != Enums::EventType::world_bloom
+         || md.getWorldBloomEventTurn(event.id) != turn
+         || hasWorldBloomFinaleChapter(md, event.id)) {
+            continue;
+        }
+        sourceEventIds.insert(event.id);
+    }
+
+    Event event;
+    event.id = fakeEventId;
+    event.eventType = Enums::EventType::world_bloom;
+    md.events.push_back(event);
+
+    std::set<int> allCharacters{};
+    for (const auto& gameCharacterUnit : md.gameCharacterUnits) {
+        EventDeckBonus bonus;
+        bonus.eventId = fakeEventId;
+        bonus.gameCharacterUnitId = gameCharacterUnit.id;
+        bonus.bonusRate = 5.0;
+        bonus.cardAttr = Enums::Attr::null;
+        md.eventDeckBonuses.push_back(bonus);
+        if (gameCharacterUnit.gameCharacterId >= 1 && gameCharacterUnit.gameCharacterId <= 26) {
+            allCharacters.insert(gameCharacterUnit.gameCharacterId);
+        }
+    }
+
+    std::set<int> copiedCardIds{};
+    std::vector<EventCard> finaleEventCards{};
+    for (const auto& eventCard : md.eventCards) {
+        if (!sourceEventIds.count(eventCard.eventId)
+         || eventCard.bonusRate <= 0
+         || !copiedCardIds.insert(eventCard.cardId).second) {
+            continue;
+        }
+        auto finaleEventCard = eventCard;
+        finaleEventCard.eventId = fakeEventId;
+        finaleEventCard.bonusRate = 25.0;
+        finaleEventCard.leaderBonusRate = 20.0;
+        finaleEventCards.push_back(finaleEventCard);
+    }
+    md.eventCards.insert(md.eventCards.end(), finaleEventCards.begin(), finaleEventCards.end());
+
+    auto supportBonuses = buildFakeWorldBloomSupportDeckUnitEventLimitedBonuses(
+        md,
+        turn,
+        fakeEventId,
+        allCharacters
+    );
+    md.worldBloomSupportDeckUnitEventLimitedBonuses.insert(
+        md.worldBloomSupportDeckUnitEventLimitedBonuses.end(),
+        supportBonuses.begin(),
+        supportBonuses.end()
+    );
+
+    if (turn == 3) {
+        const std::string prefix = "wl_3rd_part";
+        for (const auto& honor : md.honors) {
+            if (!isTop1000WorldBloomHonor(honor)) {
+                continue;
+            }
+            auto partStart = honor.assetbundleName.find(prefix);
+            if (partStart == std::string::npos) {
+                continue;
+            }
+            partStart += prefix.size();
+            auto chapterMarker = honor.assetbundleName.find("_cp", partStart);
+            if (chapterMarker == std::string::npos) {
+                continue;
+            }
+            const auto partText = honor.assetbundleName.substr(partStart, chapterMarker - partStart);
+            auto chapterEnd = chapterMarker + 3;
+            while (chapterEnd < honor.assetbundleName.size()
+                && std::isdigit(static_cast<unsigned char>(honor.assetbundleName[chapterEnd]))) {
+                ++chapterEnd;
+            }
+            const auto chapterText = honor.assetbundleName.substr(chapterMarker + 3, chapterEnd - chapterMarker - 3);
+            if (partText.empty() || chapterText.empty()
+             || !std::all_of(partText.begin(), partText.end(), [](unsigned char ch) { return std::isdigit(ch); })) {
+                continue;
+            }
+            int part = std::stoi(partText);
+            int chapter = std::stoi(chapterText);
+            for (const auto& worldBloom : md.worldBlooms) {
+                if (!sourceEventIds.count(worldBloom.eventId)
+                 || worldBloom.chapterNo != chapter
+                 || md.getWorldBloom3PartByCharacterId(worldBloom.gameCharacterId) != part) {
+                    continue;
+                }
+                md.eventHonorBonuses.push_back(EventHonorBonus{
+                    .id = 0,
+                    .eventId = fakeEventId,
+                    .honorId = honor.id,
+                    .leaderGameCharacterId = worldBloom.gameCharacterId,
+                    .bonusRate = 50.0,
+                });
+                break;
+            }
+        }
+    }
+
+    WorldBloom finale;
+    finale.id = fakeEventId * 100 + 1;
+    finale.eventId = fakeEventId;
+    finale.worldBloomChapterType = "finale";
+    finale.chapterNo = 1;
+    md.worldBlooms.push_back(finale);
+}
+
 
 template <typename T>
 std::vector<T> loadMasterData(std::map<std::string, json_doc>& jsons, const std::string& key, bool required = true) {
@@ -297,6 +441,7 @@ void MasterData::loadFromJsons(std::map<std::string, json_doc>& jsons) {
     addFakeEvent(Enums::EventType::marathon);
     addFakeEvent(Enums::EventType::cheerful);
     addLegacyWorldBloom2FinaleIfNeeded(*this);
+    addFakeWorldBloomFinale(*this, 3);
     buildDerivedCaches();
 }
 
@@ -558,6 +703,14 @@ int MasterData::getWorldBloomFakeEventId(int worldBloomTurn, int unit) const
     }
     return 3000000 + (worldBloomTurn - 1) * 100000 + unit;
 }
+
+int MasterData::getWorldBloomFakeFinaleEventId(int worldBloomTurn) const
+{
+    if (worldBloomTurn < 2 || worldBloomTurn > 3) {
+        throw std::invalid_argument("Invalid world bloom finale turn: " + std::to_string(worldBloomTurn));
+    }
+    return getWorldBloomFakeEventId(worldBloomTurn, 0);
+}
 // 映射角色id
 int MasterData::getWorldBloom3PartByCharacterId(int characterId) const
 {
@@ -590,13 +743,19 @@ bool MasterData::isWorldBloomFinale(int eventId) const
     return worldBloomFinaleEventIds.count(eventId) > 0;
 }
 
+bool MasterData::isWorldBloomFakeFinale(int eventId) const
+{
+    return eventId == getWorldBloomFakeFinaleEventId(2)
+        || eventId == getWorldBloomFakeFinaleEventId(3);
+}
+
 int MasterData::getEventCardBonusCountLimit(int eventId) const
 {
     auto it = eventCardBonusCountLimits.find(eventId);
     if (it != eventCardBonusCountLimits.end()) {
         return it->second;
     }
-    if (eventId == legacyWorldBloom2FinaleEventId) {
+    if (eventId == legacyWorldBloom2FinaleEventId || isWorldBloomFakeFinale(eventId)) {
         return legacyWorldBloom2FinaleCardBonusCountLimit;
     }
     if (isWorldBloomFinale(eventId)) {
@@ -607,7 +766,7 @@ int MasterData::getEventCardBonusCountLimit(int eventId) const
 
 std::optional<double> MasterData::getEventSkillScoreUpLimit(int eventId) const
 {
-    if (eventId == legacyWorldBloom2FinaleEventId) {
+    if (eventId == legacyWorldBloom2FinaleEventId || isWorldBloomFakeFinale(eventId)) {
         return legacyWorldBloom2FinaleSkillScoreUpLimit;
     }
     for (const auto& limit : eventSkillScoreUpLimits) {
@@ -628,7 +787,7 @@ std::optional<int> MasterData::getMysekaiFixtureBonusLimit(int eventId) const
             return limit.bonusRateLimit;
         }
     }
-    if (eventId == legacyWorldBloom2FinaleEventId) {
+    if (eventId == legacyWorldBloom2FinaleEventId || isWorldBloomFakeFinale(eventId)) {
         return legacyWorldBloom2FinaleMysekaiFixtureBonusLimit;
     }
     if (isWorldBloomFinale(eventId)) {
