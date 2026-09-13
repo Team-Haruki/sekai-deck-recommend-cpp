@@ -15,7 +15,7 @@ constexpr double legacyWorldBloom2FinaleSkillScoreUpLimit = 140.0;
 constexpr int worldBloom3FinaleCardBonusCountLimit = 5;
 // Fixture rates use 0.1% units, so 60 represents the announced 6% cap.
 constexpr int worldBloom3FinaleMysekaiFixtureBonusLimit = 60;
-constexpr int worldBloom3FinaleTotalPowerLimit = 336000;
+constexpr int worldBloom3TotalPowerLimit = 336000;
 
 
 class MasterData {

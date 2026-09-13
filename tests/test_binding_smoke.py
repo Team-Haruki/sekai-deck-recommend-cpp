@@ -205,6 +205,13 @@ def wl3_rule_master_data():
                         "gameCharacterId": 1,
                         "chapterNo": 1,
                         "worldBloomChapterType": "game_character",
+                    },
+                    {
+                        "id": 2,
+                        "eventId": 163,
+                        "gameCharacterId": 1,
+                        "chapterNo": 1,
+                        "worldBloomChapterType": "game_character",
                     }
                 ]
             ),
@@ -363,12 +370,14 @@ class WorldBloom3FinaleRuleTests(unittest.TestCase):
             "jp",
         )
 
-    def recommend(self, card_ids, leader, *, finale=True, honor_ids=()):
+    def recommend(self, card_ids, leader, *, finale=True, honor_ids=(), event_id=None):
         event_options = (
             {"world_bloom_finale_turn": 3, "forcedLeaderCharacterId": leader}
             if finale
             else {"world_bloom_event_turn": 3, "world_bloom_character_id": leader}
         )
+        if event_id is not None:
+            event_options = {"event_id": event_id, "world_bloom_character_id": leader}
         options = binding.DeckRecommendOptions.from_dict(
             {
                 "region": "jp",
@@ -403,7 +412,7 @@ class WorldBloom3FinaleRuleTests(unittest.TestCase):
                     [40, 40, 40, 40, 60],
                 )
 
-    def test_fixture_and_total_power_limits_only_apply_to_finale(self):
+    def test_wl3_power_cap_applies_to_chapters_and_finale_but_fixture_cap_is_finale_only(self):
         card_ids = [1, 2, 3, 4, 5]
         finale = self.recommend(card_ids, 1)
         normal = self.recommend(card_ids, 1, finale=False)
@@ -412,7 +421,11 @@ class WorldBloom3FinaleRuleTests(unittest.TestCase):
         self.assertEqual(finale.fixture_bonus_power, 27000)
         self.assertEqual(finale.total_power, 336000)
         self.assertEqual(normal.fixture_bonus_power, 45000)
-        self.assertEqual(normal.total_power, 495000)
+        self.assertEqual(normal.total_power, 336000)
+        released_chapter = self.recommend(card_ids, 1, finale=False, event_id=202)
+        self.assertEqual(released_chapter.total_power, 336000)
+        wl2 = self.recommend(card_ids, 1, finale=False, event_id=163)
+        self.assertGreater(wl2.total_power, 336000)
 
     def test_score_up_and_current_wl_honor_limits(self):
         card_ids = [1, 2, 3, 4, 5]

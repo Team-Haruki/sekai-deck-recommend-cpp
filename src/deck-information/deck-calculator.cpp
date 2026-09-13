@@ -242,10 +242,10 @@ void DeckCalculator::forEachDeckDetail(
     }
     power.honorBonus = honorBonus;
     power.total += honorBonus;
-    if (eventId.has_value()
-     && this->dataProvider.masterData->isWorldBloomFinale(eventId.value())
+    if (eventType == Enums::EventType::world_bloom
+     && eventId.has_value()
      && this->dataProvider.masterData->getWorldBloomEventTurn(eventId.value()) == 3) {
-        power.total = std::min(power.total, worldBloom3FinaleTotalPowerLimit);
+        power.total = std::min(power.total, worldBloom3TotalPowerLimit);
     }
 
     // 计算当前卡组每个卡牌的花前/花后固定技能效果（进Live之前）
