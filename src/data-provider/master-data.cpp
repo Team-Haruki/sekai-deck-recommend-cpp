@@ -164,7 +164,8 @@ static std::vector<WorldBloomSupportDeckUnitEventLimitedBonus> buildFakeWorldBlo
     const MasterData& md,
     int turn,
     int fakeEventId,
-    const std::set<int>& charas
+    const std::set<int>& charas,
+    const std::set<int>* sourceEventIds = nullptr
 ) {
     std::vector<WorldBloomSupportDeckUnitEventLimitedBonus> bonuses{};
 
@@ -182,51 +183,61 @@ static std::vector<WorldBloomSupportDeckUnitEventLimitedBonus> buildFakeWorldBlo
     }
 
     if (turn == 3) {
-        std::unordered_map<int, int> cardCharacterMap{};
-        for (const auto& card : md.cards) {
-            cardCharacterMap[card.id] = card.characterId;
-        }
-        std::unordered_map<int, int> eventTypeMap{};
-        for (const auto& event : md.events) {
-            eventTypeMap[event.id] = event.eventType;
+        if (sourceEventIds == nullptr) {
+            std::unordered_map<int, int> cardCharacterMap{};
+            for (const auto& card : md.cards) {
+                cardCharacterMap[card.id] = card.characterId;
+            }
+            std::unordered_map<int, int> eventTypeMap{};
+            for (const auto& event : md.events) {
+                eventTypeMap[event.id] = event.eventType;
+            }
+
+            std::set<std::pair<int, int>> used{};
+            for (const auto& eventCard : md.eventCards) {
+                auto eventTypeIt = eventTypeMap.find(eventCard.eventId);
+                auto cardCharacterIt = cardCharacterMap.find(eventCard.cardId);
+                if (eventCard.eventId == legacyWorldBloom2FinaleEventId
+                 || md.getWorldBloomEventTurn(eventCard.eventId) > 2
+                 || eventCard.bonusRate <= 0
+                 || eventTypeIt == eventTypeMap.end()
+                 || eventTypeIt->second != Enums::EventType::world_bloom
+                 || cardCharacterIt == cardCharacterMap.end()
+                 || !charas.count(cardCharacterIt->second)) {
+                    continue;
+                }
+
+                auto key = std::make_pair(cardCharacterIt->second, eventCard.cardId);
+                if (!used.insert(key).second) {
+                    continue;
+                }
+                bonuses.push_back(WorldBloomSupportDeckUnitEventLimitedBonus{
+                    .id = 0,
+                    .eventId = fakeEventId,
+                    .gameCharacterId = cardCharacterIt->second,
+                    .cardId = eventCard.cardId,
+                    .bonusRate = 20.0,
+                });
+            }
+            return bonuses;
         }
 
         std::set<std::pair<int, int>> used{};
-        for (const auto& eventCard : md.eventCards) {
-            if (eventCard.eventId == legacyWorldBloom2FinaleEventId
-             || md.getWorldBloomEventTurn(eventCard.eventId) > 2
-             || eventCard.bonusRate <= 0) {
-                continue;
-            }
-            auto eventTypeIt = eventTypeMap.find(eventCard.eventId);
-            if (eventTypeIt == eventTypeMap.end()
-             || eventTypeIt->second != Enums::EventType::world_bloom) {
+        for (const auto& bonus : md.worldBloomSupportDeckUnitEventLimitedBonuses) {
+            if (!sourceEventIds->count(bonus.eventId)
+             || !charas.count(bonus.gameCharacterId)
+             || bonus.bonusRate <= 0) {
                 continue;
             }
 
-            auto it = cardCharacterMap.find(eventCard.cardId);
-            if (it == cardCharacterMap.end()) {
+            auto key = std::make_pair(bonus.gameCharacterId, bonus.cardId);
+            if (!used.insert(key).second) {
                 continue;
             }
-
-            int gameCharacterId = it->second;
-            if (!charas.count(gameCharacterId)) {
-                continue;
-            }
-
-            auto key = std::make_pair(gameCharacterId, eventCard.cardId);
-            if (used.count(key)) {
-                continue;
-            }
-            used.insert(key);
-
-            bonuses.push_back(WorldBloomSupportDeckUnitEventLimitedBonus{
-                .id = 0,
-                .eventId = fakeEventId,
-                .gameCharacterId = gameCharacterId,
-                .cardId = eventCard.cardId,
-                .bonusRate = 20.0,
-            });
+            auto finaleBonus = bonus;
+            finaleBonus.id = 0;
+            finaleBonus.eventId = fakeEventId;
+            bonuses.push_back(finaleBonus);
         }
     }
 
@@ -314,7 +325,8 @@ static void addFakeWorldBloomFinale(MasterData& md, int turn) {
         md,
         turn,
         fakeEventId,
-        allCharacters
+        allCharacters,
+        &sourceEventIds
     );
     md.worldBloomSupportDeckUnitEventLimitedBonuses.insert(
         md.worldBloomSupportDeckUnitEventLimitedBonuses.end(),
@@ -755,13 +767,33 @@ int MasterData::getEventCardBonusCountLimit(int eventId) const
     if (it != eventCardBonusCountLimits.end()) {
         return it->second;
     }
-    if (eventId == legacyWorldBloom2FinaleEventId || isWorldBloomFakeFinale(eventId)) {
+    if (eventId == legacyWorldBloom2FinaleEventId) {
         return legacyWorldBloom2FinaleCardBonusCountLimit;
     }
     if (isWorldBloomFinale(eventId)) {
+        int turn = getWorldBloomEventTurn(eventId);
+        if (turn == 2) {
+            return legacyWorldBloom2FinaleCardBonusCountLimit;
+        }
+        if (turn == 3) {
+            return worldBloom3FinaleCardBonusCountLimit;
+        }
         throw std::runtime_error("Event card bonus count limit not found for world bloom finale eventId=" + std::to_string(eventId));
     }
     return 5;
+}
+
+double MasterData::getWorldBloomShuffleUnitBonus(int eventId, int unitCount) const
+{
+    if (!isWorldBloomFinale(eventId) || getWorldBloomEventTurn(eventId) != 3) {
+        return 0.0;
+    }
+    switch (unitCount) {
+        case 3: return 10.0;
+        case 4: return 30.0;
+        case 5: return 50.0;
+        default: return 0.0;
+    }
 }
 
 std::optional<double> MasterData::getEventSkillScoreUpLimit(int eventId) const
@@ -787,10 +819,14 @@ std::optional<int> MasterData::getMysekaiFixtureBonusLimit(int eventId) const
             return limit.bonusRateLimit;
         }
     }
-    if (eventId == legacyWorldBloom2FinaleEventId || isWorldBloomFakeFinale(eventId)) {
-        return legacyWorldBloom2FinaleMysekaiFixtureBonusLimit;
-    }
     if (isWorldBloomFinale(eventId)) {
+        int turn = getWorldBloomEventTurn(eventId);
+        if (turn == 2) {
+            return legacyWorldBloom2FinaleMysekaiFixtureBonusLimit;
+        }
+        if (turn == 3) {
+            return worldBloom3FinaleMysekaiFixtureBonusLimit;
+        }
         throw std::runtime_error("MySekai fixture bonus limit not found for world bloom finale eventId=" + std::to_string(eventId));
     }
     return std::nullopt;

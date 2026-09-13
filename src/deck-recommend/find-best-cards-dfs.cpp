@@ -495,6 +495,11 @@ void BaseDeckRecommend::findBestCardsDFS(
                     for (const auto& bonus : this->dataProvider.masterData->worldBloomDifferentAttributeBonuses) {
                         searchContext.diffAttrBonusUpperBound = std::max(searchContext.diffAttrBonusUpperBound, bonus.bonusRate);
                     }
+                    searchContext.diffAttrBonusUpperBound +=
+                        this->dataProvider.masterData->getWorldBloomShuffleUnitBonus(
+                            eventId.value_or(0),
+                            5
+                        );
                 }
             }
         } else {

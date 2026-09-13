@@ -19,6 +19,7 @@ struct DeckBonusInfo {
     // 卡组最多5张，固定数组避免评估热路径上的堆分配
     std::array<double, 5> cardBonus{};
     double diffAttrBonus = 0.;
+    double shuffleUnitBonus = 0.;
     double totalBonus = 0.;
 };
 

@@ -12,6 +12,10 @@ constexpr int legacyWorldBloom2FinaleEventId = 180;
 constexpr int legacyWorldBloom2FinaleCardBonusCountLimit = 4;
 constexpr int legacyWorldBloom2FinaleMysekaiFixtureBonusLimit = 20;
 constexpr double legacyWorldBloom2FinaleSkillScoreUpLimit = 140.0;
+constexpr int worldBloom3FinaleCardBonusCountLimit = 5;
+// Fixture rates use 0.1% units, so 60 represents the announced 6% cap.
+constexpr int worldBloom3FinaleMysekaiFixtureBonusLimit = 60;
+constexpr int worldBloom3FinaleTotalPowerLimit = 336000;
 
 
 class MasterData {
@@ -102,6 +106,8 @@ public:
     bool isWorldBloomFakeFinale(int eventId) const;
 
     int getEventCardBonusCountLimit(int eventId) const;
+
+    double getWorldBloomShuffleUnitBonus(int eventId, int unitCount) const;
 
     const Honor& getHonorById(int honorId) const;
 

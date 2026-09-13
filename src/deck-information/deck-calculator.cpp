@@ -64,7 +64,34 @@ DeckBonusInfo DeckCalculator::getDeckBonus(
         ret.diffAttrBonus = it.bonusRate;
     }
 
-    ret.totalBonus = ret.diffAttrBonus;
+    if (eventId.has_value()
+     && this->dataProvider.masterData->isWorldBloomFinale(eventId.value())
+     && this->dataProvider.masterData->getWorldBloomEventTurn(eventId.value()) == 3) {
+        std::array<int, 5> shuffleUnits{};
+        int shuffleUnitCount = 0;
+        for (const auto* card : deckCards) {
+            // CardService stores a virtual singer's support unit first and its
+            // original unit last. Shuffle rules count every virtual singer as
+            // Virtual Singer, never as that support unit.
+            if (card->units.empty()) {
+                continue;
+            }
+            int unit = card->units.back();
+            if (std::find(
+                shuffleUnits.begin(),
+                shuffleUnits.begin() + shuffleUnitCount,
+                unit
+            ) == shuffleUnits.begin() + shuffleUnitCount) {
+                shuffleUnits[shuffleUnitCount++] = unit;
+            }
+        }
+        ret.shuffleUnitBonus = this->dataProvider.masterData->getWorldBloomShuffleUnitBonus(
+            eventId.value(),
+            shuffleUnitCount
+        );
+    }
+
+    ret.totalBonus = ret.diffAttrBonus + ret.shuffleUnitBonus;
     for (int i = 0; i < (int)deckCards.size(); i++) {
         ret.totalBonus += ret.cardBonus[i];
     }
@@ -215,10 +242,10 @@ void DeckCalculator::forEachDeckDetail(
     }
     power.honorBonus = honorBonus;
     power.total += honorBonus;
-    if (eventType == Enums::EventType::world_bloom
-     && eventId.has_value()
+    if (eventId.has_value()
+     && this->dataProvider.masterData->isWorldBloomFinale(eventId.value())
      && this->dataProvider.masterData->getWorldBloomEventTurn(eventId.value()) == 3) {
-        power.total = std::min(power.total, 336000);
+        power.total = std::min(power.total, worldBloom3FinaleTotalPowerLimit);
     }
 
     // 计算当前卡组每个卡牌的花前/花后固定技能效果（进Live之前）
