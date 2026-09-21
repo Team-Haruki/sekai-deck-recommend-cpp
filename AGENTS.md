@@ -1,9 +1,8 @@
 # AGENTS.md
 
-This file applies to the entire `sekai-deck-recommend-cpp` repository. The
-same engineering rules also live in `CLAUDE.md` and
-`.github/copilot-instructions.md` — keep all three in sync when changing
-guidance.
+This file applies to the entire `sekai-deck-recommend-cpp` repository and is
+the single source of truth for it. The same engineering rules also live in
+`.github/copilot-instructions.md` — keep both in sync when changing guidance.
 
 ## Project Overview
 
@@ -86,8 +85,10 @@ cmake --build . -j
 ```
 
 Outputs ES6 module glue (`sekai_deck_recommend.js`) + `sekai_deck_recommend.wasm`.
-Static files in `data/` are embedded into the wasm via `--embed-file`; runtime
-masterdata/music-metas are pushed in by the JS caller.
+The CMakeLists branches on `EMSCRIPTEN`: the pybind11 binding is dropped and the
+Embind binding is linked instead. Static files in `data/` are embedded into the
+wasm via `--embed-file`; runtime masterdata/music-metas are pushed in by the JS
+caller.
 
 The npm package scaffold lives in `npm/haruki-sekai-deck-recommend-cpp` and is
 reserved as `haruki-sekai-deck-recommend-cpp`. It should contain only the wasm
@@ -117,6 +118,9 @@ repository.
 
 ## Engineering Rules
 
+- C++20. Headers and implementations live next to each other in `src/<area>/`.
+- Masterdata, music metas, userdata parsing, and the wasm binding's JSON-in /
+  JSON-out payloads go through yyjson via `src/common/collection-utils.h`.
 - Prefer small, behavior-focused changes over broad refactors.
 - Preserve existing enum mapping and validation behavior unless a caller-visible
   migration is intentional.
