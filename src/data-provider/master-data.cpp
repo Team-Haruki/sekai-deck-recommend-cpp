@@ -803,7 +803,7 @@ std::optional<double> MasterData::getEventSkillScoreUpLimit(int eventId) const
     }
     for (const auto& limit : eventSkillScoreUpLimits) {
         if (limit.eventId == eventId) {
-            return std::max(0.0, limit.scoreUpRateLimit - 100.0);
+            return std::max(0.0, limit.scoreUpRateLimit);
         }
     }
     if (isWorldBloomFinale(eventId)) {

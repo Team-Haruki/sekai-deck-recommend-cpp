@@ -346,8 +346,12 @@ class BindingSmokeTests(unittest.TestCase):
 
 class WorldBloom3FinaleRuleTests(unittest.TestCase):
     def setUp(self):
+        self.init_region("jp")
+
+    def init_region(self, region):
+        self.region = region
         self.engine = binding.SekaiDeckRecommend()
-        self.engine.update_masterdata_from_strings(wl3_rule_master_data(), "jp")
+        self.engine.update_masterdata_from_strings(wl3_rule_master_data(), region)
         self.engine.update_musicmetas_from_string(
             json.dumps(
                 [
@@ -367,7 +371,7 @@ class WorldBloom3FinaleRuleTests(unittest.TestCase):
                     }
                 ]
             ),
-            "jp",
+            region,
         )
 
     def recommend(self, card_ids, leader, *, finale=True, honor_ids=(), event_id=None):
@@ -380,7 +384,7 @@ class WorldBloom3FinaleRuleTests(unittest.TestCase):
             event_options = {"event_id": event_id, "world_bloom_character_id": leader}
         options = binding.DeckRecommendOptions.from_dict(
             {
-                "region": "jp",
+                "region": self.region,
                 "user_data_str": wl3_test_user_data(card_ids, honor_ids=honor_ids),
                 "live_type": "multi",
                 "music_id": 1,
@@ -411,6 +415,20 @@ class WorldBloom3FinaleRuleTests(unittest.TestCase):
                     sorted(card.event_bonus_rate for card in deck.cards),
                     [40, 40, 40, 40, 60],
                 )
+
+    def test_event_skill_cap_uses_master_value_in_all_regions(self):
+        for region in ("jp", "en", "cn", "tw", "kr"):
+            for raw_cap in (140, 240):
+                with self.subTest(region=region, raw_cap=raw_cap):
+                    self.init_region(region)
+                    data = wl3_rule_master_data()
+                    data["eventSkillScoreUpLimits"] = json.dumps(
+                        [{"id": 2, "eventId": 202, "scoreUpRateLimit": raw_cap}]
+                    )
+                    self.engine.update_masterdata_from_strings(data, region)
+                    deck = self.recommend([1, 2, 3, 4, 5], 1, finale=False, event_id=202)
+                    cap = raw_cap
+                    self.assertEqual({card.skill_score_up for card in deck.cards}, {min(200, cap)})
 
     def test_wl3_power_cap_applies_to_chapters_and_finale_but_fixture_cap_is_finale_only(self):
         card_ids = [1, 2, 3, 4, 5]
