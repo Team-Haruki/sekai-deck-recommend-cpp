@@ -189,17 +189,18 @@ int CardPowerCalculator::getMultiUnitAreaItemBonusPower(
     // 否则该组合桶回退为普通比率。决策用float比率（与客户端一致），最终加成仍按行累加后逐维向下取整。
     enum Bucket : int { None = 0, Character, Multi, UnitBucket, SupportBucket, AttrBucket, AnyBucket, BucketCount };
     struct RowPick {
-        Bucket bucket = None;
-        bool allMatch = false;
+        Bucket bucket;
+        bool allMatch;
     };
-    std::vector<RowPick> picks(userAreaItemLevels.size());
+    // Explicit aggregate initialization also works with MSVC local types.
+    std::vector<RowPick> picks(userAreaItemLevels.size(), RowPick{None, false});
     std::array<std::array<float, 3>, BucketCount> buff{};
     std::array<std::array<float, 3>, BucketCount> baseBuff{};
     std::array<bool, BucketCount> present{};
 
     for (size_t i = 0; i < userAreaItemLevels.size(); ++i) {
         const auto& it = userAreaItemLevels[i];
-        RowPick pick{};
+        RowPick pick{None, false};
         if (it.targetGameCharacterId != 0) {
             if (it.targetGameCharacterId == card.characterId)
                 pick.bucket = Character;
