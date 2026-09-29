@@ -103,6 +103,22 @@ static const std::set<std::string> VALID_SKILL_REFERENCE_CHOOSE_STRATEGIES = {
     "min",
 };
 
+static const std::string DEFAULT_MULTI_UNIT_BONUS_EVALUATION = "by_deck";
+static const std::set<std::string> VALID_MULTI_UNIT_BONUS_EVALUATIONS = {
+    "by_deck",
+    "force_on",
+    "force_off",
+};
+
+static MultiUnitBonusEvaluation parse_multi_unit_bonus_evaluation(const std::optional<std::string>& value) {
+    std::string s = value.value_or(DEFAULT_MULTI_UNIT_BONUS_EVALUATION);
+    if (!VALID_MULTI_UNIT_BONUS_EVALUATIONS.count(s))
+        throw std::invalid_argument("Invalid multi unit bonus evaluation: " + s);
+    if (s == "force_on") return MultiUnitBonusEvaluation::ForceOn;
+    if (s == "force_off") return MultiUnitBonusEvaluation::ForceOff;
+    return MultiUnitBonusEvaluation::ByDeck;
+}
+
 static const std::string DEFAULT_SKILL_ORDER_CHOOSE_STRATEGY = "average";
 static const std::set<std::string> VALID_SKILL_ORDER_CHOOSE_STRATEGIES = {
     "average",
@@ -383,6 +399,7 @@ struct PyDeckRecommendOptions {
     std::optional<std::unordered_map<int, std::string>> custom_bonus_character_support_units;
     std::optional<std::string> skill_reference_choose_strategy;
     std::optional<bool> keep_after_training_state;
+    std::optional<std::string> multi_unit_bonus_evaluation;
     std::optional<int> multi_live_teammate_score_up;
     std::optional<int> multi_live_teammate_power;
     std::optional<bool> best_skill_as_leader;
@@ -459,6 +476,8 @@ struct PyDeckRecommendOptions {
             result["skill_reference_choose_strategy"] = skill_reference_choose_strategy.value();
         if (keep_after_training_state.has_value())
             result["keep_after_training_state"] = keep_after_training_state.value();
+        if (multi_unit_bonus_evaluation.has_value())
+            result["multi_unit_bonus_evaluation"] = multi_unit_bonus_evaluation.value();
         if (multi_live_teammate_score_up.has_value())
             result["multi_live_teammate_score_up"] = multi_live_teammate_score_up.value();
         if (multi_live_teammate_power.has_value())
@@ -545,6 +564,8 @@ struct PyDeckRecommendOptions {
             options.skill_reference_choose_strategy = dict["skill_reference_choose_strategy"].cast<std::string>();
         if (dict.contains("keep_after_training_state"))
             options.keep_after_training_state = dict["keep_after_training_state"].cast<bool>();
+        if (dict.contains("multi_unit_bonus_evaluation"))
+            options.multi_unit_bonus_evaluation = dict["multi_unit_bonus_evaluation"].cast<std::string>();
         if (dict.contains("multi_live_teammate_score_up"))
             options.multi_live_teammate_score_up = dict["multi_live_teammate_score_up"].cast<int>();
         if (dict.contains("multi_live_teammate_power"))
@@ -1292,6 +1313,9 @@ class SekaiDeckRecommend {
                 config.keepAfterTrainingState = pyoptions.keep_after_training_state.value();
             }
 
+            // multi unit bonus evaluation
+            config.multiUnitBonusEvaluation = parse_multi_unit_bonus_evaluation(pyoptions.multi_unit_bonus_evaluation);
+
             // multi live teammate score up
             if (pyoptions.multi_live_teammate_score_up.has_value()) {
                 config.multiTeammateScoreUp = pyoptions.multi_live_teammate_score_up.value();
@@ -1695,8 +1719,9 @@ public:
     ) const {
         auto dataProvider = construct_data_provider_from_py(pyoptions, true, false);
         dataProvider.init();
+        auto multiUnitEval = parse_multi_unit_bonus_evaluation(pyoptions.multi_unit_bonus_evaluation);
         AreaItemRecommend recommend(dataProvider);
-        auto result = recommend.recommendAreaItem(card_ids);
+        auto result = recommend.recommendAreaItem(card_ids, multiUnitEval);
 
         py::list ret;
         for (const auto& item : result) {
@@ -1977,6 +2002,7 @@ PYBIND11_MODULE(sekai_deck_recommend, m) {
         .def_readwrite("custom_bonus_character_support_units", &PyDeckRecommendOptions::custom_bonus_character_support_units)
         .def_readwrite("skill_reference_choose_strategy", &PyDeckRecommendOptions::skill_reference_choose_strategy)
         .def_readwrite("keep_after_training_state", &PyDeckRecommendOptions::keep_after_training_state)
+        .def_readwrite("multi_unit_bonus_evaluation", &PyDeckRecommendOptions::multi_unit_bonus_evaluation)
         .def_readwrite("multi_live_teammate_score_up", &PyDeckRecommendOptions::multi_live_teammate_score_up)
         .def_readwrite("multi_live_teammate_power", &PyDeckRecommendOptions::multi_live_teammate_power)
         .def_readwrite("best_skill_as_leader", &PyDeckRecommendOptions::best_skill_as_leader)

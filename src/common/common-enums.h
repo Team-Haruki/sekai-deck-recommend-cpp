@@ -37,6 +37,8 @@ namespace Enums {
         const int theme_park = mapEnum(EnumMap::unit, "theme_park");
         const int school_refusal = mapEnum(EnumMap::unit, "school_refusal");
         const int piapro = mapEnum(EnumMap::unit, "piapro");
+        // 区域道具的多组合加成目标（7.0.0起），不是卡牌的组合
+        const int multi_unit = mapEnum(EnumMap::unit, "multi_unit");
 
         const std::array<int, 6> specificUnits = {
             light_sound,

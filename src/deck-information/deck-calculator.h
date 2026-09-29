@@ -71,6 +71,14 @@ public:
 
 
     /**
+     * 卡组是否为多组合编成，与客户端DeckUtility.IsMultiUnitDeck一致：
+     * 非V角色计入角色组合；V角色若无支援组合或支援组合已出现过，则计入piapro，否则计入支援组合；
+     * 组合数>1即为多组合
+     * @param deckCards 卡组
+     */
+    static bool isMultiUnitDeck(const std::vector<const CardDetail*>& deckCards);
+
+    /**
      * 获取称号的综合力加成（与卡牌无关、根据称号累加）
      */
     int getHonorBonusPower();
@@ -85,6 +93,7 @@ public:
      * @param skillReferenceChooseStrategy bfes花前技能参考选择策略
      * @param keepAfterTrainingState 双技能卡是否保留设置状态
      * @param bestSkillAsLeader 是否自动将技能最大值作为队长
+     * @param multiUnitEval 多组合加成判定方式
      */
     std::vector<DeckDetail> getDeckDetailByCards(
         const std::vector<const CardDetail*>& cardDetails,
@@ -94,7 +103,8 @@ public:
         std::optional<int> eventId = std::nullopt,
         SkillReferenceChooseStrategy skillReferenceChooseStrategy = SkillReferenceChooseStrategy::Average,
         bool keepAfterTrainingState = false,
-        bool bestSkillAsLeader = true
+        bool bestSkillAsLeader = true,
+        MultiUnitBonusEvaluation multiUnitEval = MultiUnitBonusEvaluation::ByDeck
     );
 
     /**
@@ -111,7 +121,8 @@ public:
         SkillReferenceChooseStrategy skillReferenceChooseStrategy,
         bool keepAfterTrainingState,
         bool bestSkillAsLeader,
-        const std::function<void(const DeckDetail&)>& visitor
+        const std::function<void(const DeckDetail&)>& visitor,
+        MultiUnitBonusEvaluation multiUnitEval = MultiUnitBonusEvaluation::ByDeck
     );
 };
    

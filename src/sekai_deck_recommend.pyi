@@ -205,6 +205,7 @@ class DeckRecommendOptions:
             When set, only cards with matching supportUnit or supportUnit == "none" gain character bonus.
         skill_reference_choose_strategy (str): Strategy for bfes skill reference choose in ["average", "max", "min"], default is "average"
         keep_after_training_state (bool): Whether to keep after-training state of bfes cards, default is False
+        multi_unit_bonus_evaluation (str): How area item "multi_unit" effects (JP 7.0.0+, e.g. area item 56) are applied, in ["by_deck", "force_on", "force_off"], default is "by_deck" (the client's DeckUtility.IsMultiUnitDeck rule). No effect when the user's area items have no multi_unit rows
         multi_live_teammate_score_up (int): Score up of single multi-live teammate, default is None (None means copying self score up)
         multi_live_teammate_power (int): Power of single multi-live teammate, default is None (None means copying self power)
         best_skill_as_leader (bool): Whether to use the best skill card as leader, default is True
@@ -252,6 +253,7 @@ class DeckRecommendOptions:
     custom_bonus_character_support_units: Optional[Dict[int, str]]
     skill_reference_choose_strategy: Optional[str]
     keep_after_training_state: Optional[bool]
+    multi_unit_bonus_evaluation: Optional[str]
     multi_live_teammate_score_up: Optional[int]
     multi_live_teammate_power: Optional[int]
     best_skill_as_leader: Optional[bool]

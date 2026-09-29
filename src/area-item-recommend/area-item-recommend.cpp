@@ -14,7 +14,8 @@ int AreaItemRecommend::findCost(const ShopItem& shopItem, const std::string& res
 
 std::vector<CardDetail> AreaItemRecommend::getCardDetails(
     const std::vector<int>& cardIds,
-    const std::vector<AreaItemLevel>& areaItemLevels
+    const std::vector<AreaItemLevel>& areaItemLevels,
+    MultiUnitBonusEvaluation multiUnitEval
 )
 {
     std::vector<UserCard> userCards{};
@@ -28,16 +29,22 @@ std::vector<CardDetail> AreaItemRecommend::getCardDetails(
         {},
         {},
         std::nullopt,
-        areaItemLevels
+        areaItemLevels,
+        std::nullopt,
+        std::nullopt,
+        std::nullopt,
+        std::nullopt,
+        multiUnitEval
     );
 }
 
 int AreaItemRecommend::getDeckPower(
     const std::vector<int>& cardIds,
-    const std::vector<AreaItemLevel>& areaItemLevels
+    const std::vector<AreaItemLevel>& areaItemLevels,
+    MultiUnitBonusEvaluation multiUnitEval
 )
 {
-    auto cardDetails = getCardDetails(cardIds, areaItemLevels);
+    auto cardDetails = getCardDetails(cardIds, areaItemLevels, multiUnitEval);
     if (cardDetails.size() != cardIds.size()) {
         throw std::runtime_error("Failed to calculate all requested cards for area item recommendation");
     }
@@ -56,7 +63,8 @@ int AreaItemRecommend::getDeckPower(
         std::nullopt,
         SkillReferenceChooseStrategy::Average,
         true,
-        false
+        false,
+        multiUnitEval
     );
     if (deckDetails.empty()) {
         throw std::runtime_error("Failed to calculate deck power for area item recommendation");
@@ -64,14 +72,17 @@ int AreaItemRecommend::getDeckPower(
     return deckDetails.front().power.total;
 }
 
-std::vector<RecommendAreaItem> AreaItemRecommend::recommendAreaItem(const std::vector<int>& cardIds)
+std::vector<RecommendAreaItem> AreaItemRecommend::recommendAreaItem(
+    const std::vector<int>& cardIds,
+    MultiUnitBonusEvaluation multiUnitEval
+)
 {
     if (cardIds.empty() || cardIds.size() > 5) {
         throw std::invalid_argument("cardIds must contain 1 to 5 cards");
     }
 
     auto currentAreaItemLevels = areaItemService.getAreaItemLevels();
-    int currentPower = getDeckPower(cardIds, currentAreaItemLevels);
+    int currentPower = getDeckPower(cardIds, currentAreaItemLevels, multiUnitEval);
 
     std::vector<RecommendAreaItem> recommend{};
     for (const auto& areaItem : dataProvider.masterData->areaItems) {
@@ -80,27 +91,32 @@ std::vector<RecommendAreaItem> AreaItemRecommend::recommendAreaItem(const std::v
             currentAreaItemLevels.end(),
             [&](const AreaItemLevel& it) { return it.areaItemId == areaItem.id; }
         );
-        std::optional<AreaItemLevel> currentLevel = currentIt == currentAreaItemLevels.end()
+        std::optional<int> currentLevel = currentIt == currentAreaItemLevels.end()
             ? std::nullopt
-            : std::optional<AreaItemLevel>(*currentIt);
-        auto nextLevel = areaItemService.getAreaItemNextLevel(areaItem, currentLevel);
-        if (currentLevel.has_value() && nextLevel.level <= currentLevel->level) {
+            : std::optional<int>(currentIt->level);
+        auto nextLevelRows = areaItemService.getAreaItemNextLevel(areaItem, currentLevel);
+        int nextLevel = nextLevelRows.front().level;
+        if (currentLevel.has_value() && nextLevel <= currentLevel.value()) {
             continue;
         }
 
-        auto newAreaItemLevels = currentAreaItemLevels;
-        if (currentIt == currentAreaItemLevels.end()) {
-            newAreaItemLevels.push_back(nextLevel);
-        } else {
-            auto newIt = std::find_if(
-                newAreaItemLevels.begin(),
-                newAreaItemLevels.end(),
-                [&](const AreaItemLevel& it) { return it.areaItemId == areaItem.id; }
-            );
-            *newIt = nextLevel;
+        // 同一道具的所有效果行一起替换为下一级
+        std::vector<AreaItemLevel> newAreaItemLevels{};
+        newAreaItemLevels.reserve(currentAreaItemLevels.size() + nextLevelRows.size());
+        bool inserted = false;
+        for (const auto& it : currentAreaItemLevels) {
+            if (it.areaItemId != areaItem.id) {
+                newAreaItemLevels.push_back(it);
+            } else if (!inserted) {
+                newAreaItemLevels.insert(newAreaItemLevels.end(), nextLevelRows.begin(), nextLevelRows.end());
+                inserted = true;
+            }
+        }
+        if (!inserted) {
+            newAreaItemLevels.insert(newAreaItemLevels.end(), nextLevelRows.begin(), nextLevelRows.end());
         }
 
-        int power = getDeckPower(cardIds, newAreaItemLevels) - currentPower;
+        int power = getDeckPower(cardIds, newAreaItemLevels, multiUnitEval) - currentPower;
         if (power <= 0) {
             continue;
         }
@@ -108,7 +124,7 @@ std::vector<RecommendAreaItem> AreaItemRecommend::recommendAreaItem(const std::v
         auto& area = findOrThrow(dataProvider.masterData->areas, [&](const Area& it) {
             return it.id == areaItem.areaId;
         }, [&]() { return "Area not found for areaId=" + std::to_string(areaItem.areaId); });
-        auto shopItem = areaItemService.getShopItem(nextLevel);
+        auto shopItem = areaItemService.getShopItem(areaItem.id, nextLevel);
         RecommendAreaItemCost cost{
             .coin = findCost(shopItem, "coin", 0),
             .seed = findCost(shopItem, "material", 17),
@@ -119,7 +135,7 @@ std::vector<RecommendAreaItem> AreaItemRecommend::recommendAreaItem(const std::v
             .areaType = area.areaType,
             .areaViewType = area.viewType,
             .areaItemId = areaItem.id,
-            .nextLevel = nextLevel.level,
+            .nextLevel = nextLevel,
             .shopItemId = shopItem.id,
             .cost = cost,
             .power = power,

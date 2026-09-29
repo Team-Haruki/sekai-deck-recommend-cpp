@@ -50,7 +50,7 @@ jobs:
           python -m coverage run --source=tools/bench \
             -m unittest discover -s tests -p 'test_bench_tools.py'
           python -m coverage xml -o coverage-reports/python-coverage.xml
-          python -m unittest discover -s tests -p 'test_binding_smoke.py'
+          python -m unittest discover -s tests -p 'test_binding*.py'
           gcovr --root . --filter 'src/' \
             --exclude 'src/sekai_deck_recommend_wasm.cpp' \
             --lcov coverage-reports/lcov.info \

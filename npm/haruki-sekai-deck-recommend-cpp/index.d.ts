@@ -22,6 +22,7 @@ export type UnitType = "light_sound" | "idol" | "street" | "theme_park" | "schoo
 export type EventType = "marathon" | "cheerful_carnival" | "world_bloom"
 
 export type SkillChooseStrategy = "average" | "max" | "min"
+export type MultiUnitBonusEvaluation = "by_deck" | "force_on" | "force_off"
 
 export type SkillOrderChooseStrategy = SkillChooseStrategy | "specific"
 
@@ -113,6 +114,8 @@ export interface RecommendOptions {
   forcedLeaderCharacterId?: number
   skill_reference_choose_strategy?: SkillChooseStrategy
   keep_after_training_state?: boolean
+  /** How area item "multi_unit" effects (JP 7.0.0+) apply; default "by_deck". No effect without multi_unit rows. */
+  multi_unit_bonus_evaluation?: MultiUnitBonusEvaluation
   multi_live_teammate_score_up?: number
   multi_live_teammate_power?: number
   best_skill_as_leader?: boolean
@@ -161,6 +164,7 @@ export interface AreaItemRecommendOptions {
   userDataStr?: string
   user_data_file_path?: string
   userDataFilePath?: string
+  multi_unit_bonus_evaluation?: MultiUnitBonusEvaluation
   [key: string]: unknown
 }
 

@@ -100,6 +100,20 @@ const std::set<std::string> VALID_SKILL_REFERENCE_CHOOSE_STRATEGIES = {
     "average", "max", "min",
 };
 
+const std::string DEFAULT_MULTI_UNIT_BONUS_EVALUATION = "by_deck";
+const std::set<std::string> VALID_MULTI_UNIT_BONUS_EVALUATIONS = {
+    "by_deck", "force_on", "force_off",
+};
+
+MultiUnitBonusEvaluation parseMultiUnitBonusEvaluation(const std::optional<std::string>& value) {
+    std::string s = value.value_or(DEFAULT_MULTI_UNIT_BONUS_EVALUATION);
+    if (!VALID_MULTI_UNIT_BONUS_EVALUATIONS.count(s))
+        throw std::invalid_argument("Invalid multi unit bonus evaluation: " + s);
+    if (s == "force_on") return MultiUnitBonusEvaluation::ForceOn;
+    if (s == "force_off") return MultiUnitBonusEvaluation::ForceOff;
+    return MultiUnitBonusEvaluation::ByDeck;
+}
+
 const std::string DEFAULT_SKILL_ORDER_CHOOSE_STRATEGY = "average";
 const std::set<std::string> VALID_SKILL_ORDER_CHOOSE_STRATEGIES = {
     "average", "max", "min", "specific",
@@ -564,6 +578,9 @@ PreparedOptions buildOptions(
 
     if (auto v = jsonOpt<bool>(opts, "keep_after_training_state"))
         config.keepAfterTrainingState = *v;
+
+    config.multiUnitBonusEvaluation = parseMultiUnitBonusEvaluation(
+        jsonOpt<std::string>(opts, "multi_unit_bonus_evaluation"));
 
     if (auto v = jsonOpt<int>(opts, "multi_live_teammate_score_up")) {
         config.multiTeammateScoreUp = *v;
@@ -1126,8 +1143,10 @@ public:
         };
         dataProvider.init();
 
+        auto multiUnitEval = parseMultiUnitBonusEvaluation(
+            jsonOpt<std::string>(opts, "multi_unit_bonus_evaluation"));
         AreaItemRecommend r(dataProvider);
-        auto result = r.recommendAreaItem(*cardIds);
+        auto result = r.recommendAreaItem(*cardIds, multiUnitEval);
         MutableJsonDoc outDoc;
         yyjson_mut_val* out = yyjson_mut_arr(outDoc.get());
         if (!out) throw std::runtime_error("Failed to allocate area items JSON array.");

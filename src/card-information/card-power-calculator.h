@@ -10,6 +10,26 @@
 
 using BasePower = std::array<int, 3>;
 
+/**
+ * 多组合加成（区域道具targetUnit=multi_unit）的判定方式，对应客户端CardUtility.MultiUnitBonusEvaluation
+ */
+enum class MultiUnitBonusEvaluation {
+    ByDeck = 0,     // 按卡组是否为多组合编成判定（DeckUtility.IsMultiUnitDeck）
+    ForceOn = 1,    // 总是视为多组合
+    ForceOff = 2,   // 总是视为非多组合
+};
+
+/**
+ * 多组合编成下卡牌综合力表的下标
+ * @param characterUnitAllMatch 卡组全员匹配角色组合
+ * @param supportUnitAllMatch 卡组全员匹配支援组合
+ * @param attrAllMatch 卡组全员同属性
+ */
+inline int multiUnitPowerIndex(bool characterUnitAllMatch, bool supportUnitAllMatch, bool attrAllMatch) {
+    return (characterUnitAllMatch ? 4 : 0) | (supportUnitAllMatch ? 2 : 0) | (attrAllMatch ? 1 : 0);
+}
+constexpr int MULTI_UNIT_POWER_SIZE = 8;
+
 struct DeckCardPowerDetail {
     int base;
     int areaItemBonus;
@@ -45,6 +65,8 @@ public:
      * @param userAreaItemLevels 用户拥有的区域道具等级
      * @param hasCanvasBonus 是否拥有自定义世界中的画布
      * @param userGateBonuses 用户拥有的自定义世界大门加成
+     * @param multiUnitPower （可选）输出多组合编成下的综合力表（按multiUnitPowerIndex索引）。
+     *        只有区域道具效果中存在multi_unit行时才会填充，否则保持为空；填充后返回值的min/max会纳入这些值
      */
     CardDetailMap<DeckCardPowerDetail> getCardPower(
         const UserCard& userCard,
@@ -53,7 +75,8 @@ public:
         const std::vector<AreaItemLevel>& userAreaItemLevels,
         bool hasCanvasBonus,
         const std::vector<MysekaiGateBonus>& userGateBonuses,
-        std::optional<int> fixtureBonusLimit = std::nullopt
+        std::optional<int> fixtureBonusLimit = std::nullopt,
+        std::vector<DeckCardPowerDetail>* multiUnitPower = nullptr
     );
     
     /**
@@ -111,6 +134,29 @@ public:
         bool sameUnit,
         int attr,
         bool sameAttr
+    );
+
+    /**
+     * 按客户端CardUtility.GetAreaItemBuffList计算多组合编成（isMultiUnitDeck=true）下的区域道具加成
+     * 非多组合编成仍使用getAreaItemBonusPower（对只含单一比率的master数据两者结果一致）
+     * @param userAreaItemLevels 用户所持的区域道具效果
+     * @param basePower 卡牌基础综合力
+     * @param card 卡牌
+     * @param characterUnit 角色所属组合
+     * @param supportUnit 支援组合（无则为none）
+     * @param characterUnitAllMatch 卡组全员匹配角色组合
+     * @param supportUnitAllMatch 卡组全员匹配支援组合
+     * @param attrAllMatch 卡组全员同属性
+     */
+    int getMultiUnitAreaItemBonusPower(
+        const std::vector<AreaItemLevel>& userAreaItemLevels,
+        const BasePower& basePower,
+        const Card& card,
+        int characterUnit,
+        int supportUnit,
+        bool characterUnitAllMatch,
+        bool supportUnitAllMatch,
+        bool attrAllMatch
     );
 
     /**
