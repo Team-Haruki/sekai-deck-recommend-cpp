@@ -178,15 +178,28 @@ int CardPowerCalculator::getFixtureBonusPower(const BasePower &basePower, int ch
 
 int CardPowerCalculator::getGateBonusPower(const BasePower &basePower, const std::vector<MysekaiGateBonus> &userGateBonuses, const std::vector<int> &cardUnits)
 {
-    bool isOnlyPiapro = cardUnits.size() == 1 && cardUnits[0] == Enums::Unit::piapro;
-    double powerBonusRate = 0;
+    // 与客户端CardUtility.GetGateBonus一致：
+    // 加成组合 = 支援组合（有的话），否则为角色原组合（getCardUnits保证它在cardUnits[0]）。
+    // - 非piapro：只看该组合的大门
+    // - piapro（无支援组合的V）：取等级最高的大门（同等级取用户数据中靠前的，与稳定排序一致），
+    //   即使该大门没有等级行（加成为0）也不会换成其他大门
+    if (cardUnits.empty())
+        return 0;
+    int unit = cardUnits[0];
+    const MysekaiGateBonus* selected = nullptr;
     for (auto& bonus : userGateBonuses) {
-        if (isOnlyPiapro || std::find(cardUnits.begin(), cardUnits.end(), bonus.unit) != cardUnits.end()) {
-            powerBonusRate = std::max(powerBonusRate, bonus.powerBonusRate);
+        if (unit == Enums::Unit::piapro) {
+            if (selected == nullptr || bonus.level > selected->level)
+                selected = &bonus;
+        } else if (bonus.unit == unit) {
+            selected = &bonus;
+            break;
         }
     }
+    if (selected == nullptr)
+        return 0;
     // 按各个综合分别计算加成，其中powerBonusRate单位是1%
-    double total = sumPower(basePower) * powerBonusRate * 0.01;
+    double total = sumPower(basePower) * selected->powerBonusRate * 0.01;
     return std::floor(total);
 }
 

@@ -473,5 +473,158 @@ class WorldBloom3FinaleRuleTests(unittest.TestCase):
         self.assertEqual(bonuses, {201: 32, 202: 12, 203: 12})
 
 
+# JP 7.0.0 gates: five unit gates with level rows up to 70, plus gate 6
+# ("shuffle", unit "none") which has no level rows at all.
+GATE_TEST_CARDS = {
+    # card id: (character id, support unit)
+    11: (1, "none"),   # light_sound
+    12: (5, "none"),   # idol
+    13: (9, "none"),   # street (user has no street gate)
+    14: (21, "none"),  # virtual singer without support unit
+    15: (22, "idol"),  # virtual singer supporting idol
+}
+
+
+def gate_master_data():
+    data = wl3_rule_master_data()
+    data["cards"] = json.dumps(
+        [
+            wl3_test_card(card_id, character_id, support_unit)
+            for card_id, (character_id, support_unit) in GATE_TEST_CARDS.items()
+        ]
+    )
+    gate_units = ("light_sound", "idol", "street", "theme_park", "school_refusal")
+    gates = [
+        {"id": gate_id, "unit": unit, "mysekaiGateType": "unit"}
+        for gate_id, unit in enumerate(gate_units, start=1)
+    ]
+    gates.append({"id": 6, "unit": "none", "mysekaiGateType": "shuffle"})
+    data["mysekaiGates"] = json.dumps(gates)
+    data["mysekaiGateLevels"] = json.dumps(
+        [
+            {
+                "id": gate_id * 1000 + level,
+                "mysekaiGateId": gate_id,
+                "level": level,
+                "powerBonusRate": level / 10,
+            }
+            for gate_id in range(1, 6)
+            for level in range(1, 71)
+        ]
+    )
+    return data
+
+
+def gate_user_data(user_gates):
+    character_ids = sorted({character_id for character_id, _ in GATE_TEST_CARDS.values()})
+    return json.dumps(
+        {
+            "userGamedata": {"userId": 1},
+            "userAreas": [],
+            "userCards": [
+                {
+                    "userId": 1,
+                    "cardId": card_id,
+                    "level": 1,
+                    "skillLevel": 1,
+                    "masterRank": 0,
+                    "specialTrainingStatus": "not_doing",
+                    "defaultImage": "original",
+                    "episodes": [],
+                }
+                for card_id in GATE_TEST_CARDS
+            ],
+            "userCharacters": [
+                {"characterId": character_id, "characterRank": 1}
+                for character_id in character_ids
+            ],
+            "userDecks": [],
+            "userHonors": [],
+            "userMysekaiCanvases": [],
+            "userMysekaiFixtureGameCharacterPerformanceBonuses": [],
+            "userMysekaiGates": [
+                {"mysekaiGateId": gate_id, "mysekaiGateLevel": level}
+                for gate_id, level in user_gates
+            ],
+        }
+    ).encode()
+
+
+class MysekaiGateBonusTests(unittest.TestCase):
+    def setUp(self):
+        self.engine = binding.SekaiDeckRecommend()
+        self.engine.update_masterdata_from_strings(gate_master_data(), "jp")
+        self.engine.update_musicmetas_from_string(
+            json.dumps(
+                [
+                    {
+                        "music_id": 1,
+                        "difficulty": "expert",
+                        "music_time": 100,
+                        "event_rate": 100,
+                        "base_score": 1,
+                        "base_score_auto": 1,
+                        "skill_score_solo": [0] * 6,
+                        "skill_score_auto": [0] * 6,
+                        "skill_score_multi": [0] * 6,
+                        "fever_score": 0,
+                        "fever_end_time": 0,
+                        "tap_count": 100,
+                    }
+                ]
+            ),
+            "jp",
+        )
+
+    def gate_bonuses(self, user_gates):
+        options = binding.DeckRecommendOptions.from_dict(
+            {
+                "region": "jp",
+                "user_data_str": gate_user_data(user_gates),
+                "live_type": "multi",
+                "music_id": 1,
+                "music_diff": "expert",
+                "target": "power",
+                "algorithm": "dfs",
+                "limit": 1,
+                "fixed_cards": list(GATE_TEST_CARDS),
+            }
+        )
+        deck = self.engine.recommend(options).decks[0]
+        bonuses = {card.card_id: card.total_power - card.base_power for card in deck.cards}
+        self.assertEqual(deck.gate_bonus_power, sum(bonuses.values()))
+        return bonuses
+
+    def test_shuffle_gate_without_levels_does_not_break_calculation(self):
+        # Base power is 90000 per card; level 70 = 7%, level 40 = 4%.
+        bonuses = self.gate_bonuses([(1, 70), (2, 40), (6, 1)])
+        self.assertEqual(
+            bonuses,
+            {
+                11: 6300,  # own unit gate, level 70
+                12: 3600,  # own unit gate, level 40
+                13: 0,  # no street gate
+                14: 6300,  # highest-level gate (gate 1)
+                15: 3600,  # support unit gate only
+            },
+        )
+
+    def test_virtual_singer_uses_highest_level_gate_even_without_level_rows(self):
+        # The client orders userMysekaiGates by level and takes the first; a
+        # gate without a level row then yields 0 instead of falling back.
+        bonuses = self.gate_bonuses([(1, 70), (2, 40), (6, 71)])
+        self.assertEqual(bonuses[14], 0)
+        self.assertEqual(bonuses[11], 6300)
+        self.assertEqual(bonuses[15], 3600)
+
+    def test_virtual_singer_ties_keep_user_data_order(self):
+        self.assertEqual(self.gate_bonuses([(6, 40), (2, 40)])[14], 0)
+        self.assertEqual(self.gate_bonuses([(2, 40), (6, 40)])[14], 3600)
+
+    def test_unknown_gate_or_level_contributes_zero(self):
+        bonuses = self.gate_bonuses([(99, 1), (1, 999)])
+        self.assertEqual(set(bonuses.values()), {0})
+
+
 if __name__ == "__main__":
     unittest.main()

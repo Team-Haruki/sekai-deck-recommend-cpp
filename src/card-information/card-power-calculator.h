@@ -136,7 +136,7 @@ public:
 
     /**
      * 自定义世界的大门加成
-     * 如果是无应援的V家角色，按最大加成算
+     * 有支援组合看支援组合的大门，否则看角色组合的大门；无支援组合的V家角色取等级最高的大门
      * @param basePower 基础综合
      * @param userGateBonuses 当前生效的门加成
      * @param cardUnits 当前卡有的组合
