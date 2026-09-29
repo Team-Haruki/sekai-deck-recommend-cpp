@@ -76,6 +76,9 @@ struct DeckRecommendConfig {
     // 是否保持bfes花前花后状态
     bool keepAfterTrainingState = false;
 
+    // 多组合加成（区域道具multi_unit效果）判定方式
+    MultiUnitBonusEvaluation multiUnitBonusEvaluation = MultiUnitBonusEvaluation::ByDeck;
+
     // 指定协力队友实效
     std::optional<int> multiTeammateScoreUp = std::nullopt;
     // 指定协力队友综合力

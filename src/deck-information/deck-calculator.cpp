@@ -3,6 +3,7 @@
 #include "deck-calculator.h"
 
 #include <algorithm>
+#include <bit>
 #include <array>
 #include <cmath>
 #include <numeric>
@@ -136,6 +137,30 @@ SupportDeckBonus DeckCalculator::getSupportDeckBonus(
     return ret;
 }
 
+bool DeckCalculator::isMultiUnitDeck(const std::vector<const CardDetail*>& deckCards)
+{
+    // 组合ID都是较小的enum值，用位集合代替set（卡组评估热路径）
+    auto bit = [](int unit) -> uint64_t { return unit >= 0 && unit < 64 ? (uint64_t(1) << unit) : 0; };
+    uint64_t units = 0;
+    for (const auto* card : deckCards) {
+        if (getCardCharacterUnit(*card) != Enums::Unit::piapro)
+            units |= bit(getCardCharacterUnit(*card));
+    }
+    bool needVirtualSinger = false;
+    for (const auto* card : deckCards) {
+        if (getCardCharacterUnit(*card) != Enums::Unit::piapro)
+            continue;
+        int supportUnit = getCardSupportUnit(*card);
+        if (supportUnit == Enums::Unit::none || (units & bit(supportUnit)))
+            needVirtualSinger = true;
+        else
+            units |= bit(supportUnit);
+    }
+    if (needVirtualSinger)
+        units |= bit(Enums::Unit::piapro);
+    return std::popcount(units) > 1;
+}
+
 int DeckCalculator::getHonorBonusPower()
 {
     auto& userHonors = this->dataProvider.userData->userHonors;
@@ -162,14 +187,16 @@ std::vector<DeckDetail> DeckCalculator::getDeckDetailByCards(
     std::optional<int> eventId,
     SkillReferenceChooseStrategy skillReferenceChooseStrategy,
     bool keepAfterTrainingState,
-    bool bestSkillAsLeader
+    bool bestSkillAsLeader,
+    MultiUnitBonusEvaluation multiUnitEval
 )
 {
     std::vector<DeckDetail> ret{};
     forEachDeckDetail(
         cardDetails, supportCards, honorBonus, eventType, eventId,
         skillReferenceChooseStrategy, keepAfterTrainingState, bestSkillAsLeader,
-        [&](const DeckDetail& deckDetail) { ret.push_back(deckDetail); }
+        [&](const DeckDetail& deckDetail) { ret.push_back(deckDetail); },
+        multiUnitEval
     );
     return ret;
 }
@@ -183,7 +210,8 @@ void DeckCalculator::forEachDeckDetail(
     SkillReferenceChooseStrategy skillReferenceChooseStrategy,
     bool keepAfterTrainingState,
     bool bestSkillAsLeader,
-    const std::function<void(const DeckDetail&)>& visitor
+    const std::function<void(const DeckDetail&)>& visitor,
+    MultiUnitBonusEvaluation multiUnitEval
 )
 {
     // 活动加成
@@ -218,10 +246,30 @@ void DeckCalculator::forEachDeckDetail(
     for (int i = 0; i < 16; ++i) 
         unit_num += bool(unit_map[i]);
 
+    // 多组合加成：只有卡牌带有多组合综合力表（用户区域道具有multi_unit效果且未force_off）时才需要判定
+    bool useMultiUnitPower = false;
+    if (multiUnitEval != MultiUnitBonusEvaluation::ForceOff) {
+        bool hasMultiUnitPower = std::any_of(cardDetails.begin(), cardDetails.end(), [](const CardDetail* card) {
+            return !card->multiUnitPower.empty();
+        });
+        useMultiUnitPower = hasMultiUnitPower
+            && (multiUnitEval == MultiUnitBonusEvaluation::ForceOn || isMultiUnitDeck(cardDetails));
+    }
+
     // 计算当前卡组的综合力，要加上称号的固定加成
     std::array<DeckCardPowerDetail, 5> cardPower{};
     for (int i = 0; i < card_num; ++i) {
         auto& cardDetail = *cardDetails[i];
+        if (useMultiUnitPower && !cardDetail.multiUnitPower.empty()) {
+            // 全员匹配与客户端CheckAllMember*Match一致：5人且每人的角色组合或支援组合为该组合
+            int supportUnit = getCardSupportUnit(cardDetail);
+            cardPower[i] = cardDetail.multiUnitPower[multiUnitPowerIndex(
+                unit_map[getCardCharacterUnit(cardDetail)] == 5,
+                supportUnit != Enums::Unit::none && unit_map[supportUnit] == 5,
+                attr_map[cardDetail.attr] == 5
+            )];
+            continue;
+        }
         DeckCardPowerDetail powerDetail = {};
         for (const auto &unit : cardDetail.units) {
             auto current = cardDetail.power.get(unit, unit_map[unit], attr_map[cardDetail.attr]);

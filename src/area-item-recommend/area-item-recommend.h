@@ -32,12 +32,14 @@ class AreaItemRecommend {
 
     std::vector<CardDetail> getCardDetails(
         const std::vector<int>& cardIds,
-        const std::vector<AreaItemLevel>& areaItemLevels
+        const std::vector<AreaItemLevel>& areaItemLevels,
+        MultiUnitBonusEvaluation multiUnitEval
     );
 
     int getDeckPower(
         const std::vector<int>& cardIds,
-        const std::vector<AreaItemLevel>& areaItemLevels
+        const std::vector<AreaItemLevel>& areaItemLevels,
+        MultiUnitBonusEvaluation multiUnitEval
     );
 
 public:
@@ -49,8 +51,13 @@ public:
 
     /**
      * Recommend the next area item upgrades for a fixed deck, sorted by power gain per coin.
+     * All effect rows of an area item level (e.g. item 56's all-character and multi_unit rows)
+     * are swapped together.
      */
-    std::vector<RecommendAreaItem> recommendAreaItem(const std::vector<int>& cardIds);
+    std::vector<RecommendAreaItem> recommendAreaItem(
+        const std::vector<int>& cardIds,
+        MultiUnitBonusEvaluation multiUnitEval = MultiUnitBonusEvaluation::ByDeck
+    );
 };
 
 #endif // AREA_ITEM_RECOMMEND_H

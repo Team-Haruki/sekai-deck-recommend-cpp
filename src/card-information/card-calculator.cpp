@@ -14,7 +14,8 @@ std::optional<CardDetail> CardCalculator::getCardDetail(
     std::optional<double> scoreUpLimit,
     const std::optional<std::vector<int>>& customBonusCharacterIds,
     const std::optional<int>& customBonusAttr,
-    const std::optional<std::unordered_map<int, int>>& customBonusSupportUnits
+    const std::optional<std::unordered_map<int, int>>& customBonusSupportUnits,
+    MultiUnitBonusEvaluation multiUnitEval
 )
 {
     const Card* cardPtr = this->dataProvider.masterData->findCardById(userCard.cardId);
@@ -41,9 +42,11 @@ std::optional<CardDetail> CardCalculator::getCardDetail(
     auto userCard0 = this->cardService.applyCardConfig(userCard, card, cfg);
     auto units = this->cardService.getCardUnits(card);
     auto skill = this->skillCalculator.getCardSkill(userCard0, card, scoreUpLimit);
+    std::vector<DeckCardPowerDetail> multiUnitPower{};
     auto power = this->powerCalculator.getCardPower(
         userCard0, card, units, userAreaItemLevels, hasCanvasBonus, userGateBonuses,
-        eventConfig.has_value() ? eventConfig->mysekaiFixtureLimit : std::nullopt
+        eventConfig.has_value() ? eventConfig->mysekaiFixtureLimit : std::nullopt,
+        multiUnitEval == MultiUnitBonusEvaluation::ForceOff ? nullptr : &multiUnitPower
     );
 
     CardEventBonusInfo eventBonus{};
@@ -89,7 +92,8 @@ std::optional<CardDetail> CardCalculator::getCardDetail(
         .episode1Read = episode1Read,
         .episode2Read = episode2Read,
         .afterTraining = afterTraining,
-        .defaultImage = userCard0.defaultImage
+        .defaultImage = userCard0.defaultImage,
+        .multiUnitPower = std::move(multiUnitPower)
     };
 }
 
@@ -102,7 +106,8 @@ std::vector<CardDetail> CardCalculator::batchGetCardDetail(
     std::optional<double> scoreUpLimit,
     const std::optional<std::vector<int>>& customBonusCharacterIds,
     const std::optional<int>& customBonusAttr,
-    const std::optional<std::unordered_map<int, int>>& customBonusSupportUnits
+    const std::optional<std::unordered_map<int, int>>& customBonusSupportUnits,
+    MultiUnitBonusEvaluation multiUnitEval
 )
 {
     std::vector<CardDetail> ret{};
@@ -118,7 +123,8 @@ std::vector<CardDetail> CardCalculator::batchGetCardDetail(
         details[i] = this->getCardDetail(
             userCards[i], areaItemLevels0, config, singleCardConfig, eventConfig,
             userCanvasBonusCards.find(userCards[i].cardId) != userCanvasBonusCards.end(),
-            userGateBonuses, scoreUpLimit, customBonusCharacterIds, customBonusAttr, customBonusSupportUnits
+            userGateBonuses, scoreUpLimit, customBonusCharacterIds, customBonusAttr, customBonusSupportUnits,
+            multiUnitEval
         );
     });
     for (auto& cardDetail : details) {

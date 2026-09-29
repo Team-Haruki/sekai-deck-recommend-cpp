@@ -38,7 +38,18 @@ struct CardDetail {
     bool episode2Read;
     bool afterTraining;
     int defaultImage;
+    // 多组合编成（区域道具multi_unit效果生效）时的综合力，按multiUnitPowerIndex索引；
+    // 用户区域道具没有multi_unit效果或指定force_off时为空
+    std::vector<DeckCardPowerDetail> multiUnitPower{};
 };
+
+// CardService::getCardUnits的顺序为[支援组合(可选), 角色组合]
+inline int getCardCharacterUnit(const CardDetail& card) {
+    return card.units.back();
+}
+inline int getCardSupportUnit(const CardDetail& card) {
+    return card.units.size() > 1 ? card.units.front() : Enums::Unit::none;
+}
 
 struct SupportDeckCard {
     int cardId;
@@ -95,7 +106,8 @@ public:
         std::optional<double> scoreUpLimit = std::nullopt,
         const std::optional<std::vector<int>>& customBonusCharacterIds = std::nullopt,
         const std::optional<int>& customBonusAttr = std::nullopt,
-        const std::optional<std::unordered_map<int, int>>& customBonusSupportUnits = std::nullopt
+        const std::optional<std::unordered_map<int, int>>& customBonusSupportUnits = std::nullopt,
+        MultiUnitBonusEvaluation multiUnitEval = MultiUnitBonusEvaluation::ByDeck
     );
 
     /**
@@ -105,6 +117,7 @@ public:
      * @param eventConfig 活动设置
      * @param areaItemLevels （可选）纳入计算的区域道具等级
      * @param scoreUpLimit 终章应用的技能加分上限
+     * @param multiUnitEval 多组合加成判定方式（force_off时不计算多组合综合力表）
      */
     std::vector<CardDetail> batchGetCardDetail(
         const std::vector<UserCard>& userCards,
@@ -115,7 +128,8 @@ public:
         std::optional<double> scoreUpLimit = std::nullopt,
         const std::optional<std::vector<int>>& customBonusCharacterIds = std::nullopt,
         const std::optional<int>& customBonusAttr = std::nullopt,
-        const std::optional<std::unordered_map<int, int>>& customBonusSupportUnits = std::nullopt
+        const std::optional<std::unordered_map<int, int>>& customBonusSupportUnits = std::nullopt,
+        MultiUnitBonusEvaluation multiUnitEval = MultiUnitBonusEvaluation::ByDeck
     );
 
     /**

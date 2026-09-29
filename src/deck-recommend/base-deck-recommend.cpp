@@ -228,7 +228,8 @@ BestPermutationResult BaseDeckRecommend::getBestPermutation(
                 ctx.maxValue = value;
                 ctx.ret.bestDeck = RecommendDeck(deckDetail, ctx.config.target, score);
             }
-        }
+        },
+        config.multiUnitBonusEvaluation
     );
     return ctx.ret;
 }
@@ -280,7 +281,8 @@ std::vector<RecommendDeck> BaseDeckRecommend::recommendHighScoreDeck(
     auto cards = cardCalculator.batchGetCardDetail(
         userCards, config.cardConfig, config.singleCardConfig, 
         eventConfig, areaItemLevels, scoreUpLimit,
-        config.customBonusCharacterIds, config.customBonusAttr, config.customBonusSupportUnits
+        config.customBonusCharacterIds, config.customBonusAttr, config.customBonusSupportUnits,
+        config.multiUnitBonusEvaluation
     );
 
     // 归类支援卡组
@@ -372,7 +374,8 @@ std::vector<RecommendDeck> BaseDeckRecommend::recommendHighScoreDeck(
             auto card = cardCalculator.batchGetCardDetail(
                 {uc}, config.cardConfig, config.singleCardConfig, 
                 eventConfig, areaItemLevels, scoreUpLimit,
-                config.customBonusCharacterIds, config.customBonusAttr, config.customBonusSupportUnits
+                config.customBonusCharacterIds, config.customBonusAttr, config.customBonusSupportUnits,
+                config.multiUnitBonusEvaluation
             );
             if (card.size() > 0) {
                 fixedCards.push_back(card[0]);
