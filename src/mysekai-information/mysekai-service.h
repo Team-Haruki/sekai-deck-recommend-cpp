@@ -6,7 +6,11 @@
 
 
 struct MysekaiGateBonus {
+    int gateId;
+    // 大门对应的组合；shuffle类型大门（如JP的6号门）为none
     int unit;
+    int level;
+    // 没有对应等级行时为0（客户端同样按0处理，而不是报错）
     double powerBonusRate;
 };
 
@@ -34,8 +38,8 @@ public:
     std::vector<UserMysekaiFixtureGameCharacterPerformanceBonus> getMysekaiFixtureBonuses();
 
     /**
-     * 获得自定义世界的大门加成
-     * 计算逻辑：原创角色看组合；如果V有支援组合，看支援组合；如果V没有支援组合，取加成最大值
+     * 获得用户所有大门的加成（按用户数据顺序）
+     * 缺少大门或等级定义时加成为0，不抛异常
      */
     std::vector<MysekaiGateBonus> getMysekaiGateBonuses();
 
