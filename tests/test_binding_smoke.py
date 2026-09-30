@@ -625,6 +625,110 @@ class MysekaiGateBonusTests(unittest.TestCase):
         bonuses = self.gate_bonuses([(99, 1), (1, 999)])
         self.assertEqual(set(bonuses.values()), {0})
 
+# Marathon event whose bonus characters (1, 5, 9, 13, 17) fill a same-attribute
+# deck on their own, so the card priority pre-filter drops every other card.
+PINNED_EVENT_ID = 300
+PINNED_BONUS_CHARACTERS = (1, 5, 9, 13, 17)
+
+
+def pinned_marathon_master_data():
+    data = wl3_rule_master_data()
+    data.update(
+        {
+            "events": json.dumps([{"id": PINNED_EVENT_ID, "eventType": "marathon"}]),
+            "eventCards": json.dumps(
+                [
+                    {
+                        "id": card_id,
+                        "eventId": PINNED_EVENT_ID,
+                        "cardId": card_id,
+                        "bonusRate": 20,
+                        "leaderBonusRate": 0,
+                    }
+                    for card_id in range(1, 6)
+                ]
+            ),
+            "eventDeckBonuses": json.dumps(
+                [
+                    {
+                        "id": index,
+                        "eventId": PINNED_EVENT_ID,
+                        "gameCharacterUnitId": character_id,
+                        "cardAttr": "cute",
+                        "bonusRate": 50,
+                    }
+                    for index, character_id in enumerate(PINNED_BONUS_CHARACTERS, 1)
+                ]
+            ),
+        }
+    )
+    return data
+
+
+class PinnedCharacterTests(unittest.TestCase):
+    """Pinned characters must survive the dfs_ga card priority pre-filter."""
+
+    def setUp(self):
+        self.engine = binding.SekaiDeckRecommend()
+        self.engine.update_masterdata_from_strings(pinned_marathon_master_data(), "jp")
+        self.engine.update_musicmetas_from_string(
+            json.dumps(
+                [
+                    {
+                        "music_id": 1,
+                        "difficulty": "expert",
+                        "music_time": 100,
+                        "event_rate": 100,
+                        "base_score": 1,
+                        "base_score_auto": 1,
+                        "skill_score_solo": [0.1] * 6,
+                        "skill_score_auto": [0.1] * 6,
+                        "skill_score_multi": [0.1] * 6,
+                        "fever_score": 0,
+                        "fever_end_time": 0,
+                        "tap_count": 100,
+                    }
+                ]
+            ),
+            "jp",
+        )
+
+    def recommend(self, algorithm, fixed_characters, leader):
+        options = binding.DeckRecommendOptions.from_dict(
+            {
+                "region": "jp",
+                "user_data_str": wl3_test_user_data([1, 2, 3, 4, 5, 6, 7, 8]),
+                "live_type": "multi",
+                "music_id": 1,
+                "music_diff": "expert",
+                "event_id": PINNED_EVENT_ID,
+                "target": "score",
+                "algorithm": algorithm,
+                "limit": 1,
+                "timeout_ms": 2000,
+                "fixed_characters": fixed_characters,
+                "forcedLeaderCharacterId": leader,
+            }
+        )
+        return self.engine.recommend(options).decks[0]
+
+    def test_pinned_non_bonus_character_keeps_its_cards(self):
+        # Character 2 (card 6) has no event bonus and is filtered out by the
+        # priority tables; dfs_ga used to fail with "no cards to select".
+        for algorithm in ("dfs_ga", "dfs", "ga"):
+            with self.subTest(algorithm=algorithm):
+                deck = self.recommend(algorithm, [1, 2], 1)
+                characters = [WL3_TEST_CARD_CHARACTERS[card.card_id] for card in deck.cards]
+                self.assertEqual(characters[0], 1)
+                self.assertIn(2, characters)
+
+    def test_pinned_character_without_cards_is_rejected(self):
+        # Character 3 has no owned card at all.
+        for algorithm in ("dfs_ga", "dfs"):
+            with self.subTest(algorithm=algorithm):
+                with self.assertRaisesRegex(ValueError, "Fixed character 3 has no usable card"):
+                    self.recommend(algorithm, [1, 3], 1)
+
 
 if __name__ == "__main__":
     unittest.main()
