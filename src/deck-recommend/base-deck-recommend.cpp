@@ -414,6 +414,16 @@ std::vector<RecommendDeck> BaseDeckRecommend::recommendHighScoreDeck(
     if (int(occupiedCharacterIds.size()) > config.member) {
         throw std::runtime_error("Fixed cards and fixed characters exceed member count");
     }
+    // 固定角色必须至少有一张可用卡（已持有且稀有度未被禁用、未被组合过滤），否则任何算法都无法组队
+    for (const auto characterId : requiredCharacters) {
+        if (fixedCardCharacterIds.count(characterId)) continue;
+        bool hasCard = std::any_of(cards.begin(), cards.end(), [&](const CardDetail& card) {
+            return card.characterId == characterId;
+        });
+        if (!hasCard)
+            throw std::invalid_argument("Fixed character " + std::to_string(characterId)
+                + " has no usable card (not owned, rarity disabled or filtered by unit)");
+    }
 
     auto honorBonus = deckCalculator.getHonorBonusPower();
 
@@ -1072,6 +1082,18 @@ std::vector<RecommendDeck> BaseDeckRecommend::recommendHighScoreDeck(
         std::vector<CardDetail> seedCards = cards;
         std::vector<CardDetail> seedPrev{};
         seedCards = filterCardPriority(liveType, eventConfig.eventType, seedCards, seedPrev, baseConfig.member);
+        // 优先级筛选只看活动加成/稀有度/突破，可能把固定角色（及固定卡）全部筛掉，
+        // 导致GA预热对固定角色无卡可选（"no cards to select"），这里把它们补回种子卡池
+        if (!requiredCharacterSet.empty() || !fixedCards.empty()) {
+            std::unordered_set<int> seedIds{};
+            for (const auto& card : seedCards) seedIds.insert(card.cardId);
+            for (const auto& card : cards) {
+                if ((requiredCharacterSet.count(card.characterId) || fixedCardIds.count(card.cardId))
+                    && seedIds.insert(card.cardId).second) {
+                    seedCards.push_back(card);
+                }
+            }
+        }
         {
             // 先用一小段GA预热把结果队列垫满，DFS的上界剪枝从第一个结点就能生效
             //（剪枝门槛要求队列中已有limit个结果，冷启动下前期完全不剪枝）

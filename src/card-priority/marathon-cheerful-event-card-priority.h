@@ -4,7 +4,8 @@
 #include "card-priority/card-priority-filter.h"
 #include "common/collection-utils.h"
 
-inline const std::vector<CardPriority> marathonCheerfulCardPriorities = {
+inline const std::vector<CardPriority>& marathonCheerfulCardPriorities() {
+    static const std::vector<CardPriority> table = {
     CardPriority{
         .eventBonus = 25 + 25 + 20 + 25, // 同色同队 当期卡 5破四星
         .cardRarityType = Enums::CardRarityType::rarity_4,
@@ -174,5 +175,7 @@ inline const std::vector<CardPriority> marathonCheerfulCardPriorities = {
         .priority = 100
     }
 };
+    return table;
+}
 
 #endif
