@@ -109,12 +109,35 @@ repository.
 
 - PyPI package name: `haruki-sekai-deck-recommend-cpp`.
 - npm package name: `haruki-sekai-deck-recommend-cpp`.
-- Release workflows build PyPI wheels, PyPI sdist, and the npm wasm package.
+- The workflows reuse the shared templates in
+  [`seiunx-dev/ci-templates`](https://github.com/seiunx-dev/ci-templates) at `@v1`
+  where one fits (release gate, GitHub Release, Sonar, actionlint). cibuildwheel
+  (scikit-build-core + pybind11) and the emsdk build have no template, so those jobs
+  stay in the thin callers with a comment saying why. Reuse the templates first;
+  customize only when they genuinely cannot meet a need, and fix template bugs
+  upstream (new `v1.x.y` tag) instead of working around them here.
+- `ci.yml` (`CI`, `master` pushes, PRs to `master`, manual dispatch): one cp313
+  wheel per OS (linux x64 manylinux, Windows x64 with clang-cl + Ninja, macOS
+  arm64), the WebAssembly build + `npm pack` (`scripts/ci/build-npm.sh`, emsdk
+  pinned), the coverage build (`scripts/ci/coverage.sh`: instrumented native
+  module, unittest, gcovr) feeding `Sonar`, and actionlint. The aggregate job
+  **`CI OK`** is the only required status check.
+- `release.yml` (`Release`): bump `version` in `pyproject.toml` and
+  `npm/haruki-sekai-deck-recommend-cpp/package.json` in a PR → merge and wait for
+  `CI OK` on `master` → push the tag `v<version>`. `release-gate` refuses a tag that
+  differs from either file and waits for `CI OK` on the tagged commit. The run builds
+  all wheels (cp310–cp315t on linux x64/arm64 manylinux and musllinux, Windows x64,
+  macOS arm64; interpreters split into three parallel groups; musllinux legs may
+  fail without blocking the release, as before), the sdist and the npm wasm package.
+  Only after every build is done does it create the GitHub Release (all artifacts +
+  `SHA256SUMS-<tag>.txt`) and publish to PyPI and npm. Manual dispatch is a dry run
+  that builds everything and publishes nothing.
 - PyPI and npm publishing use Trusted Publishing/OIDC. Keep the GitHub
   environments named `pypi-publish` and `npm-publish` unless the publishing
-  setup is intentionally redesigned.
-- GitHub Release artifacts may include both PyPI artifacts and the npm tarball;
-  PyPI publishing must only download artifacts prefixed with `pypi-`.
+  setup is intentionally redesigned. Both trusted publishers must name the
+  workflow file `release.yml`.
+- The GitHub Release carries both PyPI artifacts and the npm tarball; PyPI
+  publishing downloads only the `release-wheels-*` and `release-sdist` artifacts.
 
 ## Engineering Rules
 

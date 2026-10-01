@@ -1,0 +1,119 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# PRs: one group per PR, newer pushes cancel older runs. Everything else: one group per
+# event and commit, so a queued main run is never replaced by a newer one (every commit keeps
+# its "CI OK" and :sha-<sha> image for the release gate and promote-on-tag).
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || format('{0}-{1}', github.event_name, github.sha) }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  # No template drives cibuildwheel (scikit-build-core + pybind11, not maturin): one
+  # interpreter per OS proves the native module still builds everywhere.
+  wheels:
+    name: Wheel ${{ matrix.p.label }}
+    runs-on: ${{ matrix.p.os }}
+    timeout-minutes: 30
+    # cibuildwheel settings of the old build-wheels.yml (Windows builds with clang-cl + Ninja).
+    env:
+      CIBW_BUILD_FRONTEND: build[uv]
+      CIBW_BUILD_VERBOSITY: "1"
+      CIBW_CMAKE_GENERATOR: Ninja
+      CIBW_ENVIRONMENT_WINDOWS: CC=clang-cl CXX=clang-cl
+    strategy:
+      fail-fast: false
+      matrix:
+        py: ["cp313"] # one interpreter per OS on every CI run; the full set builds on tags
+        p:
+          - { label: linux-x64, os: ubuntu-latest, plat: "manylinux_x86_64" }
+          - { label: windows-x64, os: windows-latest, plat: "win_amd64" }
+          - { label: macos-arm64, os: macos-latest, plat: "macosx_arm64" }
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          submodules: recursive
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        with:
+          version: "0.9.18"
+          enable-cache: false
+      - name: Select interpreters
+        env:
+          PY: ${{ matrix.py }}
+          PLAT: ${{ matrix.p.plat }}
+        shell: bash
+        run: |
+          build=""; for p in $PY; do build="$build $p-$PLAT"; done
+          echo "CIBW_BUILD=${build# }" >> "$GITHUB_ENV"
+      - name: cibuildwheel
+        run: uvx --no-build cibuildwheel==4.2.0 --output-dir wheelhouse
+
+  # Emscripten build of the npm package (no template covers emsdk).
+  wasm:
+    name: WebAssembly / npm
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          submodules: recursive
+          persist-credentials: false
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/emsdk
+          key: emsdk-5.0.7-${{ runner.os }}
+      - run: ./scripts/ci/build-npm.sh 5.0.7 # installs emsdk if missing, emcmake + ninja, npm pack
+
+  # Instrumented native build + unittest + gcovr; sonar.yml picks up python.xml and cpp.xml.
+  coverage:
+    name: Coverage
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          submodules: recursive
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.11"
+      - run: "python -m pip install --only-binary :all: coverage==7.15.3 gcovr==8.6"
+      - run: ./scripts/ci/coverage.sh coverage # Debug + SEKAI_ENABLE_COVERAGE build, unittest, gcovr
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: coverage-cpp
+          path: coverage/
+          retention-days: 3
+
+  sonar:
+    name: Sonar
+    needs: [coverage]
+    uses: seiunx-dev/ci-templates/.github/workflows/sonar.yml@v1
+    with:
+      project-version: auto
+    secrets:
+      SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+
+  workflows:
+    name: Workflow lint
+    uses: seiunx-dev/ci-templates/.github/workflows/actionlint.yml@v1
+
+  ci-ok:
+    name: CI OK # the only required status check
+    if: always()
+    needs: [wheels, wasm, coverage, sonar, workflows]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - if: contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled')
+        run: exit 1

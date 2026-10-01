@@ -78,10 +78,13 @@ application provides them at runtime. Local benchmark fixtures may live beside
 this repository as `../haruki-sekai-master`, `../music_metas.json`, and
 `../collections.suite.json`; do not commit those fixture files.
 
-Release workflows build PyPI wheels, PyPI sdist, and the npm wasm package. PyPI
-and npm publishing use Trusted Publishing/OIDC through the `pypi-publish` and
-`npm-publish` environments. PyPI publishing should only download artifacts
-prefixed with `pypi-`.
+CI (`ci.yml`) and releases (`release.yml`) reuse the shared
+`seiunx-dev/ci-templates` (`@v1`) where a template fits; cibuildwheel and emsdk
+stay in the callers. A tag push gates on `pyproject.toml` + npm `package.json`
+and `CI OK`, builds PyPI wheels, the sdist and the npm wasm package, then
+publishes. PyPI and npm publishing use Trusted Publishing/OIDC through the
+`pypi-publish` and `npm-publish` environments; PyPI publishing downloads only
+the `release-wheels-*` and `release-sdist` artifacts. See AGENTS.md.
 
 ## Performance & Regression Verification
 
