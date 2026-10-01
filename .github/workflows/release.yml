@@ -70,7 +70,7 @@ jobs:
           build=""; for p in $PY; do build="$build $p-$PLAT"; done
           echo "CIBW_BUILD=${build# }" >> "$GITHUB_ENV"
       - name: cibuildwheel
-        run: uvx cibuildwheel==4.2.0 --output-dir wheelhouse
+        run: uvx --no-build cibuildwheel==4.2.0 --output-dir wheelhouse
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: release-wheels-${{ matrix.p.label }}-${{ strategy.job-index }}

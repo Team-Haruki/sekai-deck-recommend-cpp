@@ -56,7 +56,7 @@ jobs:
           build=""; for p in $PY; do build="$build $p-$PLAT"; done
           echo "CIBW_BUILD=${build# }" >> "$GITHUB_ENV"
       - name: cibuildwheel
-        run: uvx cibuildwheel==4.2.0 --output-dir wheelhouse
+        run: uvx --no-build cibuildwheel==4.2.0 --output-dir wheelhouse
 
   # Emscripten build of the npm package (no template covers emsdk).
   wasm:
