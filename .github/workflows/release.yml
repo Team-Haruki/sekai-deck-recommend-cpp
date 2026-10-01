@@ -1,151 +1,173 @@
-name: Build and publish packages
+name: Release
+# Replaces release.yml + build-wheels.yml + build-sdist.yml + build-npm.yml. All builds finish
+# before anything is published: npm, PyPI and the GitHub Release all need every build job (npm
+# used to publish before the wheels were done). cibuildwheel and emsdk stay in this caller
+# because no template drives them; the gate and the GitHub Release come from ci-templates.
 
 on:
   push:
-    tags:
-      - "v*"
-  workflow_dispatch:
-    inputs:
-      package_version:
-        description: "npm package version to publish"
-        required: true
-        default: "0.2.28"
-        type: string
-      source_ref:
-        description: "Git ref to build for npm publish"
-        required: true
-        default: "v0.2.28"
-        type: string
+    tags: ['v*']
+  workflow_dispatch: # dry run: builds everything, publishes nothing
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
 
 jobs:
-  build_wheels:
-    name: Build wheels
-    if: github.event_name != 'workflow_dispatch'
-    uses: ./.github/workflows/build-wheels.yml
-
-  build_sdist:
-    name: Build sdist
-    if: github.event_name != 'workflow_dispatch'
-    uses: ./.github/workflows/build-sdist.yml
-
-  build_npm:
-    name: Build npm package
-    uses: ./.github/workflows/build-npm.yml
+  gate:
+    name: Gate
+    permissions:
+      contents: read
+      checks: read
+    uses: seiunx-dev/ci-templates/.github/workflows/release-gate.yml@v1
     with:
-      source_ref: ${{ inputs.source_ref || github.ref }}
+      version-source: pyproject
+      version-extra-paths: npm/haruki-sekai-deck-recommend-cpp/package.json
 
-  github_release:
-    name: Create GitHub Release
-    if: github.event_name != 'workflow_dispatch'
-    needs:
-      - build_wheels
-      - build_sdist
-      - build_npm
+  wheels:
+    name: Wheels ${{ matrix.p.label }} (${{ matrix.py }})
+    needs: gate
+    runs-on: ${{ matrix.p.os }}
+    timeout-minutes: 45
+    # musllinux legs were allowed to fail before as well; a missing musl wheel must not block
+    # the rest of the release.
+    continue-on-error: ${{ contains(matrix.p.label, 'musl') }}
+    env:
+      CIBW_BUILD_FRONTEND: build[uv]
+      CIBW_BUILD_VERBOSITY: "1"
+      CIBW_CMAKE_GENERATOR: Ninja
+      CIBW_ENVIRONMENT_WINDOWS: CC=clang-cl CXX=clang-cl
+    strategy:
+      fail-fast: false
+      matrix:
+        # interpreters split into groups so the 8 serial Windows builds (about 20 min) run in parallel
+        py: ["cp310 cp311 cp312", "cp313 cp314 cp314t", "cp315 cp315t"]
+        p:
+          - { label: linux-x64-many, os: ubuntu-latest, plat: "manylinux_x86_64" }
+          - { label: linux-x64-musl, os: ubuntu-latest, plat: "musllinux_x86_64" }
+          - { label: linux-arm64-many, os: ubuntu-24.04-arm, plat: "manylinux_aarch64" }
+          - { label: linux-arm64-musl, os: ubuntu-24.04-arm, plat: "musllinux_aarch64" }
+          - { label: windows-x64, os: windows-latest, plat: "win_amd64" }
+          - { label: macos-arm64, os: macos-latest, plat: "macosx_arm64" }
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          submodules: recursive
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        with:
+          version: "0.9.18"
+          enable-cache: false
+      - name: Select interpreters
+        env:
+          PY: ${{ matrix.py }}
+          PLAT: ${{ matrix.p.plat }}
+        shell: bash
+        run: |
+          build=""; for p in $PY; do build="$build $p-$PLAT"; done
+          echo "CIBW_BUILD=${build# }" >> "$GITHUB_ENV"
+      - name: cibuildwheel
+        run: uvx cibuildwheel==4.2.0 --output-dir wheelhouse
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: release-wheels-${{ matrix.p.label }}-${{ strategy.job-index }}
+          path: wheelhouse/*.whl
+          retention-days: 3
+
+  sdist:
+    name: sdist
+    needs: gate
     runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          submodules: recursive
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        with:
+          enable-cache: false
+      - run: uv build --sdist --out-dir dist
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: release-sdist
+          path: dist/
+          retention-days: 3
 
+  npm:
+    name: npm package
+    needs: gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          submodules: recursive
+          persist-credentials: false
+      - run: ./scripts/ci/build-npm.sh 5.0.7
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: release-npm
+          path: npm/haruki-sekai-deck-recommend-cpp/*.tgz
+          retention-days: 3
+
+  publish:
+    name: GitHub Release
+    needs: [gate, wheels, sdist, npm]
+    if: needs.gate.outputs.is-tag == 'true'
     permissions:
       contents: write
+    uses: seiunx-dev/ci-templates/.github/workflows/gh-release.yml@v1
+    with:
+      tag: ${{ needs.gate.outputs.tag }}
+      prerelease: ${{ needs.gate.outputs.prerelease }}
+      artifact-pattern: release-*
 
-    steps:
-      - name: Download release artifacts
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
-        with:
-          path: dist
-          merge-multiple: true
-
-      - name: Create GitHub Release
-        uses: softprops/action-gh-release@b4309332981a82ec1c5618f44dd2e27cc8bfbfda # v3.0.0
-        with:
-          files: dist/*
-          generate_release_notes: true
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-  publish_pypi:
-    name: Publish to PyPI
-    if: github.event_name != 'workflow_dispatch'
-    needs:
-      - build_wheels
-      - build_sdist
+  pypi:
+    name: PyPI
+    needs: [gate, publish]
+    if: needs.gate.outputs.is-tag == 'true'
     runs-on: ubuntu-latest
-
-    environment:
-      name: pypi-publish
-      url: https://pypi.org/p/haruki-sekai-deck-recommend-cpp
-
+    timeout-minutes: 20
+    environment: pypi-publish
     permissions:
       id-token: write
-
     steps:
-      - name: Download PyPI artifacts
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
+          pattern: release-{wheels,sdist}*
           path: dist
-          pattern: pypi-*
           merge-multiple: true
-
-      - name: Publish to PyPI
-        uses: pypa/gh-action-pypi-publish@cef221092ed1bacb1cc03d23a2d87d1d172e277b # v1.14.0
+      - uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # v1.14.2
         with:
-          packages-dir: dist/
+          skip-existing: true # a re-run after a partial upload no longer fails with "File already exists"
 
-  publish_npm:
-    name: Publish to npm
-    needs:
-      - build_npm
+  npm-publish:
+    name: npm
+    needs: [gate, publish]
+    if: needs.gate.outputs.is-tag == 'true'
     runs-on: ubuntu-latest
-
-    environment:
-      name: npm-publish
-      url: https://www.npmjs.com/package/haruki-sekai-deck-recommend-cpp
-
+    timeout-minutes: 10
+    environment: npm-publish
     permissions:
       id-token: write
-
     steps:
-      - name: Set up Node.js
-        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: "24"
-          registry-url: "https://registry.npmjs.org"
-
-      - name: Update npm
-        run: npm install -g --ignore-scripts npm@12.0.2
-
-      - name: Download npm package
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+          registry-url: https://registry.npmjs.org
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
-          name: npm-package
-          path: dist
-
-      - name: Publish to npm
-        env:
-          EXPECTED_NPM_VERSION: ${{ inputs.package_version }}
+          name: release-npm
+          path: npm-dist
+      - name: Publish with provenance (skip if the version exists)
         run: |
-          shopt -s globstar nullglob
-          packages=(dist/**/haruki-sekai-deck-recommend-cpp-*.tgz)
-
-          if [ "${#packages[@]}" -ne 1 ]; then
-            echo "Expected exactly one npm package, found ${#packages[@]}."
-            find dist -maxdepth 4 -type f -print
-            exit 1
+          pkg=$(ls npm-dist/*.tgz)
+          ver=$(tar -xOzf "$pkg" package/package.json | jq -r .version)
+          if npm view "haruki-sekai-deck-recommend-cpp@$ver" version >/dev/null 2>&1; then
+            echo "$ver already published"; exit 0
           fi
-
-          actual_version="$(
-            tar -xOf "${packages[0]}" package/package.json \
-              | node -p "JSON.parse(require('fs').readFileSync(0, 'utf8')).version"
-          )"
-
-          if [ -n "${EXPECTED_NPM_VERSION:-}" ]; then
-            if [ "${actual_version}" != "${EXPECTED_NPM_VERSION}" ]; then
-              echo "Expected npm package version ${EXPECTED_NPM_VERSION}, got ${actual_version}."
-              exit 1
-            fi
-          fi
-
-          if npm view "haruki-sekai-deck-recommend-cpp@${actual_version}" version >/dev/null 2>&1; then
-            echo "npm package version ${actual_version} already exists; skipping publish."
-            exit 0
-          fi
-
-          npm publish "$(realpath "${packages[0]}")" --provenance
+          npm publish "$pkg" --provenance --access public
