@@ -62,7 +62,7 @@ If you are not using uv, `pip install -e . -v` remains supported.
 from sekai_deck_recommend_cpp import (
     SekaiDeckRecommend, 
     DeckRecommendOptions,
-    DeckRecommendCardConfig
+    DeckRecommendSingleCardConfig,
 )
    
 sekai_deck_recommend = SekaiDeckRecommend()
@@ -93,15 +93,17 @@ options.live_type = "multi"
 options.music_id = 74
 options.music_diff = "expert"
 options.event_id = 160
+# a list of DeckRecommendSingleCardConfig objects (plain dicts are not accepted
+# here; build them with from_dict or set attributes on a new instance)
 options.single_card_configs = [
-    {
+    DeckRecommendSingleCardConfig.from_dict({
         "card_id": 12345,
         "level": 60,
         "skill_level": 4,
         "master_rank": 5,
         "episode_read_count": 2,
         "canvas": True,
-    }
+    })
 ]
 
 result = sekai_deck_recommend.recommend(options)

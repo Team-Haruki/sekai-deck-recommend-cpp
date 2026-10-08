@@ -77,7 +77,8 @@ python tools/bench/bench_matrix.py all                                     # 新
 ## 引擎并行度
 
 `DECK_ENGINE_THREADS=N` 开启 GA 批量评估的引擎内并行（默认 1 = 完全串行，
-行为与历史一致；wasm 强制串行）。设计保证并行与串行**逐位一致**（生成阶段
+行为与历史一致；默认 wasm 构建强制串行，以 `-DSEKAI_WASM_THREADS=ON`
+构建的 pthreads wasm 同样支持并行）。设计保证并行与串行**逐位一致**（生成阶段
 串行保 RNG 顺序、评估并行、按首次出现顺序串行合并），可直接用
 `regress.py compare` 验证。部署时注意与 deck-service EnginePool 的核数
 预算相乘不要超订。实测收益集中在大种群 GA（8 线程 best ~1.5×）；RL 生产

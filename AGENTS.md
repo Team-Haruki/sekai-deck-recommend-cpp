@@ -37,7 +37,15 @@ change live automation behavior downstream.
 - `src/master-data/`: masterdata model structs.
 - `3rdparty/yyjson/`: vendored yyjson dependency for masterdata, music metas,
   userdata parsing, and wasm JSON-in / JSON-out binding payloads.
-- `sekai_deck_recommend.cpp` and `.pyi`: Python binding surface.
+- `src/sekai_deck_recommend.cpp` and `src/sekai_deck_recommend.pyi`: Python
+  binding surface; `src/sekai_deck_recommend_wasm.cpp`: wasm binding (see
+  Bindings below).
+- `npm/haruki-sekai-deck-recommend-cpp/`: npm package scaffold for the wasm
+  build.
+- `tests/`: Python `unittest` suites (binding smoke/area-item tests and the
+  bench tooling tests).
+- `tools/bench/`: local benchmark and regression harness.
+- `scripts/ci/`: CI helper scripts (`build-npm.sh`, `coverage.sh`).
 - `data/`: static data required by the engine. `data/rl_seed_cache.tsv` is a
   runtime-generated RL warm-start cache (written when `DECK_DATA_DIR` or
   `DECK_RL_SEED_CACHE_FILE` is set). Only the default
@@ -65,6 +73,17 @@ that sibling repository:
 cd ../deck-service
 cargo check
 cargo build
+```
+
+Python tests (the same suites `scripts/ci/coverage.sh` runs in CI, without the
+coverage instrumentation). The binding tests import the bare native module from
+`SEKAI_BINDING_DIR`:
+
+```bash
+cmake -S . -B build/native -DCMAKE_BUILD_TYPE=Release
+cmake --build build/native -j
+SEKAI_BINDING_DIR="$PWD/build/native" python -m unittest discover -s tests -p 'test_binding*.py'
+python -m unittest discover -s tests -p 'test_bench_tools.py'
 ```
 
 If submodules are missing after cloning:
@@ -96,11 +115,12 @@ loader, `.wasm` binary, wrapper helpers, and TypeScript declarations. Do not
 bundle masterdata, music metas, or user data in the npm package; the application
 provides them at runtime.
 
-Common local benchmark fixtures in this workspace use:
+Local benchmark fixtures default to (see `tools/bench/common.py`; override with
+`SEKAI_BENCH_MASTERDATA`, `SEKAI_BENCH_MUSICMETAS`, `SEKAI_BENCH_USERDATA`):
 
-- masterdata: `../haruki-sekai-master`
-- music metas: `../music_metas.json`
-- user data: `../collections.suite.json`
+- masterdata: `./haruki-sekai-master/master` (inside the repo, gitignored)
+- music metas: `../music_metas.json` (beside the repo)
+- user data: `./collections.suite.json` (inside the repo, gitignored)
 
 These fixtures are not package assets and should not be committed from this
 repository.
@@ -162,15 +182,19 @@ repository.
 
 Two parallel binding files live next to the engine:
 
-- `src/sekai_deck_recommend.cpp` — pybind11 binding for the Python wheel and
-  the `deck-service` FFI bridge.
+- `src/sekai_deck_recommend.cpp` — pybind11 binding for the Python wheel.
 - `src/sekai_deck_recommend_wasm.cpp` — Embind binding for the WebAssembly
   build. JSON-in / JSON-out surface (`recommend(optionsJson)` returns a JSON
   string).
 
-Option validation logic is duplicated between the two until a shared core is
-extracted; when adding a field to `DeckRecommendOptions`, update both files
-and keep their schemas identical.
+`deck-service` compiles neither of these: it builds only the engine sources and
+ships its own C bridge (`cpp_bridge/deck_recommend_c.cpp` in that repository),
+which parses the options itself.
+
+Option validation logic is therefore duplicated in three places until a shared
+core is extracted; when adding a field to `DeckRecommendOptions`, update both
+binding files here, keep their schemas identical, and make the matching change
+in the deck-service bridge.
 
 ## High-Risk Areas
 

@@ -2,7 +2,8 @@
 
 Treat this repository as production C++ scoring code for Project Sekai deck
 recommendation and live calculation. The same engineering rules also live in
-`AGENTS.md` and `CLAUDE.md` — keep all three in sync when changing guidance.
+`AGENTS.md` (the single source of truth; `CLAUDE.md` only points there) — keep
+both files in sync when changing guidance.
 
 ## Project Context
 
@@ -42,7 +43,7 @@ recommendation and live calculation. The same engineering rules also live in
 - `src/card-information/`: card power, skill, and image state calculation.
 - `src/data-provider/`: masterdata/music meta/userdata loading.
 - `src/user-data/`: userdata parsers used by downstream services.
-- `sekai_deck_recommend.cpp`: Python binding entry point.
+- `src/sekai_deck_recommend.cpp`: Python binding entry point.
 
 ## Build Checks
 
@@ -70,13 +71,16 @@ cmake --build . -j
 
 Two parallel binding files live in `src/`: `sekai_deck_recommend.cpp`
 (pybind11) and `sekai_deck_recommend_wasm.cpp` (Embind, JSON-in / JSON-out).
-Option validation is duplicated; keep both in sync when adding a field.
+deck-service uses neither; it builds the engine sources with its own C bridge
+(`cpp_bridge/deck_recommend_c.cpp`). Option validation is duplicated across all
+three; keep them in sync when adding a field.
 
 The npm package scaffold lives in `npm/haruki-sekai-deck-recommend-cpp`. Do not
 bundle masterdata, music metas, or user data into the npm package; the
-application provides them at runtime. Local benchmark fixtures may live beside
-this repository as `../haruki-sekai-master`, `../music_metas.json`, and
-`../collections.suite.json`; do not commit those fixture files.
+application provides them at runtime. Local benchmark fixtures default to
+`./haruki-sekai-master/master` and `./collections.suite.json` inside the repo
+(gitignored) and `../music_metas.json` beside it (see `tools/bench/common.py`);
+do not commit those fixture files.
 
 CI (`ci.yml`) and releases (`release.yml`) reuse the shared
 `seiunx-dev/ci-templates` (`@v1`) where a template fits; cibuildwheel and emsdk
