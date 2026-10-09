@@ -159,6 +159,20 @@ repository.
 - The GitHub Release carries both PyPI artifacts and the npm tarball; PyPI
   publishing downloads only the `release-wheels-*` and `release-sdist` artifacts.
 
+### Release notes
+
+Release notes are written in English and follow the org standard
+[RELEASE_NOTES.md](https://github.com/seiunx-dev/ci-templates/blob/main/RELEASE_NOTES.md).
+
+- Title every release with the tag only, for example `v0.4.2`.
+- Publish a tag as a pre-release only when it has an `-alpha`, `-beta` or `-rc`
+  suffix; every other tag is a regular release, and every tag gets a release.
+- Omit empty sections, and end each item with its PR number `(#123)` (the short
+  commit SHA when there is no PR).
+- After the `Release` workflow publishes the GitHub Release, rewrite its
+  auto-generated notes to the standard with
+  `gh release edit <tag> --notes-file <file>`.
+
 ## Engineering Rules
 
 - C++20. Headers and implementations live next to each other in `src/<area>/`.
