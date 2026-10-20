@@ -7,7 +7,13 @@ name: Release
 on:
   push:
     tags: ['v*']
-  workflow_dispatch: # dry run: builds everything, publishes nothing
+  workflow_dispatch:
+    inputs:
+      npm_release_tag:
+        description: 'Recover npm publication from an existing GitHub Release (for example v0.5.0); empty means a build-only dry run'
+        required: false
+        default: ''
+        type: string
 
 permissions:
   contents: read
@@ -19,6 +25,7 @@ concurrency:
 jobs:
   gate:
     name: Gate
+    if: github.event_name != 'workflow_dispatch' || inputs.npm_release_tag == ''
     permissions:
       contents: read
       checks: read
@@ -170,4 +177,39 @@ jobs:
           if npm view "haruki-sekai-deck-recommend-cpp@$ver" version >/dev/null 2>&1; then
             echo "$ver already published"; exit 0
           fi
-          npm publish "$pkg" --provenance --access public
+          npm publish "./$pkg" --provenance --access public
+
+  npm-recover:
+    name: Recover npm publication
+    if: github.event_name == 'workflow_dispatch' && inputs.npm_release_tag != ''
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: npm-publish
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "24"
+          registry-url: https://registry.npmjs.org
+      - name: Verify and publish the existing release archive
+        env:
+          GH_TOKEN: ${{ github.token }}
+          NPM_RELEASE_TAG: ${{ inputs.npm_release_tag }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$NPM_RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          [[ "$(gh release view "$NPM_RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --json isDraft --jq .isDraft)" == false ]]
+          version="${NPM_RELEASE_TAG#v}"
+          package="haruki-sekai-deck-recommend-cpp-${version}.tgz"
+          sums="SHA256SUMS-${NPM_RELEASE_TAG}.txt"
+          gh release download "$NPM_RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --pattern "$package" --pattern "$sums" --dir npm-dist
+          cd npm-dist
+          sha256sum --check --ignore-missing "$sums"
+          [[ "$(tar -xOzf "$package" package/package.json | jq -r .version)" == "$version" ]]
+          if npm view "haruki-sekai-deck-recommend-cpp@$version" version >/dev/null 2>&1; then
+            echo "$version already published"; exit 0
+          fi
+          npm publish "./$package" --provenance --access public
