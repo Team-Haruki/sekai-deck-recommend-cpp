@@ -97,6 +97,8 @@ export interface RecommendOptions {
   world_bloom_finale_turn?: number
   world_bloom_character_id?: number
   challenge_live_character_id?: number
+  /** Memory-event simulation: all attributes +25%, native unit characters +75% total. */
+  event_me_unit?: UnitType
   event_attr?: EventAttr
   event_unit?: UnitType
   event_type?: EventType

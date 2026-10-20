@@ -331,11 +331,24 @@ PreparedOptions buildOptions(
     auto worldBloomTurnOpt = jsonOpt<int>(opts, "world_bloom_event_turn");
     auto worldBloomFinaleTurnOpt = jsonOpt<int>(opts, "world_bloom_finale_turn");
     auto worldBloomCharOpt = jsonOpt<int>(opts, "world_bloom_character_id");
+    auto eventMeUnitOpt = jsonOpt<std::string>(opts, "event_me_unit");
     auto eventAttrOpt = jsonOpt<std::string>(opts, "event_attr");
     auto eventUnitOpt = jsonOpt<std::string>(opts, "event_unit");
     auto eventTypeOpt = jsonOpt<std::string>(opts, "event_type");
 
-    if (eventIdOpt) {
+    if (eventMeUnitOpt && (is_challenge_live || is_mysekai || eventIdOpt || eventAttrOpt || eventUnitOpt
+        || worldBloomTurnOpt || worldBloomFinaleTurnOpt || worldBloomCharOpt
+        || jsonOpt<std::string>(opts, "custom_bonus_attr")
+        || opts.contains("custom_bonus_character_ids")
+        || eventTypeOpt.value_or("marathon") != "marathon")) {
+        throw std::invalid_argument("event_me_unit requires a marathon simulation without other event or custom bonus selectors.");
+    }
+    if (eventMeUnitOpt) {
+        if (!VALID_UNIT_TYPES.count(*eventMeUnitOpt))
+            throw std::invalid_argument("Invalid memory event unit: " + *eventMeUnitOpt);
+        out.eventId = out.dataProvider.masterData->getMemoryEventFakeEventId(
+            mapEnum(EnumMap::unit, *eventMeUnitOpt));
+    } else if (eventIdOpt) {
         if (is_challenge_live)
             throw std::invalid_argument("event_id is not valid for challenge live.");
         out.eventId = *eventIdOpt;
