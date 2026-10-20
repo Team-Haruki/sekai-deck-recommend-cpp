@@ -175,6 +175,7 @@ class DeckRecommendOptions:
         music_id (int): Music ID
         music_diff (str): Music difficulty in ["easy", "normal", "hard", "expert", "master", "append"]
         event_id (int): Event ID, leave it None to use no-event or unit-attr-specificed recommendation
+        event_me_unit (str): Memory-event simulation: all cards +25%, native unit characters +75% total. Mutually exclusive with other event/custom bonus selectors; marathon only.
         event_attr (str): Attribute of unit-attr-specificed recommendation, only available when event_id is None. In ["mysterious", "cute", "cool", "pure", "happy"]
         event_unit (str): Unit of unit-attr-specificed recommendation, only available when event_id is None. In ["light_sound", "idol", "street", "theme_park", "school_refusal", "piapro"]
         event_type (str): Event type of unit-attr-specificed/no-event recommendation, only available when event_id is None. In ["marathon", "cheerful_carnival"]
@@ -225,6 +226,7 @@ class DeckRecommendOptions:
     music_id: int
     music_diff: str
     event_id: Optional[int]
+    event_me_unit: Optional[str]
     event_attr: Optional[str]
     event_unit: Optional[str]
     event_type: Optional[str]

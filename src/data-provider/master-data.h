@@ -93,6 +93,8 @@ public:
 
     int getUnitAttrFakeEventId(int eventType, int unit, int attr) const;
 
+    int getMemoryEventFakeEventId(int unit) const;
+
     int getWorldBloomFakeEventId(int worldBloomTurn, int unit) const;
 
     int getWorldBloomFakeFinaleEventId(int worldBloomTurn) const;

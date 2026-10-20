@@ -665,6 +665,78 @@ def pinned_marathon_master_data():
     return data
 
 
+class MemoryEventTests(unittest.TestCase):
+    def setUp(self):
+        self.engine = binding.SekaiDeckRecommend()
+        data = wl3_rule_master_data()
+        # All five attributes, including a virtual singer associated with VBS.
+        cards = json.loads(data["cards"])
+        for index, card in enumerate(cards):
+            card["attr"] = ("cute", "cool", "pure", "happy", "mysterious")[index % 5]
+            if card["id"] == 8:
+                card["supportUnit"] = "street"
+        data["cards"] = json.dumps(cards)
+        units = json.loads(data["gameCharacterUnits"])
+        units.append({"id": 102, "gameCharacterId": 21, "unit": "street"})
+        data["gameCharacterUnits"] = json.dumps(units)
+        self.engine.update_masterdata_from_strings(data, "jp")
+        self.engine.update_musicmetas_from_string(json.dumps([{
+            "music_id": 1, "difficulty": "expert", "music_time": 100,
+            "event_rate": 100, "base_score": 1, "base_score_auto": 1,
+            "skill_score_solo": [0] * 6, "skill_score_auto": [0] * 6,
+            "skill_score_multi": [0] * 6, "fever_score": 0,
+            "fever_end_time": 0, "tap_count": 100,
+        }]), "jp")
+
+    def options(self, unit, cards):
+        return {
+            "region": "jp", "user_data_str": wl3_test_user_data(cards),
+            "live_type": "multi", "music_id": 1, "music_diff": "expert",
+            "event_me_unit": unit, "target": "power", "algorithm": "dfs",
+            "limit": 1, "fixed_cards": cards,
+        }
+
+    def test_all_units_preserve_master_rank_and_exclude_associated_singers(self):
+        for unit in ("light_sound", "idol", "street", "theme_park", "school_refusal", "piapro"):
+            for cards in ([1, 2, 3, 4, 5], [1, 2, 3, 4, 8], [6, 7, 3, 5, 8]):
+                with self.subTest(unit=unit, cards=cards):
+                    options = binding.DeckRecommendOptions.from_dict(self.options(unit, cards))
+                    self.assertEqual(options.to_dict()["event_me_unit"], unit)
+                    deck = self.engine.recommend(options).decks[0]
+                    expected = {
+                        card_id: (75 if wl3_test_unit(WL3_TEST_CARD_CHARACTERS[card_id]) == unit else 25) + 10
+                        for card_id in cards
+                    }
+                    self.assertEqual({card.card_id: card.event_bonus_rate for card in deck.cards}, expected)
+                    self.assertEqual(deck.event_bonus_rate, sum(expected.values()))
+
+    def test_memory_event_bonus_changes_selection_and_event_points(self):
+        options = self.options("street", list(range(1, 9)))
+        options.pop("fixed_cards")
+        options["target"] = "score"
+        deck = self.engine.recommend(binding.DeckRecommendOptions.from_dict(options)).decks[0]
+        self.assertIn(3, [card.card_id for card in deck.cards])  # Kohane, the only VBS human in this pool.
+        self.assertEqual(deck.event_bonus_rate, 225)
+        base = 110 + deck.live_score // 17000 + min(13, (4 * deck.live_score) // 340000)
+        self.assertEqual(deck.score, int(base * 3.25))
+
+    def test_rejects_mixed_selectors(self):
+        for extra in (
+            {"event_id": 202}, {"event_attr": "cute"}, {"event_unit": "idol"},
+            {"world_bloom_event_turn": 1}, {"world_bloom_finale_turn": 3},
+            {"world_bloom_character_id": 9}, {"event_type": "cheerful_carnival"},
+            {"custom_bonus_attr": "cool"}, {"custom_bonus_character_ids": [9]},
+            {"live_type": "challenge"}, {"live_type": "mysekai"},
+        ):
+            with self.subTest(extra=extra):
+                options = self.options("street", [1, 2, 3, 4, 5]) | extra
+                with self.assertRaisesRegex(ValueError, "event_me_unit requires"):
+                    self.engine.recommend(binding.DeckRecommendOptions.from_dict(options))
+        options = self.options("invalid", [1, 2, 3, 4, 5])
+        with self.assertRaisesRegex(ValueError, "Invalid memory event unit"):
+            self.engine.recommend(binding.DeckRecommendOptions.from_dict(options))
+
+
 class PinnedCharacterTests(unittest.TestCase):
     """Pinned characters must survive the dfs_ga card priority pre-filter."""
 
