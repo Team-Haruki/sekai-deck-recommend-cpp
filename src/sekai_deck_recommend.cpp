@@ -1045,7 +1045,7 @@ class SekaiDeckRecommend {
         
         // eventId
         if (pyoptions.event_me_unit.has_value() && (
-            is_challenge_live || is_mysekai || pyoptions.event_id.has_value()
+            is_challenge_live || pyoptions.event_id.has_value()
             || pyoptions.event_attr.has_value() || pyoptions.event_unit.has_value()
             || pyoptions.world_bloom_event_turn.has_value() || pyoptions.world_bloom_finale_turn.has_value()
             || pyoptions.world_bloom_character_id.has_value()

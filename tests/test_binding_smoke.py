@@ -1,5 +1,6 @@
 import importlib
 import json
+import math
 import os
 import sys
 import unittest
@@ -710,6 +711,22 @@ class MemoryEventTests(unittest.TestCase):
                     self.assertEqual({card.card_id: card.event_bonus_rate for card in deck.cards}, expected)
                     self.assertEqual(deck.event_bonus_rate, sum(expected.values()))
 
+    def test_mysekai_memory_event_preserves_unit_bonuses(self):
+        cards = [1, 2, 3, 4, 8]
+        for unit in ("light_sound", "idol", "street", "theme_park", "school_refusal", "piapro"):
+            with self.subTest(unit=unit):
+                options = self.options(unit, cards) | {"live_type": "mysekai"}
+                deck = self.engine.recommend(binding.DeckRecommendOptions.from_dict(options)).decks[0]
+                expected = {
+                    card_id: (75 if wl3_test_unit(WL3_TEST_CARD_CHARACTERS[card_id]) == unit else 25) + 10
+                    for card_id in cards
+                }
+                self.assertEqual({card.card_id: card.event_bonus_rate for card in deck.cards}, expected)
+                self.assertEqual(deck.event_bonus_rate, sum(expected.values()))
+                power_bonus = math.floor((1 + deck.total_power / 450000) * 10 + 1e-6) / 10
+                expected_points = math.floor(power_bonus * (1 + sum(expected.values()) / 100) + 1e-6) * 500
+                self.assertEqual(deck.mysekai_event_point, expected_points)
+
     def test_memory_event_bonus_changes_selection_and_event_points(self):
         options = self.options("street", list(range(1, 9)))
         options.pop("fixed_cards")
@@ -726,7 +743,7 @@ class MemoryEventTests(unittest.TestCase):
             {"world_bloom_event_turn": 1}, {"world_bloom_finale_turn": 3},
             {"world_bloom_character_id": 9}, {"event_type": "cheerful_carnival"},
             {"custom_bonus_attr": "cool"}, {"custom_bonus_character_ids": [9]},
-            {"live_type": "challenge"}, {"live_type": "mysekai"},
+            {"live_type": "challenge"},
         ):
             with self.subTest(extra=extra):
                 options = self.options("street", [1, 2, 3, 4, 5]) | extra

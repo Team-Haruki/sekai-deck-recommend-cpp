@@ -336,7 +336,7 @@ PreparedOptions buildOptions(
     auto eventUnitOpt = jsonOpt<std::string>(opts, "event_unit");
     auto eventTypeOpt = jsonOpt<std::string>(opts, "event_type");
 
-    if (eventMeUnitOpt && (is_challenge_live || is_mysekai || eventIdOpt || eventAttrOpt || eventUnitOpt
+    if (eventMeUnitOpt && (is_challenge_live || eventIdOpt || eventAttrOpt || eventUnitOpt
         || worldBloomTurnOpt || worldBloomFinaleTurnOpt || worldBloomCharOpt
         || jsonOpt<std::string>(opts, "custom_bonus_attr")
         || opts.contains("custom_bonus_character_ids")
