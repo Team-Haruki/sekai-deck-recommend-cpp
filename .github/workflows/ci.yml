@@ -43,7 +43,7 @@ jobs:
         with:
           submodules: recursive
           persist-credentials: false
-      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
         with:
           version: "0.9.18"
           enable-cache: false
@@ -89,7 +89,7 @@ jobs:
           python-version: "3.11"
       - run: "python -m pip install --only-binary :all: coverage==7.15.3 gcovr==8.6"
       - run: ./scripts/ci/coverage.sh coverage # Debug + SEKAI_ENABLE_COVERAGE build, unittest, gcovr
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: coverage-cpp
           path: coverage/
