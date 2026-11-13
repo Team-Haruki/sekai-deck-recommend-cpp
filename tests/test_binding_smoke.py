@@ -2,6 +2,7 @@ import importlib
 import json
 import math
 import os
+import struct
 import sys
 import unittest
 from pathlib import Path
@@ -752,6 +753,51 @@ class MemoryEventTests(unittest.TestCase):
         options = self.options("invalid", [1, 2, 3, 4, 5])
         with self.assertRaisesRegex(ValueError, "Invalid memory event unit"):
             self.engine.recommend(binding.DeckRecommendOptions.from_dict(options))
+
+
+class RegionalBonusRoundingTests(unittest.TestCase):
+    """TW/KR/CN round character rank and area item bonuses in integer basis points."""
+
+    RATE = 1.15  # float32(1.15) * 0.01f * 30000 lands just under 345, which exposes the JP per-stat floor
+
+    @staticmethod
+    def f32(value):
+        return struct.unpack("<f", struct.pack("<f", value))[0]
+
+    def deck(self, region):
+        data = wl3_rule_master_data()
+        ranks = json.loads(data["characterRanks"])
+        for rank in ranks:
+            rank.update(power1BonusRate=self.RATE, power2BonusRate=self.RATE, power3BonusRate=self.RATE)
+        data["characterRanks"] = json.dumps(ranks)
+        engine = binding.SekaiDeckRecommend()
+        engine.update_masterdata_from_strings(data, region)
+        engine.update_musicmetas_from_string(json.dumps([{
+            "music_id": 1, "difficulty": "expert", "music_time": 100,
+            "event_rate": 100, "base_score": 1, "base_score_auto": 1,
+            "skill_score_solo": [0] * 6, "skill_score_auto": [0] * 6,
+            "skill_score_multi": [0] * 6, "fever_score": 0,
+            "fever_end_time": 0, "tap_count": 100,
+        }]), region)
+        cards = [1, 2, 3, 4, 5]
+        options = {
+            "region": region, "user_data_str": wl3_test_user_data(cards),
+            "live_type": "multi", "music_id": 1, "music_diff": "expert",
+            "event_me_unit": "street", "target": "power", "algorithm": "dfs",
+            "limit": 1, "fixed_cards": cards,
+        }
+        return engine.recommend(binding.DeckRecommendOptions.from_dict(options)).decks[0]
+
+    def test_character_rank_bonus_rounding_per_region(self):
+        stat = 30000
+        f32 = self.f32
+        jp_per_card = 3 * math.floor(f32(f32(f32(self.RATE) * f32(0.01)) * stat))
+        cn_per_card = (3 * round(f32(f32(self.RATE) * 100.0)) * stat) // 10000
+        self.assertNotEqual(jp_per_card, cn_per_card)
+        self.assertEqual(self.deck("jp").character_bonus_power, 5 * jp_per_card)
+        for region in ("tw", "kr", "cn"):
+            with self.subTest(region=region):
+                self.assertEqual(self.deck(region).character_bonus_power, 5 * cn_per_card)
 
 
 class PinnedCharacterTests(unittest.TestCase):
