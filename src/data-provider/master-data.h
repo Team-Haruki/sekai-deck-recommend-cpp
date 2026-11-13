@@ -50,6 +50,7 @@ public:
     std::vector<CardMysekaiCanvasBonus> cardMysekaiCanvasBonuses;
     std::vector<CardRarity> cardRarities;
     std::vector<CharacterRank> characterRanks;
+    std::vector<Config> configs;
     std::vector<EventCard> eventCards;
     std::vector<EventCardBonusLimit> eventCardBonusLimits;
     std::vector<EventDeckBonus> eventDeckBonuses;
@@ -129,6 +130,9 @@ public:
     const CharacterRank& getCharacterRank(int characterId, int rank) const;
 
     std::optional<double> getEventSkillScoreUpLimit(int eventId) const;
+    // `event_score_ceiling` from the configs table: caps the teammate score sum in
+    // multi/cheerful event points. Falls back to the JP value when configs is absent.
+    int getEventScoreCeiling() const;
 
     std::optional<int> getMysekaiFixtureBonusLimit(int eventId) const;
 

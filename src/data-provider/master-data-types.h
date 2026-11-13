@@ -5,6 +5,7 @@
 #include "master-data/area-item.h"
 #include "master-data/area.h"
 #include "master-data/card-episode.h"
+#include "master-data/config.h"
 #include "master-data/card.h"
 #include "master-data/card-mysekai-canvas-bonus.h"
 #include "master-data/card-rarity.h"
