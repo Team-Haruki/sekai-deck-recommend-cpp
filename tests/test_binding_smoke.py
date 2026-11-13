@@ -681,6 +681,7 @@ class MemoryEventTests(unittest.TestCase):
         units = json.loads(data["gameCharacterUnits"])
         units.append({"id": 102, "gameCharacterId": 21, "unit": "street"})
         data["gameCharacterUnits"] = json.dumps(units)
+        self.master_data = data
         self.engine.update_masterdata_from_strings(data, "jp")
         self.engine.update_musicmetas_from_string(json.dumps([{
             "music_id": 1, "difficulty": "expert", "music_time": 100,
@@ -735,8 +736,39 @@ class MemoryEventTests(unittest.TestCase):
         deck = self.engine.recommend(binding.DeckRecommendOptions.from_dict(options)).decks[0]
         self.assertIn(3, [card.card_id for card in deck.cards])  # Kohane, the only VBS human in this pool.
         self.assertEqual(deck.event_bonus_rate, 225)
-        base = 110 + deck.live_score // 17000 + min(13, (4 * deck.live_score) // 340000)
+        base = 110 + deck.live_score // 17000 + min(16, (4 * deck.live_score) // 340000)
         self.assertEqual(deck.score, int(base * 3.25))
+
+    def test_multi_teammate_term_follows_event_score_ceiling(self):
+        # configs.event_score_ceiling caps the teammate score sum: JP 5,500,000 -> 16, EN 4,500,000 -> 13.
+        # Without configs the engine falls back to the JP value.
+        for ceiling, cap in ((None, 16), (5500000, 16), (4500000, 13)):
+            with self.subTest(ceiling=ceiling):
+                data = dict(self.master_data)
+                if ceiling is not None:
+                    data["configs"] = json.dumps([
+                        {"configKey": "date_change_hour", "value": "4"},
+                        {"configKey": "event_score_ceiling", "value": str(ceiling)},
+                    ])
+                self.engine.update_masterdata_from_strings(data, "jp")
+                options = self.options("street", list(range(1, 9)))
+                options.pop("fixed_cards")
+                options["target"] = "score"
+                deck = self.engine.recommend(binding.DeckRecommendOptions.from_dict(options)).decks[0]
+                teammate_sum = 4 * deck.live_score
+                self.assertGreater(teammate_sum // 340000, 16)  # make sure the cap is actually exercised
+                base = 110 + deck.live_score // 17000 + cap
+                self.assertEqual(deck.score, int(base * 3.25))
+
+    def test_invalid_event_score_ceiling_is_reported(self):
+        data = dict(self.master_data)
+        data["configs"] = json.dumps([{"configKey": "event_score_ceiling", "value": "not-a-number"}])
+        self.engine.update_masterdata_from_strings(data, "jp")
+        options = self.options("street", list(range(1, 9)))
+        options.pop("fixed_cards")
+        options["target"] = "score"
+        with self.assertRaisesRegex(Exception, "Invalid configs.event_score_ceiling value: not-a-number"):
+            self.engine.recommend(binding.DeckRecommendOptions.from_dict(options))
 
     def test_rejects_mixed_selectors(self):
         for extra in (

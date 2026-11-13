@@ -37,6 +37,7 @@ const std::vector<std::string> requiredMasterDataKeys = {
     "worldBloomSupportDeckBonuses"
 };
 const std::vector<std::string> notRequiredMasterDataKeys = {
+    "configs",
     "worldBloomSupportDeckUnitEventLimitedBonuses",
     "cardMysekaiCanvasBonuses",
     "eventCardBonusLimits",
@@ -430,6 +431,7 @@ void MasterData::loadFromJsons(std::map<std::string, json_doc>& jsons) {
 
     this->worldBloomSupportDeckUnitEventLimitedBonuses = loadMasterData<WorldBloomSupportDeckUnitEventLimitedBonus>(jsons, "worldBloomSupportDeckUnitEventLimitedBonuses", false);
     this->cardMysekaiCanvasBonuses = loadMasterData<CardMysekaiCanvasBonus>(jsons, "cardMysekaiCanvasBonuses", false);
+    this->configs = loadMasterData<Config>(jsons, "configs", false);
     this->eventCardBonusLimits = loadMasterData<EventCardBonusLimit>(jsons, "eventCardBonusLimits", false);
     this->eventHonorBonuses = loadMasterData<EventHonorBonus>(jsons, "eventHonorBonuses", false);
     this->eventMysekaiFixtureGameCharacterPerformanceBonusLimits = loadMasterData<EventMysekaiFixtureGameCharacterPerformanceBonusLimit>(jsons, "eventMysekaiFixtureGameCharacterPerformanceBonusLimits", false);
@@ -850,6 +852,23 @@ std::optional<double> MasterData::getEventSkillScoreUpLimit(int eventId) const
         throw std::runtime_error("Event skill score up limit not found for world bloom finale eventId=" + std::to_string(eventId));
     }
     return std::nullopt;
+}
+
+int MasterData::getEventScoreCeiling() const
+{
+    // JP value since the teammate cap rose from 13 to 16 (5,500,000 / 340,000);
+    // EN still ships 4,500,000, which reproduces the old cap of 13.
+    constexpr int defaultEventScoreCeiling = 5500000;
+    for (const auto& config : configs) {
+        if (config.configKey == "event_score_ceiling") {
+            try {
+                return std::stoi(config.value);
+            } catch (const std::exception&) {
+                throw std::runtime_error("Invalid configs.event_score_ceiling value: " + config.value);
+            }
+        }
+    }
+    return defaultEventScoreCeiling;
 }
 
 std::optional<int> MasterData::getMysekaiFixtureBonusLimit(int eventId) const

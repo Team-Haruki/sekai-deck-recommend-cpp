@@ -5,6 +5,8 @@ int EventCalculator::getEventPoint(int liveType, int eventType, int selfScore, d
     double musicRate0 = musicRate / 100.;
     double deckRate = deckBonus / 100. + 1;
     int otherScore0 = otherScore == 0 ? 4 * selfScore : otherScore;
+    // The teammate term is capped by configs.event_score_ceiling (JP 5,500,000 -> 16, EN 4,500,000 -> 13)
+    int teammateTerm = int(std::min(otherScore0, this->dataProvider.masterData->getEventScoreCeiling()) / 340000.);
 
     double baseScore = 0;
     double lifeRate = 0;
@@ -20,13 +22,13 @@ int EventCalculator::getEventPoint(int liveType, int eventType, int selfScore, d
     else if (liveType == Enums::LiveType::multi_live) {
         if (eventType == Enums::EventType::cheerful) 
             throw std::runtime_error("Multi live is not playable in cheerful event.");
-        baseScore = (110 + int(selfScore / 17000.) + std::min(13, int(otherScore0 / 340000.)));
+        baseScore = (110 + int(selfScore / 17000.) + teammateTerm);
         return int(baseScore * musicRate0 * deckRate) * boostRate;
     } 
     else if (liveType == Enums::LiveType::cheerful_live) {
         if (eventType != Enums::EventType::cheerful)
             throw std::runtime_error("Cheerful live is only playable in cheerful event.");
-        baseScore = (110 + int(selfScore / 17000.) + std::min(13, int(otherScore0 / 340000.)));
+        baseScore = (110 + int(selfScore / 17000.) + teammateTerm);
         lifeRate = 1.15 + std::min(std::max(life / 5000., 0.1), 0.2);
         return int(int(baseScore * musicRate0 * deckRate) * lifeRate) * boostRate;
     }
