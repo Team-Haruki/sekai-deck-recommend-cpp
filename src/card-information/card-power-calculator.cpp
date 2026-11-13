@@ -3,6 +3,29 @@
 #include <algorithm>
 #include <cmath>
 
+namespace {
+
+// The TW/KR/CN clients (CN 6.4.0 / TW binaries checked) compute area item and character rank
+// bonuses in integer basis points: each rate becomes round_half_even(float(rate) * 100f), is
+// multiplied by the stat, summed over all three stats, and divided by 10000 once at the end.
+// The JP/EN client floors float(rate) * 0.01 * stat per stat instead, so TW/KR/CN come out 0-3
+// higher per card for each of the two bonuses.
+bool usesBasisPointBonus(Region region)
+{
+    return region == Region::TW || region == Region::KR || region == Region::CN;
+}
+
+long long bonusBasisPoints(double rate)
+{
+    double x = double(float(rate) * 100.0f);
+    double r = std::floor(x);
+    double frac = x - r;
+    if (frac > 0.5 || (frac == 0.5 && std::fmod(r, 2.0) != 0.0)) r += 1.0;  // C# Math.Round: ties to even
+    return (long long)r;
+}
+
+}  // namespace
+
 CardDetailMap<DeckCardPowerDetail> CardPowerCalculator::getCardPower(
     const UserCard &userCard, 
     const Card &card, 
@@ -142,6 +165,7 @@ BasePower CardPowerCalculator::getBasePower(const UserCard &userCard, const Card
 int CardPowerCalculator::getAreaItemBonusPower(const std::vector<AreaItemLevel> &userAreaItemLevels, const BasePower &basePower, int characterId, int unit, bool sameUnit, int attr, bool sameAttr)
 {
     double areaItemBonus[3] = {0, 0, 0};
+    long long basisPoints = 0;
     for (auto& it : userAreaItemLevels) {
         if ((it.targetUnit == Enums::Unit::any || it.targetUnit == unit) &&
             (it.targetCardAttr == Enums::Attr::any || it.targetCardAttr == attr) &&
@@ -160,9 +184,12 @@ int CardPowerCalculator::getAreaItemBonusPower(const std::vector<AreaItemLevel> 
             }
             for (int i = 0; i < 3; ++i) {
                 areaItemBonus[i] += rates[i] * 0.01 * basePower[i];
+                basisPoints += bonusBasisPoints(rates[i]) * basePower[i];
             }
         }
     }
+    if (usesBasisPointBonus(dataProvider.region))
+        return int(basisPoints / 10000);
     // 三个维度单独计算后向下取整再累加
     int total = 0;
     for (int i = 0; i < 3; ++i) {
@@ -255,6 +282,7 @@ int CardPowerCalculator::getMultiUnitAreaItemBonusPower(
     }
 
     double areaItemBonus[3] = {0, 0, 0};
+    long long basisPoints = 0;
     for (size_t i = 0; i < userAreaItemLevels.size(); ++i) {
         const auto& pick = picks[i];
         if (pick.bucket == None || dropped[pick.bucket])
@@ -268,8 +296,11 @@ int CardPowerCalculator::getMultiUnitAreaItemBonusPower(
         };
         for (int k = 0; k < 3; ++k) {
             areaItemBonus[k] += rates[k] * 0.01 * basePower[k];
+            basisPoints += bonusBasisPoints(rates[k]) * basePower[k];
         }
     }
+    if (usesBasisPointBonus(dataProvider.region))
+        return int(basisPoints / 10000);
     int total = 0;
     for (int k = 0; k < 3; ++k) {
         total += std::floor(areaItemBonus[k]);
@@ -291,6 +322,12 @@ int CardPowerCalculator::getCharacterBonusPower(const BasePower &basePower, int 
         characterRank.power2BonusRate,
         characterRank.power3BonusRate
     };
+    if (usesBasisPointBonus(dataProvider.region)) {
+        long long basisPoints = 0;
+        for (int i = 0; i < 3; ++i)
+            basisPoints += bonusBasisPoints(rates[i]) * basePower[i];
+        return int(basisPoints / 10000);
+    }
     int total = 0;
     for (int i = 0; i < 3; ++i) {
         total += std::floor(float(rates[i]) * float(0.01) * float(basePower[i]));
