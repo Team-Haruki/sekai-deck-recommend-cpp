@@ -759,6 +759,16 @@ class MemoryEventTests(unittest.TestCase):
                 base = 110 + deck.live_score // 17000 + cap
                 self.assertEqual(deck.score, int(base * 3.25))
 
+    def test_invalid_event_score_ceiling_is_reported(self):
+        data = dict(self.master_data)
+        data["configs"] = json.dumps([{"configKey": "event_score_ceiling", "value": "not-a-number"}])
+        self.engine.update_masterdata_from_strings(data, "jp")
+        options = self.options("street", list(range(1, 9)))
+        options.pop("fixed_cards")
+        options["target"] = "score"
+        with self.assertRaisesRegex(Exception, "Invalid configs.event_score_ceiling value: not-a-number"):
+            self.engine.recommend(binding.DeckRecommendOptions.from_dict(options))
+
     def test_rejects_mixed_selectors(self):
         for extra in (
             {"event_id": 202}, {"event_attr": "cute"}, {"event_unit": "idol"},
